@@ -81,7 +81,7 @@ export default function GameCanvas() {
                 {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Entrar no cenário →'}
               </button>}
             {!error && status === 'ready' && <button className="secondary" disabled={!initialized}
-              onClick={event => { game.current?.start('fase1-orla'); setSceneId('fase1-orla'); event.currentTarget.blur(); }}>
+              onClick={event => { game.current?.start('fase1-orla'); setSceneId('fase1-orla'); setCloseView(true); event.currentTarget.blur(); }}>
               Abrir fase 1 · Orla →
             </button>}
             {!error && status === 'paused' && <button className="secondary" onClick={returnToMenu}>Voltar ao menu</button>}
@@ -98,9 +98,9 @@ export default function GameCanvas() {
             <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
             {PLAYER_APPEARANCES[id].name}
           </button>)}
-          {isLaboratory && <button aria-pressed={closeView} onClick={() => { game.current?.setCloseView(!closeView); setCloseView(!closeView); }}>
+          <button aria-pressed={closeView} onClick={() => { game.current?.setCloseView(!closeView); setCloseView(!closeView); }}>
             {closeView ? 'Visão ampla' : 'Ver de perto'}
-          </button>}
+          </button>
         </div>
         {(!isLaboratory || (selectedPlayer !== 3 && !abilities.editing)) && <div className="touch-controls" aria-label="Controles de movimento">
           {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}

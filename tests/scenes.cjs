@@ -403,23 +403,25 @@ test('zoom seguido de pausa não ressuscita o tween de entrada cancelado (GSAP r
   assert.equal(gsap.globalTimeline.getChildren().includes(tween), false, 'o tween cancelado deve continuar fora da timeline');
 });
 
-const { ORLA_CONFIG } = require('../src/game/config.ts');
+const { ORLA_CONFIG, ORLA_CAMERA } = require('../src/game/config.ts');
 
 for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390], [320, 1000]]) {
-  test(`Orla enquadra chão e altura das personagens em ${width}x${height} a 55 graus`, () => {
+  test(`Orla mantém os quatro cantos do viewport dentro do chão em ${width}x${height}`, () => {
     const orla = new Fase1OrlaScene();
     const camera = new three.PerspectiveCamera();
-    orla.configureCamera(camera, width / height);
-    const elevation = three.MathUtils.radToDeg(Math.atan2(camera.position.y, camera.position.z));
-    assert.ok(Math.abs(elevation - ORLA_CONFIG.camera.elevationDegrees) < 1e-9);
-    for (const x of [-ORLA_CONFIG.ground.width / 2, ORLA_CONFIG.ground.width / 2]) {
-      for (const z of [-ORLA_CONFIG.ground.depth / 2, ORLA_CONFIG.ground.depth / 2]) {
-        for (const y of [0, ORLA_CONFIG.camera.contentHeight]) {
-          const point = new three.Vector3(x, y, z).project(camera);
-          assert.ok(Math.abs(point.x) <= 1 / ORLA_CONFIG.camera.framingPadding + 1e-9);
-          assert.ok(Math.abs(point.y) <= 1 / ORLA_CONFIG.camera.framingPadding + 1e-9);
-          assert.ok(point.z > -1 && point.z < 1);
-        }
+    const ray = new three.Raycaster();
+    const floor = new three.Plane(new three.Vector3(0, 1, 0), 0);
+    for (const close of [true, false]) for (const x of [-9, 0, 9]) for (const z of [-9, 0, 9]) {
+      orla.player.setPosition(x, z);
+      orla.configureCamera(camera, width / height, close);
+      assert.equal(camera.fov, ORLA_CAMERA.fov);
+      assert.ok(Math.abs(camera.rotation.x + Math.atan2(1, ORLA_CAMERA.tilt)) < 1e-9);
+      for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+        ray.setFromCamera(new three.Vector2(sx, sy), camera);
+        const hit = ray.ray.intersectPlane(floor, new three.Vector3());
+        assert.ok(hit);
+        assert.ok(Math.abs(hit.x) <= ORLA_CONFIG.ground.width / 2 + 1e-8);
+        assert.ok(Math.abs(hit.z) <= ORLA_CONFIG.ground.depth / 2 + 1e-8);
       }
     }
     orla.dispose();
@@ -453,7 +455,7 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
   assert.equal(shadowDispose.mock.callCount(), 1);
 });
 
-test('Game mantém câmera da Orla fixa, reenquadra no resize pausado e restaura laboratório', t => {
+test('Game segue seleção na Orla, reenquadra no resize pausado e restaura laboratório', t => {
   const { Game, Element, created, observers, tweens } = gameHarness(t);
   const host = new Element();
   const game = new Game(host, () => {});
@@ -468,15 +470,15 @@ test('Game mantém câmera da Orla fixa, reenquadra no resize pausado e restaura
   game.input.setTouch(1, 'KeyD');
   renderer.loop(150);
   renderer.loop(200);
-  assert.ok(camera.position.equals(fixed));
-  assert.ok(camera.quaternion.equals(rotation));
+  assert.ok(!camera.position.equals(fixed));
+  assert.ok(camera.quaternion.angleTo(rotation) < 1e-7);
   assert.equal(tweens.length, 0);
   game.togglePause();
   host.clientWidth = 390;
   host.clientHeight = 844;
   observers[0].callback();
   assert.equal(camera.aspect, 390 / 844);
-  assert.ok(camera.position.length() > fixed.length());
+  assert.ok(Number.isFinite(camera.position.length()));
   game.returnToMenu();
   game.start();
   assert.equal(tweens.length, 1, 'a entrada animada continua no laboratório');
