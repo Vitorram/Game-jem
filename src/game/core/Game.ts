@@ -11,6 +11,7 @@ import { TestScene } from '../scenes/TestScene';
 import { Fase1OrlaScene } from '../scenes/Fase1OrlaScene';
 import { SceneManager } from './SceneManager';
 import { GAME_CONFIG } from '../config';
+import type { RiskSnapshot } from '../risks/RiskWorkflow';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 
@@ -44,6 +45,7 @@ export class Game {
     private onStatus: (status: GameStatus) => void,
     private onAbilities?: (state: AbilitySnapshot) => void,
     private onPlayerSelected?: (id: PlayerId) => void,
+    private onRisks?: (state: RiskSnapshot) => void,
   ) {
     this.renderer = new WebGLRenderer({
       antialias: true,
@@ -119,7 +121,7 @@ export class Game {
     if (this.status !== 'ready' || this.disposed) return;
 
     if (sceneId === 'fase1-orla') {
-      const orla = new Fase1OrlaScene(this.input);
+      const orla = new Fase1OrlaScene(this.input, this.onRisks);
       this.scenes.setScene(orla);
       this.closeView = true;
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);

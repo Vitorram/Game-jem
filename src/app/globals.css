@@ -198,3 +198,17 @@ h1 span { color: var(--accent); }
 .orla-touch-controls button:nth-child(n+2):nth-child(-n+4) { grid-row: 3; }
 .orla-touch-controls { right: 24px; }
 @media (max-width: 400px) { .orla-touch-controls { right: 12px; } }
+
+.risk-panel { position: absolute; top: 165px; left: 24px; width: 300px; max-height: calc(100dvh - 440px); overflow: auto; padding: 14px; border: 1px solid #64796b; border-radius: 10px; background: #102023ee; font-size: 12px; line-height: 1.45; }
+.risk-panel summary { cursor: pointer; font-weight: 700; }
+.risk-panel ol { list-style: none; padding: 0; display: grid; gap: 8px; }
+.risk-panel li { padding-left: 9px; border-left: 3px solid #79b8ff; }
+.risk-panel li[data-status="inspected"] { border-color: #ffd878; }
+.risk-panel li[data-status="released"] { border-color: #ff806d; }
+.risk-panel li[data-status="routing"] { border-color: #cdb1ff; }
+.risk-panel li[data-status="resolved"] { border-color: #62d7a7; }
+.risk-panel li b, .risk-panel li span { display: block; }
+.risk-panel small, .risk-panel li span { color: var(--muted); }
+.risk-message { margin-bottom: 0; }
+@media (max-width: 600px) { .risk-panel { left: 12px; right: 12px; width: auto; } }
+@media (min-width: 700px) and (max-height: 650px) { .risk-panel { top: 160px; left: 190px; width: calc(100% - 390px); max-height: calc(100dvh - 220px); } }
