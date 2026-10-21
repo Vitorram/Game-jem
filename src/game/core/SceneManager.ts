@@ -3,6 +3,7 @@ import type { Scene } from './Scene';
 export class SceneManager {
   private active: Scene | null = null;
   private disposed = false;
+  private readonly retired = new WeakSet<Scene>();
 
   get current(): Scene | null { return this.active; }
 
@@ -10,10 +11,14 @@ export class SceneManager {
   setScene(next: Scene): void {
     if (this.disposed) throw new Error('SceneManager já foi descartado.');
     if (next === this.active) return;
+    if (this.retired.has(next)) throw new Error('Esta cena já foi descartada. Crie uma nova instância.');
 
     const previous = this.active;
     this.active = null;
-    previous?.dispose();
+    if (previous) {
+      this.retired.add(previous);
+      previous.dispose();
+    }
     this.active = next;
   }
 
@@ -26,6 +31,9 @@ export class SceneManager {
     this.disposed = true;
     const previous = this.active;
     this.active = null;
-    previous?.dispose();
+    if (previous) {
+      this.retired.add(previous);
+      previous.dispose();
+    }
   }
 }

@@ -168,6 +168,7 @@ export class Game {
     if (this.disposed || !this.world) return;
     this.closeView = enabled;
     this.intro?.kill();
+    this.intro = undefined;
   }
 
   useAbility() {

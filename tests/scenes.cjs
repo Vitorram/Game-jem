@@ -84,6 +84,19 @@ test('selecionar a mesma instância ativa não a descarta', () => {
   assert.deepEqual(calls.at(-1), ['same', 'dispose']);
 });
 
+test('uma cena já descartada não pode voltar ao manager nem receber dispose duas vezes', () => {
+  const calls = [];
+  const manager = new SceneManager();
+  const first = stubScene('first', calls);
+  const second = stubScene('second', calls);
+  manager.setScene(first);
+  manager.setScene(second);
+  assert.throws(() => manager.setScene(first), /cena já foi descartada/i);
+  assert.equal(manager.current, second);
+  manager.dispose();
+  assert.deepEqual(calls, [['first', 'dispose'], ['second', 'dispose']]);
+});
+
 test('manager descartado rejeita cenas novas sem assumir sua propriedade', () => {
   const manager = new SceneManager();
   const calls = [];
@@ -98,6 +111,9 @@ test('manager descartado rejeita cenas novas sem assumir sua propriedade', () =>
 test('TestScene recebe input injetado por update(dt) e libera GPU ao trocar por Orla', t => {
   const manager = new SceneManager();
   const lab = new TestScene(undefined, { getAxis: () => ({ x: 1, z: 0 }) });
+  lab.abilities.activate({ x: 0, z: 0 });
+  lab.abilities.setTool('light');
+  lab.abilities.activate({ x: 2, z: 0 });
   const before = lab.player.mesh.position.clone();
   const counts = watchResources(lab.scene);
   const sun = lab.scene.children.find(object => object instanceof three.DirectionalLight);
@@ -121,15 +137,35 @@ test('TestScene recebe input injetado por update(dt) e libera GPU ao trocar por 
   assert.equal(shadowDispose.mock.callCount(), 1);
 });
 
-test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar renderer', t => {
-  const phaseUpdate = t.mock.method(Fase1OrlaScene.prototype, 'update');
+function gameHarness(t, animation) {
   const created = [];
-  class Element extends EventTarget {
+  const tweens = [];
+  const observers = [];
+  class TrackedTarget extends EventTarget {
+    listeners = new Map();
+    addEventListener(type, callback, options) {
+      if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+      this.listeners.get(type).add(callback);
+      super.addEventListener(type, callback, options);
+    }
+    removeEventListener(type, callback, options) {
+      this.listeners.get(type)?.delete(callback);
+      super.removeEventListener(type, callback, options);
+    }
+    get listenerCount() {
+      return [...this.listeners.values()].reduce((sum, callbacks) => sum + callbacks.size, 0);
+    }
+  }
+  class Element extends TrackedTarget {
     style = {};
+    children = [];
     setAttribute() {}
-    remove() { this.removed = true; }
+    remove() {
+      this.removed = true;
+      if (this.parent) this.parent.children = this.parent.children.filter(child => child !== this);
+    }
     closest() { return null; }
-    appendChild(child) { this.child = child; }
+    appendChild(child) { this.children.push(child); child.parent = this; }
     clientWidth = 1024;
     clientHeight = 768;
   }
@@ -145,10 +181,14 @@ test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar rendere
     forceContextLoss() { this.contextLost = true; }
   }
   const replacements = {
-    window: Object.assign(new EventTarget(), { devicePixelRatio: 1, matchMedia: () => ({ matches: true }) }),
-    document: Object.assign(new EventTarget(), { hidden: false }),
+    window: Object.assign(new TrackedTarget(), { devicePixelRatio: 1, matchMedia: () => ({ matches: false }) }),
+    document: Object.assign(new TrackedTarget(), { hidden: false }),
     HTMLElement: Element,
-    ResizeObserver: class { observe() {} disconnect() {} },
+    ResizeObserver: class {
+      constructor() { observers.push(this); }
+      observe() { this.connected = true; }
+      disconnect() { this.connected = false; }
+    },
   };
   for (const [key, value] of Object.entries(replacements)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -158,10 +198,30 @@ test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar rendere
   const originalLoad = Module._load;
   t.mock.method(Module, '_load', function (id, ...args) {
     if (id === 'three') return { ...three, WebGLRenderer: Renderer };
-    if (id === 'gsap') return { gsap: { to: () => ({ isActive: () => false, kill() {}, pause() {}, resume() {} }) } };
+    if (id === 'gsap' && animation) return { gsap: animation };
+    if (id === 'gsap') return { gsap: { to: () => {
+      const tween = {
+        killed: false, paused: false,
+        isActive() { return !this.killed && !this.paused; },
+        kill() { this.killed = true; },
+        pause() { this.paused = true; },
+        resume() { this.paused = false; },
+      };
+      tweens.push(tween);
+      return tween;
+    } } };
     return originalLoad.call(this, id, ...args);
   });
-  const { Game } = require('../src/game/core/Game.ts');
+  const gamePath = require.resolve('../src/game/core/Game.ts');
+  delete require.cache[gamePath];
+  t.after(() => delete require.cache[gamePath]);
+  const { Game } = require(gamePath);
+  return { Game, Element, created, tweens, observers };
+}
+
+test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar renderer', t => {
+  const phaseUpdate = t.mock.method(Fase1OrlaScene.prototype, 'update');
+  const { Game, Element, created } = gameHarness(t);
   const statuses = [];
   let abilityEvents = 0;
   const game = new Game(new Element(), status => statuses.push(status), () => abilityEvents++);
@@ -223,4 +283,120 @@ test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar rendere
   assert.equal(created.length, 1);
   assert.ok([...restoredCounts.values()].every(count => count === 1));
   assert.deepEqual(statuses, ['playing', 'paused', 'playing', 'ready', 'playing']);
+});
+
+for (const sceneId of ['test', 'fase1-orla']) {
+  test(`${sceneId}: Escape, blur e aba oculta pausam updates e tween sem retomar sozinhos`, t => {
+    const { Game, Element, created, tweens } = gameHarness(t);
+    const SceneType = sceneId === 'test' ? TestScene : Fase1OrlaScene;
+    const updates = t.mock.method(SceneType.prototype, 'update');
+    const statuses = [];
+    const game = new Game(new Element(), status => statuses.push(status));
+    t.after(() => game.dispose());
+    game.start(sceneId);
+    const renderer = created[0];
+    const tween = tweens[0];
+    let time = 100;
+    for (const reason of ['escape', 'blur', 'hidden']) {
+      renderer.loop(time += 16);
+      const before = updates.mock.callCount();
+      game.input.setTouch(1, 'KeyD');
+      if (reason === 'escape') window.dispatchEvent(Object.assign(new Event('keydown'), { code: 'Escape' }));
+      if (reason === 'blur') window.dispatchEvent(new Event('blur'));
+      if (reason === 'hidden') {
+        document.hidden = true;
+        document.dispatchEvent(new Event('visibilitychange'));
+      }
+      assert.equal(statuses.at(-1), 'paused');
+      assert.equal(tween.paused, true);
+      assert.deepEqual(game.input.getAxis(), { x: 0, z: 0 });
+      renderer.loop(time += 16);
+      assert.equal(updates.mock.callCount(), before);
+      document.hidden = false;
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('focus'));
+      assert.equal(statuses.at(-1), 'paused');
+      game.togglePause();
+      renderer.loop(time += 16);
+      assert.equal(updates.mock.callCount(), before + 1);
+      assert.equal(updates.mock.calls.at(-1).arguments[0], 0, 'primeiro dt após retomar deve ser zero');
+      assert.equal(tween.paused, false);
+    }
+    game.dispose();
+    assert.equal(tween.killed, true);
+  });
+}
+
+test('20 trocas e ciclo montar/desmontar/remontar não acumulam listeners, canvas ou tweens', t => {
+  const { Game, Element, created, tweens, observers } = gameHarness(t);
+  const host = new Element();
+  const staleTicks = [];
+  const sceneDisposals = new Map();
+  for (const SceneType of [TestScene, Fase1OrlaScene]) {
+    const dispose = SceneType.prototype.dispose;
+    t.mock.method(SceneType.prototype, 'dispose', function () {
+      sceneDisposals.set(this, (sceneDisposals.get(this) || 0) + 1);
+      return dispose.call(this);
+    });
+  }
+  // Reproduz setup -> cleanup -> setup do efeito de GameCanvas no Strict Mode.
+  for (let mount = 0; mount < 3; mount++) {
+    const statuses = [];
+    const game = new Game(host, status => statuses.push(status));
+    t.after(() => game.dispose());
+    const renderer = created.at(-1);
+    const listenerCount = window.listenerCount + document.listenerCount;
+    assert.equal(listenerCount, 6);
+    assert.equal(host.children.length, 1);
+    if (mount > 0) {
+      for (let cycle = 0; cycle < 10; cycle++) {
+        game.start(cycle % 2 === 0 ? 'fase1-orla' : 'test');
+        renderer.loop(100 + cycle * 32);
+        const counts = watchResources(renderer.lastScene);
+        game.togglePause();
+        assert.equal(tweens.at(-1).paused, true);
+        game.returnToMenu();
+        assert.equal(statuses.at(-1), 'ready');
+        assert.equal(tweens.at(-1).killed, true);
+        assert.ok([...counts.values()].every(count => count === 1));
+        assert.equal(window.listenerCount + document.listenerCount, listenerCount);
+        assert.equal(host.children.length, 1);
+      }
+      game.start();
+      window.dispatchEvent(Object.assign(new Event('keydown'), { code: 'Escape' }));
+      assert.deepEqual(statuses.slice(-2), ['playing', 'paused'], 'apenas um handler de Escape por jogo');
+    }
+    staleTicks.push(renderer.loop);
+    game.dispose();
+    game.dispose();
+    assert.equal(window.listenerCount + document.listenerCount, 0);
+    assert.equal(host.children.length, 0);
+    assert.equal(renderer.loop, null);
+    assert.equal(renderer.disposeCount, 1);
+    assert.ok(observers.every(observer => !observer.connected));
+    assert.ok(tweens.every(tween => tween.killed));
+    const before = statuses.length;
+    staleTicks.forEach(tick => tick(2000));
+    window.dispatchEvent(new Event('blur'));
+    assert.equal(statuses.length, before);
+  }
+  assert.ok(sceneDisposals.size > 20);
+  assert.ok([...sceneDisposals.values()].every(count => count === 1));
+});
+
+test('zoom seguido de pausa não ressuscita o tween de entrada cancelado (GSAP real)', t => {
+  const { gsap } = require('gsap');
+  gsap.ticker.wake();
+  let game;
+  t.after(() => { game?.dispose(); gsap.ticker.sleep(); });
+  const { Game, Element } = gameHarness(t, gsap);
+  game = new Game(new Element(), () => {});
+  game.start();
+  const tween = gsap.globalTimeline.getChildren().find(child => child.targets().some(target => target instanceof three.Vector3));
+  assert.ok(tween, 'a entrada cria um tween real da câmera');
+  game.setCloseView(true);
+  assert.equal(gsap.globalTimeline.getChildren().includes(tween), false);
+  game.togglePause();
+  game.togglePause();
+  assert.equal(gsap.globalTimeline.getChildren().includes(tween), false, 'o tween cancelado deve continuar fora da timeline');
 });
