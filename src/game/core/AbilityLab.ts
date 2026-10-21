@@ -1,4 +1,5 @@
-﻿import type { PlayerId } from '../entities/Player';
+import { inspectRisk, installSensor, cycleLight, copyRoute, moveRouteStop } from './AbilityActions';
+import type { PlayerId } from '../entities/Player';
 
 export type MapPoint = { x: number; z: number };
 export type InfraTool = 'sensor' | 'light';
@@ -34,7 +35,7 @@ export class AbilityLab {
   selectRole(role: PlayerId) {
     this.state.role = role;
     this.state.editing = false;
-    this.state.draft = this.state.stops.map(point => ({ ...point }));
+    this.state.draft = copyRoute(this.state.stops);
     this.emit(role === 1 ? 'WASD para andar. E usa a ferramenta escolhida.' : role === 2 ? 'Enter abre a edição de pontos e rotas.' : 'Clique nos sinais ? do mapa para investigar. Depois marque os riscos.');
   }
   setTool(tool: InfraTool) {
@@ -45,24 +46,23 @@ export class AbilityLab {
   activate(point: MapPoint) {
     if (this.state.role === 1) {
       if (this.state.tool === 'sensor') {
-        if (this.state.sensors.length >= 5) return this.emit('Os 5 sensores de teste já foram instalados. Reinicie para testar de novo.');
-        const position = bounded(point);
-        if (this.state.sensors.some(sensor => distance(sensor, position) < 0.8)) return this.emit('Já existe um sensor aqui. Ande um pouco antes de instalar outro.');
-        this.state.sensors.push(position);
+        const action = installSensor(this.state.sensors, bounded(point));
+        if (action.result === 'limit') return this.emit('Os 5 sensores de teste já foram instalados. Reinicie para testar de novo.');
+        if (action.result === 'near') return this.emit('Já existe um sensor aqui. Ande um pouco antes de instalar outro.');
+        this.state.sensors = [...action.sensors];
         this.emit(`Sensor ${this.state.sensors.length}/5 instalado. O círculo verde mostra seu alcance de teste.`);
       } else {
-        if (!this.state.light) this.state.light = { ...bounded(point), level: 0 };
-        this.state.light.level = (this.state.light.level + 1) % 3;
+        this.state.light = cycleLight(this.state.light, bounded(point));
         this.emit(['Luz de teste desligada.', 'Iluminação suave ativada.', 'Iluminação forte ativada.'][this.state.light.level]);
       }
     } else if (this.state.role === 2) {
       if (this.state.editing) {
-        this.state.stops = this.state.draft.map(stop => ({ ...stop }));
+        this.state.stops = copyRoute(this.state.draft);
         this.state.editing = false;
         this.emit('Rota aplicada! A linha roxa na plataforma mostra o novo trajeto.');
       } else {
         this.state.editing = true;
-        this.state.draft = this.state.stops.map(stop => ({ ...stop }));
+        this.state.draft = copyRoute(this.state.stops);
         this.emit('Escolha A, B ou C e clique no mapa para mover. Enter confirma a rota.');
       }
     }
@@ -76,8 +76,9 @@ export class AbilityLab {
     if (!Number.isFinite(point.x) || !Number.isFinite(point.z)) return;
     if (this.state.role === 2 && this.state.editing) {
       const position = bounded(point);
-      if (this.state.draft.some((stop, index) => index !== this.state.selectedStop && distance(stop, position) < 1)) return this.emit('Deixe um espaço entre os pontos de ônibus.');
-      this.state.draft[this.state.selectedStop] = position;
+      const draft = moveRouteStop(this.state.draft, this.state.selectedStop, position);
+      if (!draft) return this.emit('Deixe um espaço entre os pontos de ônibus.');
+      this.state.draft = draft;
       this.emit(`Ponto ${'ABC'[this.state.selectedStop]} reposicionado. Enter aplica a alteração.`);
     } else if (this.state.role === 3) {
       const issue = this.state.issues.find(item => distance(item, point) < 1.1);
@@ -92,10 +93,10 @@ export class AbilityLab {
     this.state.selectedIssue = id;
     if (mark && !issue.revealed) return this.emit('Inspecione este ponto antes de marcá-lo.');
     if (mark) {
-      issue.marked = !issue.marked;
+      Object.assign(issue, inspectRisk(issue, true));
       this.emit(issue.marked ? 'Risco marcado para a equipe. Ele aparece nas três telas.' : 'Marcação removida.');
     } else {
-      issue.revealed = true;
+      Object.assign(issue, inspectRisk(issue));
       this.emit(issue.detail);
     }
   }

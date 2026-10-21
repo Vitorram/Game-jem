@@ -35,6 +35,18 @@ Há três caixas infinitas na linha de bancadas: Sensor (azul), Placa (amarela) 
 
 O catálogo fica em `src/game/items/itemData.ts`; as regras e direções em `ItemInteractions.ts`, sem Three.js. `orlaMap.ts` define as caixas e seus tipos; `ItemVisuals.ts` mantém os meshes e libera seus recursos no descarte da cena. Altura e tamanho dos itens ficam em `ITEM_VIEW_CONFIG`.
 
+## Fluxo cooperativo de riscos na Orla
+
+Há três pontos na faixa inferior do mapa: **1 · iluminação**, **2 · sensor**, **3 · rota/calçada interditada**. Um, dois ou três traços identificam os pontos no chão. A cor muda de azul (não inspecionado) para amarelo (inspecionado), vermelho (tarefa liberada), roxo (desvio em preparação) e verde (resolvido). O painel mostra o estado também em texto e pode ser recolhido.
+
+1. Selecione **Análise**, caminhe até a célula vizinha e olhe para o ponto. **E** ou **Ação · E** inspeciona; outra ação marca o risco e libera a tarefa.
+2. Troque com **Tab** ou os três botões de personagem. Posição, direção, itens e intervenções concluídas permanecem com suas donas. Na Orla, Análise também pode caminhar.
+3. **Infraestrutura** usa E no ponto marcado para instalar o sensor ou acender a iluminação. **Mobilidade** usa E no ponto de rota para preparar um desvio de teste predefinido, e E novamente para confirmar. A rota original permanece até a confirmação; trocar para outra personagem cancela só o rascunho.
+
+O papel errado ou uma tarefa ainda não liberada não produz intervenção. Ações repetidas em um risco resolvido não duplicam equipamento nem desligam a luz. Nesta etapa, habilidades não consomem os itens carregáveis e não há pedidos, pontuação ou multiplayer em rede. Sair da fase reinicia o teste.
+
+`AbilityActions.ts` compartilha as regras de inspeção, sensores, luz e paradas entre o laboratório e `RiskWorkflow.ts`. Este último contém a máquina de estados sem Three/React. `riskData.ts` define os três riscos e o desvio; a cena reaproveita `AbilityVisuals` para mostrar as intervenções. O React só recebe snapshots em ações, nunca por frame. `npm test` cobre o fluxo puro, papéis, troca de personagem, inventário, pausa e descarte de GPU.
+
 ## Organização
 
 | Caminho | Responsabilidade |

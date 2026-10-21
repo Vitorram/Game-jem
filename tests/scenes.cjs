@@ -607,3 +607,71 @@ test('Game: E/toque interagem, Tab cicla inventários e UI, pausa e repetição 
   assert.equal(game.scenes.current.items.heldBy(1), null);
   game.dispose();
 });
+
+test('fluxo cooperativo na Orla usa tile à frente e não publica estado por frame', () => {
+  const events = [];
+  const orla = new Fase1OrlaScene({ getAxis: () => ({ x: 0, z: 1 }) }, state => events.push(state));
+  const risks = orla.risks.snapshot().risks;
+  const place = (id, risk) => {
+    orla.selectPlayer(id);
+    const position = orla.map.cellCenter(risk.column, risk.row - 1);
+    orla.player.setPosition(position.x, position.z);
+  };
+  const beforeUpdates = events.length;
+  for (let i = 0; i < 10; i++) orla.update(0.01);
+  assert.equal(events.length, beforeUpdates);
+  for (const risk of risks) {
+    place(3, risk);
+    orla.interact(); orla.interact();
+    place(risk.kind === 'route' ? 2 : 1, risk);
+    orla.interact();
+    if (risk.kind === 'route') orla.interact();
+  }
+  assert.ok(events.at(-1).risks.every(r => r.status === 'resolved'));
+  assert.equal(events.at(-1).sensors.length, 1);
+  assert.equal(events.at(-1).light.level, 1);
+  const counts = watchResources(orla.scene);
+  orla.dispose(); orla.dispose();
+  assert.ok([...counts.values()].every(count => count === 1));
+  const finalEvents = events.length;
+  orla.interact(); orla.selectPlayer(2); orla.update(0.05);
+  assert.equal(events.length, finalEvents);
+});
+
+test('Tab e botões preservam posições, inventário e riscos; pausa bloqueia intervenção', t => {
+  const { Game, Element } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  t.after(() => game.dispose());
+  game.start('fase1-orla');
+  const orla = game.scenes.current;
+  const source = orla.map.cellCenter(6, 5);
+  orla.player.setPosition(source.x, source.z);
+  game.input.setTouch(1, 'KeyW'); game.interact();
+  assert.equal(orla.items.heldBy(1), 'sign');
+  game.selectPlayer(3);
+  const risk = orla.risks.snapshot().risks[0];
+  const position = orla.map.cellCenter(risk.column, risk.row - 1);
+  orla.player.setPosition(position.x, position.z);
+  game.input.setTouch(2, 'KeyS'); game.interact(); game.interact();
+  assert.equal(orla.risks.snapshot().risks[0].status, 'released');
+  const positions = orla.players.map(player => player.mesh.position.clone());
+  const tab = () => window.dispatchEvent(Object.assign(new Event('keydown'), { code: 'Tab' }));
+  tab(); tab(); tab();
+  assert.equal(orla.player.id, 3);
+  orla.players.forEach((player, i) => assert.ok(player.mesh.position.equals(positions[i])));
+  assert.equal(orla.items.heldBy(1), 'sign');
+  game.selectPlayer(1);
+  orla.player.setPosition(position.x, position.z);
+  game.input.setTouch(3, 'KeyS');
+  // Registra a direção antes da pausa, que limpa os controles ativos.
+  orla.update(0.001);
+  game.togglePause(); game.interact(); tab();
+  assert.equal(orla.player.id, 1);
+  assert.equal(orla.risks.snapshot().risks[0].status, 'released');
+  game.togglePause(); game.interact();
+  assert.equal(orla.risks.snapshot().risks[0].status, 'resolved');
+  assert.equal(orla.items.heldBy(1), 'sign', 'habilidade não consome o inventário nesta etapa');
+  game.returnToMenu(); game.start('fase1-orla');
+  assert.ok(game.scenes.current.risks.snapshot().risks.every(r => r.status === 'hidden'));
+  game.dispose();
+});

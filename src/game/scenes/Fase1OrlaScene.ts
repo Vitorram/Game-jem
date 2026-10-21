@@ -11,6 +11,10 @@ import { GridMap } from '../map/GridMap';
 import { GridMapView } from '../map/GridMapView';
 import { ItemInteractions } from '../items/ItemInteractions';
 import { ItemVisuals } from '../items/ItemVisuals';
+import { RiskWorkflow, type RiskSnapshot } from '../risks/RiskWorkflow';
+import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
+import { RiskMarkers } from '../risks/RiskMarkers';
+import { AbilityVisuals } from './AbilityVisuals';
 import { ORLA_MAP } from '../map/orlaMap';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
@@ -24,6 +28,13 @@ export class Fase1OrlaScene implements GameScene {
   private readonly mapView = new GridMapView(this.map);
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
+  readonly risks = new RiskWorkflow(
+    ORLA_RISKS.map(risk => ({ ...risk, point: this.map.cellCenter(risk.column, risk.row) })),
+    { stops: ORLA_ROUTE.stops.map(cell => this.map.cellCenter(cell.column, cell.row)), movedIndex: ORLA_ROUTE.movedIndex,
+      destination: this.map.cellCenter(ORLA_ROUTE.destination.column, ORLA_ROUTE.destination.row) },
+  );
+  private readonly riskMarkers = new RiskMarkers(this.risks.snapshot());
+  private readonly abilityVisuals = new AbilityVisuals();
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
   private readonly sun: DirectionalLight;
   private disposed = false;
@@ -32,7 +43,7 @@ export class Fase1OrlaScene implements GameScene {
 
   get player() { return this.players[this.selectedId - 1]; }
 
-  constructor(input: Pick<Input, 'getAxis'> = { getAxis: () => ({ x: 0, z: 0 }) }) {
+  constructor(input: Pick<Input, 'getAxis'> = { getAxis: () => ({ x: 0, z: 0 }) }, private readonly onRisks?: (state: RiskSnapshot) => void) {
     this.input = input;
     const { hemisphere, sun } = ORLA_CONFIG;
     this.scene.background = new Color(ORLA_CONFIG.background);
@@ -50,22 +61,42 @@ export class Fase1OrlaScene implements GameScene {
     this.sun.shadow.normalBias = sun.shadowNormalBias;
     this.sun.shadow.camera.updateProjectionMatrix();
     this.scene.add(this.sun);
-    this.scene.add(this.mapView.group);
+    this.scene.add(this.mapView.group, this.riskMarkers.group, this.abilityVisuals.group);
     this.players.forEach((player, index) => {
       const spawn = this.map.spawns[index];
       player.setPosition(spawn.x, spawn.z);
       this.scene.add(player.mesh);
     });
+    this.syncRisks();
   }
 
   selectPlayer(id: PlayerId): void {
-    if (!this.disposed) this.selectedId = id;
+    if (this.disposed) return;
+    this.selectedId = id;
+    if (this.risks.selectRole(id)) this.syncRisks();
   }
 
   interact(): void {
     if (this.disposed) return;
     this.items.face(this.selectedId, this.input.getAxis());
+    const cell = this.items.tileInFront(this.selectedId, this.player.mesh.position);
+    if (cell && this.risks.interact(this.selectedId, cell)) {
+      this.syncRisks();
+      return;
+    }
     if (this.items.interact(this.selectedId, this.player.mesh.position)) this.itemVisuals.sync(this.items);
+  }
+
+  private syncRisks(): void {
+    const state = this.risks.snapshot();
+    this.riskMarkers.sync(state);
+    // Reutiliza os sensores, iluminação e desenho de rota do laboratório.
+    this.abilityVisuals.sync({
+      role: 2, tool: 'sensor', sensors: state.sensors, light: state.light,
+      stops: state.stops, draft: state.draft ?? state.stops, editing: state.draft !== null,
+      selectedStop: ORLA_ROUTE.movedIndex, issues: [], selectedIssue: null, message: state.message,
+    });
+    this.onRisks?.(state);
   }
 
   configureCamera(camera: PerspectiveCamera, aspect: number, closeView = true): void {
@@ -122,6 +153,8 @@ export class Fase1OrlaScene implements GameScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.riskMarkers.dispose();
+    this.abilityVisuals.dispose();
     this.itemVisuals.dispose();
     this.players.forEach(player => player.dispose());
     this.mapView.dispose();

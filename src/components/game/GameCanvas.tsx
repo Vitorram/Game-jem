@@ -6,6 +6,8 @@ import { Game, type GameSceneId, type GameStatus } from '@/game/core/Game';
 import { PLAYER_APPEARANCES, type PlayerId } from '@/game/entities/Player';
 import { AbilityLab } from '@/game/core/AbilityLab';
 import AbilityPanel from './AbilityPanel';
+import RiskPanel from './RiskPanel';
+import type { RiskSnapshot } from '@/game/risks/RiskWorkflow';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -27,13 +29,14 @@ export default function GameCanvas() {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
   const [closeView, setCloseView] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [risks, setRisks] = useState<RiskSnapshot | null>(null);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
 
   useEffect(() => {
     if (!host.current) return;
     let instance: Game;
     try {
-      instance = new Game(host.current, setStatus, setAbilities, setSelectedPlayer);
+      instance = new Game(host.current, setStatus, setAbilities, setSelectedPlayer, setRisks);
       game.current = instance;
       setInitialized(true);
       setError(null);
@@ -59,6 +62,7 @@ export default function GameCanvas() {
   const returnToMenu = () => {
     game.current?.returnToMenu();
     setSceneId('test');
+    setRisks(null);
     setSelectedPlayer(1);
     setCloseView(false);
   };
@@ -92,6 +96,7 @@ export default function GameCanvas() {
       {status === 'playing' && !error && <>
         <div className="hud"><span><b>{PLAYER_APPEARANCES[selectedPlayer].name}</b><small>{!isLaboratory ? 'WASD · mover / E · ação / Tab · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar' : selectedPlayer === 2 ? 'WASD + Enter' : 'WASD + E'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
+        {!isLaboratory && risks && <RiskPanel state={risks} player={selectedPlayer} />}
         <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>
