@@ -127,7 +127,8 @@ test('TestScene recebe input injetado por update(dt) e libera GPU ao trocar por 
   assert.ok(counts.size > 0);
   assert.ok([...counts.values()].every(count => count === 1));
   assert.equal(shadowDispose.mock.callCount(), 1);
-  assert.equal(phase.scene.children.length, 0);
+  assert.equal(phase.players.length, 3);
+  assert.ok(phase.scene.getObjectByName('orla-ground'));
   manager.update(0.05);
   manager.dispose();
   manager.dispose();
@@ -176,7 +177,7 @@ function gameHarness(t, animation) {
     setPixelRatio() {}
     setSize() {}
     setAnimationLoop(callback) { this.loop = callback; }
-    render(scene) { this.lastScene = scene; }
+    render(scene, camera) { this.lastScene = scene; this.lastCamera = camera; }
     dispose() { this.disposeCount = (this.disposeCount || 0) + 1; }
     forceContextLoss() { this.contextLost = true; }
   }
@@ -185,7 +186,7 @@ function gameHarness(t, animation) {
     document: Object.assign(new TrackedTarget(), { hidden: false }),
     HTMLElement: Element,
     ResizeObserver: class {
-      constructor() { observers.push(this); }
+      constructor(callback) { this.callback = callback; observers.push(this); }
       observe() { this.connected = true; }
       disconnect() { this.connected = false; }
     },
@@ -236,7 +237,7 @@ test('Game abre Orla, pausa, volta ao laboratório e encerra sem recriar rendere
   renderer.loop(200);
   const phaseScene = renderer.lastScene;
   assert.notEqual(phaseScene, laboratoryScene);
-  assert.equal(phaseScene.children.length, 0);
+  assert.ok(phaseScene.getObjectByName('orla-ground'));
   assert.ok([...counts.values()].every(count => count === 1));
   const beforeEvents = abilityEvents;
   game.useAbility();
@@ -308,7 +309,8 @@ for (const sceneId of ['test', 'fase1-orla']) {
         document.dispatchEvent(new Event('visibilitychange'));
       }
       assert.equal(statuses.at(-1), 'paused');
-      assert.equal(tween.paused, true);
+      if (tween) assert.equal(tween.paused, true);
+      else assert.equal(tweens.length, 0, 'Orla não cria tween de câmera');
       assert.deepEqual(game.input.getAxis(), { x: 0, z: 0 });
       renderer.loop(time += 16);
       assert.equal(updates.mock.callCount(), before);
@@ -320,10 +322,10 @@ for (const sceneId of ['test', 'fase1-orla']) {
       renderer.loop(time += 16);
       assert.equal(updates.mock.callCount(), before + 1);
       assert.equal(updates.mock.calls.at(-1).arguments[0], 0, 'primeiro dt após retomar deve ser zero');
-      assert.equal(tween.paused, false);
+      if (tween) assert.equal(tween.paused, false);
     }
     game.dispose();
-    assert.equal(tween.killed, true);
+    if (tween) assert.equal(tween.killed, true);
   });
 }
 
@@ -354,10 +356,10 @@ test('20 trocas e ciclo montar/desmontar/remontar não acumulam listeners, canva
         renderer.loop(100 + cycle * 32);
         const counts = watchResources(renderer.lastScene);
         game.togglePause();
-        assert.equal(tweens.at(-1).paused, true);
+        if (cycle % 2 !== 0) assert.equal(tweens.at(-1).paused, true);
         game.returnToMenu();
         assert.equal(statuses.at(-1), 'ready');
-        assert.equal(tweens.at(-1).killed, true);
+        assert.ok(tweens.every(tween => tween.killed));
         assert.ok([...counts.values()].every(count => count === 1));
         assert.equal(window.listenerCount + document.listenerCount, listenerCount);
         assert.equal(host.children.length, 1);
@@ -399,4 +401,84 @@ test('zoom seguido de pausa não ressuscita o tween de entrada cancelado (GSAP r
   game.togglePause();
   game.togglePause();
   assert.equal(gsap.globalTimeline.getChildren().includes(tween), false, 'o tween cancelado deve continuar fora da timeline');
+});
+
+const { ORLA_CONFIG } = require('../src/game/config.ts');
+
+for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390], [320, 1000]]) {
+  test(`Orla enquadra chão e altura das personagens em ${width}x${height} a 55 graus`, () => {
+    const orla = new Fase1OrlaScene();
+    const camera = new three.PerspectiveCamera();
+    orla.configureCamera(camera, width / height);
+    const elevation = three.MathUtils.radToDeg(Math.atan2(camera.position.y, camera.position.z));
+    assert.ok(Math.abs(elevation - ORLA_CONFIG.camera.elevationDegrees) < 1e-9);
+    for (const x of [-ORLA_CONFIG.ground.width / 2, ORLA_CONFIG.ground.width / 2]) {
+      for (const z of [-ORLA_CONFIG.ground.depth / 2, ORLA_CONFIG.ground.depth / 2]) {
+        for (const y of [0, ORLA_CONFIG.camera.contentHeight]) {
+          const point = new three.Vector3(x, y, z).project(camera);
+          assert.ok(Math.abs(point.x) <= 1 / ORLA_CONFIG.camera.framingPadding + 1e-9);
+          assert.ok(Math.abs(point.y) <= 1 / ORLA_CONFIG.camera.framingPadding + 1e-9);
+          assert.ok(point.z > -1 && point.z < 1);
+        }
+      }
+    }
+    orla.dispose();
+  });
+}
+
+test('Orla move cada personagem selecionada, respeita o chão e libera recursos uma vez', t => {
+  const orla = new Fase1OrlaScene({ getAxis: () => ({ x: 1, z: 1 }) });
+  const counts = watchResources(orla.scene);
+  const sun = orla.scene.children.find(child => child instanceof three.DirectionalLight);
+  const shadowDispose = t.mock.method(sun.shadow, 'dispose');
+  assert.ok(sun.castShadow);
+  assert.ok(orla.scene.children.some(child => child instanceof three.HemisphereLight));
+  assert.ok(orla.scene.getObjectByName('orla-ground').receiveShadow);
+  for (const id of [1, 2, 3]) {
+    orla.selectPlayer(id);
+    const before = orla.players.map(player => player.mesh.position.clone());
+    orla.update(0.05);
+    orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id));
+    for (let frame = 0; frame < 300; frame++) orla.update(0.05);
+    assert.ok(Math.abs(orla.player.mesh.position.x) <= ORLA_CONFIG.ground.width / 2 - ORLA_CONFIG.ground.edgeMargin);
+    assert.ok(Math.abs(orla.player.mesh.position.z) <= ORLA_CONFIG.ground.depth / 2 - ORLA_CONFIG.ground.edgeMargin);
+  }
+  orla.dispose();
+  orla.dispose();
+  const before = orla.player.mesh.position.clone();
+  orla.update(0.05);
+  assert.ok(orla.player.mesh.position.equals(before));
+  assert.equal(orla.scene.children.length, 0);
+  assert.ok([...counts.values()].every(count => count === 1));
+  assert.equal(shadowDispose.mock.callCount(), 1);
+});
+
+test('Game mantém câmera da Orla fixa, reenquadra no resize pausado e restaura laboratório', t => {
+  const { Game, Element, created, observers, tweens } = gameHarness(t);
+  const host = new Element();
+  const game = new Game(host, () => {});
+  game.start('fase1-orla');
+  const renderer = created[0];
+  assert.equal(renderer.shadowMap.type, three.PCFSoftShadowMap);
+  renderer.loop(100);
+  const camera = renderer.lastCamera;
+  const fixed = camera.position.clone();
+  const rotation = camera.quaternion.clone();
+  game.selectPlayer(3);
+  game.input.setTouch(1, 'KeyD');
+  renderer.loop(150);
+  renderer.loop(200);
+  assert.ok(camera.position.equals(fixed));
+  assert.ok(camera.quaternion.equals(rotation));
+  assert.equal(tweens.length, 0);
+  game.togglePause();
+  host.clientWidth = 390;
+  host.clientHeight = 844;
+  observers[0].callback();
+  assert.equal(camera.aspect, 390 / 844);
+  assert.ok(camera.position.length() > fixed.length());
+  game.returnToMenu();
+  game.start();
+  assert.equal(tweens.length, 1, 'a entrada animada continua no laboratório');
+  game.dispose();
 });

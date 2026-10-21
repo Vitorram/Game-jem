@@ -68,7 +68,7 @@ export default function GameCanvas() {
       <div ref={host} className="viewport" />
       <header className="topbar">
         <div className="brand"><span className="brand-mark">S</span><span>SUBURBAN<small>{isLaboratory ? 'LABORATÓRIO DE HABILIDADES' : 'FASE 1 · ORLA'}</small></span></div>
-        <span className="build-label">{isLaboratory ? 'TESTE LIVRE' : 'CENA VAZIA'}</span>
+        <span className="build-label">{isLaboratory ? 'TESTE LIVRE' : 'BASE DA ORLA'}</span>
       </header>
       {(status !== 'playing' || error) && (
         <div className="overlay">
@@ -90,30 +90,28 @@ export default function GameCanvas() {
         </div>
       )}
       {status === 'playing' && !error && <>
-        <div className="hud"><span><b>{isLaboratory ? PLAYER_APPEARANCES[selectedPlayer].name : 'Fase 1 · Orla'}</b><small>{!isLaboratory ? 'Cena vazia · em construção' : selectedPlayer === 3 ? 'Mouse · investigar e marcar' : selectedPlayer === 2 ? 'WASD + Enter' : 'WASD + E'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
-        {isLaboratory && <>
-          <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />
-          <div className="character-selector" role="group" aria-label="Escolher personagem">
-            {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
-              onClick={event => { game.current?.selectPlayer(id); setSelectedPlayer(id); event.currentTarget.blur(); }}>
-              <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
-              {PLAYER_APPEARANCES[id].name}
-            </button>)}
-            <button aria-pressed={closeView} onClick={() => { game.current?.setCloseView(!closeView); setCloseView(!closeView); }}>
-              {closeView ? 'Visão ampla' : 'Ver de perto'}
-            </button>
-          </div>
-          {selectedPlayer !== 3 && !abilities.editing && <div className="touch-controls" aria-label="Controles de movimento">
-            {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}
-              onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, code); }}
-              onPointerUp={event => game.current?.input.setTouch(event.pointerId)}
-              onPointerCancel={event => game.current?.input.setTouch(event.pointerId)}
-              onLostPointerCapture={event => game.current?.input.setTouch(event.pointerId)}
-            >{symbol}</button>)}
-          </div>}
-        </>}
+        <div className="hud"><span><b>{PLAYER_APPEARANCES[selectedPlayer].name}</b><small>{!isLaboratory ? 'WASD / Setas · mover' : selectedPlayer === 3 ? 'Mouse · investigar e marcar' : selectedPlayer === 2 ? 'WASD + Enter' : 'WASD + E'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
+        {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
+        <div className="character-selector" role="group" aria-label="Escolher personagem">
+          {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
+            onClick={event => { game.current?.selectPlayer(id); setSelectedPlayer(id); event.currentTarget.blur(); }}>
+            <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
+            {PLAYER_APPEARANCES[id].name}
+          </button>)}
+          {isLaboratory && <button aria-pressed={closeView} onClick={() => { game.current?.setCloseView(!closeView); setCloseView(!closeView); }}>
+            {closeView ? 'Visão ampla' : 'Ver de perto'}
+          </button>}
+        </div>
+        {(!isLaboratory || (selectedPlayer !== 3 && !abilities.editing)) && <div className="touch-controls" aria-label="Controles de movimento">
+          {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}
+            onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, code); }}
+            onPointerUp={event => game.current?.input.setTouch(event.pointerId)}
+            onPointerCancel={event => game.current?.input.setTouch(event.pointerId)}
+            onLostPointerCapture={event => game.current?.input.setTouch(event.pointerId)}
+          >{symbol}</button>)}
+        </div>}
       </>}
-      <footer className="bottom-bar">{isLaboratory && <span>{selectedPlayer === 3 ? 'MOUSE' : 'WASD / SETAS'} <small>{selectedPlayer === 3 ? 'ANALISAR' : 'MOVER'}</small></span>}<span>ESC <small>PAUSAR</small></span><span className="prototype-label">{isLaboratory ? 'HABILIDADES · SEM MISSÃO' : 'FASE 1 · ORLA'}</span></footer>
+      <footer className="bottom-bar"><span>{isLaboratory && selectedPlayer === 3 ? 'MOUSE' : 'WASD / SETAS'} <small>{isLaboratory && selectedPlayer === 3 ? 'ANALISAR' : 'MOVER'}</small></span><span>ESC <small>PAUSAR</small></span><span className="prototype-label">{isLaboratory ? 'HABILIDADES · SEM MISSÃO' : 'FASE 1 · ORLA'}</span></footer>
     </section>
   );
 }
