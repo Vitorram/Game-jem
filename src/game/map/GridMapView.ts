@@ -30,12 +30,23 @@ export class GridMapView {
       tile.castShadow = type.height > 0;
       tile.receiveShadow = true;
       this.group.add(tile);
-      if (kind === 'road') {
-        const marking = new Mesh(this.geometry, this.markingMaterial);
-        marking.name = `road-marking-${column}-${row}`;
-        marking.scale.set(map.tileSize * 0.42, 0.025, 0.035);
-        marking.position.set(center.x, 0.018, center.z);
-        this.group.add(marking);
+    }
+
+    const roadRows = Array.from({ length: map.rows }, (_, row) => row)
+      .filter(row => Array.from({ length: map.columns }, (_, column) => map.tileAt(column, row)).includes('road'));
+    if (roadRows.length) {
+      const roadMinZ = Math.min(...roadRows.map(row => map.cellCenter(0, row).z - map.tileSize / 2));
+      const roadMaxZ = Math.max(...roadRows.map(row => map.cellCenter(0, row).z + map.tileSize / 2));
+      const laneCount = 5; // faixa de escape mais quatro faixas principais
+      for (let column = 0; column < map.columns; column++) {
+        const x = map.cellCenter(column, roadRows[0]).x;
+        for (let divider = 1; divider < laneCount; divider++) {
+          const marking = new Mesh(this.geometry, this.markingMaterial);
+          marking.name = `road-lane-divider-${column}-${divider}`;
+          marking.scale.set(map.tileSize * 0.42, 0.025, 0.035);
+          marking.position.set(x, 0.018, roadMinZ + (roadMaxZ - roadMinZ) * divider / laneCount);
+          this.group.add(marking);
+        }
       }
     }
   }

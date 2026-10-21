@@ -200,28 +200,16 @@ h1 span { color: var(--accent); }
 @media (max-width: 400px) { .orla-touch-controls { right: 12px; } }
 
 .risk-panel { position: absolute; top: 165px; left: 24px; width: 300px; max-height: calc(100dvh - 440px); overflow: auto; padding: 14px; border: 1px solid #64796b; border-radius: 10px; background: #102023ee; font-size: 12px; line-height: 1.45; }
-.urban-problem-alert { position: absolute; top: 165px; right: 36px; padding: 12px 16px; border: 1px solid #ffb94d; border-radius: 8px; background: #34291bea; color: #ffe2a3; font-size: 13px; font-weight: 800; letter-spacing: 0.05em; }
-.urban-problem-alert small { display: block; margin-top: 4px; color: #d7bd88; font-size: 9px; letter-spacing: 0.08em; }
-.dispatch-center, .team-dispatch-notice { position: absolute; z-index: 5; top: 158px; right: 24px; width: min(320px, calc(100vw - 32px)); padding: 14px; border: 1px solid #77a68e; border-radius: 10px; background: #102320f2; color: #e8f5ed; box-shadow: 0 12px 36px #07100e66; }
-.dispatch-center header, .team-dispatch-notice header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 11px; color: #a8d9bd; font: 9px monospace; letter-spacing: .1em; }
-.dispatch-center header b, .team-dispatch-notice header b { color: #7ee0a4; font-size: 8px; }
-.dispatch-center > strong, .team-dispatch-notice > strong { display: block; color: #ffe0a0; font-size: 14px; letter-spacing: .04em; }
-.dispatch-center > small, .team-dispatch-notice > small { display: block; margin-top: 6px; color: #c6d1c7; font: 9px monospace; letter-spacing: .08em; }
-.dispatch-center p { margin: 10px 0; color: #a9c1b5; font-size: 10px; line-height: 1.45; }
-.dispatch-center button { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; margin-top: 7px; padding: 9px; border: 1px solid #567a68; border-radius: 7px; background: #1c3a31; color: #e7f6ec; cursor: pointer; font-size: 9px; text-align: left; }
-.dispatch-center button b { color: #91e4ad; font: 8px monospace; }
-.dispatch-center button:disabled { border-color: #3e5c4b; background: #162b24; cursor: default; }
-.dispatch-center button.is-dispatched b { color: #79dba0; }
-.dispatch-center.is-resolved { border-color: #60c88e; }
-.dispatch-center.is-resolved header { color: #85e3a8; }
-.dispatch-center.is-resolved > strong { color: #95e8b2; }
-.team-dispatch-notice { right: auto; left: 50%; width: min(300px, calc(100vw - 32px)); transform: translateX(-50%); border-color: #64b994; background: #112a27f2; }
-.team-dispatch-notice.for-mobility { border-color: #d2ad59; background: #302918f2; }
-.team-dispatch-notice.for-mobility header { color: #f0d17e; }
-.team-objective-caption { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 9px; border-top: 1px solid #ffffff1b; color: #b9d1c5; font: 9px monospace; letter-spacing: .06em; }
-.team-objective-caption b { color: #8ce4b4; }
-.for-mobility .team-objective-caption b { color: #f1d078; }
-.team-dispatch-notice .team-objective-instruction { color: #f1d078; }
+.game-objective-hud { position: absolute; z-index: 4; top: 165px; left: 36px; display: grid; gap: 5px; max-width: min(500px, calc(100vw - 72px)); padding: 7px 10px; border-left: 2px solid #8de0b5; background: #10211dcc; color: #edf7ee; text-shadow: 0 1px 3px #000; font: 10px monospace; letter-spacing: .04em; }
+.game-objective-hud b { font-size: 11px; }
+.game-objective-hud span { color: #bfd2c6; font-size: 8px; }
+.game-objective-hud .traffic-state { font-size: 9px; }
+.traffic-state.normal { color: #8ce4a5; }
+.traffic-state.attention { color: #f0cf70; }
+.traffic-state.critical { color: #ff8574; }
+.game-objective-hud.for-mobility { border-color: #ebc866; }
+.game-objective-hud.for-mobility b { color: #ffe39a; }
+.game-objective-hud.is-complete { border-color: #78e2a6; color: #a3efbd; }
 .interaction-prompt { position: absolute; left: 50%; bottom: 92px; transform: translateX(-50%); display: flex; align-items: center; gap: 9px; max-width: calc(100vw - 24px); padding: 10px 15px; border: 1px solid #8bd6b1; border-radius: 8px; background: #102923ed; color: #e2fff1; font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-align: center; white-space: normal; }
 .interaction-prompt kbd { display: inline-grid; place-items: center; min-width: 24px; height: 24px; border-radius: 5px; background: #8bd6b1; color: #102923; font-size: 12px; }
 .repair-puzzle-overlay { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: #071114d9; backdrop-filter: blur(5px); touch-action: manipulation; }
@@ -248,63 +236,6 @@ h1 span { color: var(--accent); }
 .repair-feedback.is-visible { animation: repair-feedback-pop .22s ease-out both; }
 @keyframes repair-feedback-pop { from { opacity: 0; transform: translateY(5px) scale(.96); } to { opacity: 1; transform: translateY(0) scale(1); } }
 .repair-instruction { margin: 9px 0 0; color: #94aaa3; font: 9px monospace; letter-spacing: .12em; }
-.mobility-panel-overlay { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 20px; background: #071114b8; backdrop-filter: blur(4px); }
-.mobility-panel { width: min(500px, 100%); max-height: min(90dvh, 760px); overflow-y: auto; padding: 22px; border: 1px solid #62817b; border-radius: 14px; background: linear-gradient(145deg, #1d302e, #101c22 74%); color: #e9f4ea; box-shadow: 0 24px 90px #0009; }
-.mobility-panel-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.mobility-kicker { color: #9ecaba; font: 9px monospace; letter-spacing: .16em; }
-.mobility-panel-header h2 { margin: 5px 0 0; font-size: 17px; letter-spacing: .04em; }
-.mobility-close { width: 32px; height: 32px; border: 1px solid #58716c; border-radius: 7px; background: #ffffff08; color: #e9f4ea; font-size: 22px; }
-.mobility-road-tabs { display: grid; gap: 6px; margin-bottom: 14px; }
-.mobility-road-tabs button { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid #ffffff12; border-radius: 7px; background: #ffffff05; color: #dce9df; text-align: left; font-size: 10px; }
-.mobility-road-tabs button[aria-selected="true"] { border-color: #8bd6b1; background: #8bd6b112; }
-.mobility-road-tabs button b { color: #86dba8; font: 8px monospace; }
-.mobility-road-tabs button b.is-blocked { color: #ff9280; }
-.mobility-road-tabs button b.is-stopped { color: #e4c373; }
-.mobility-selected-road { padding: 14px; border: 1px solid #ffffff16; border-radius: 9px; background: #07111450; }
-.mobility-cone-zones { display: grid; gap: 7px; margin-top: 10px; padding: 10px; border: 1px solid #b77a3944; border-radius: 8px; background: #5b3b171c; color: #f2c77d; font: 8px monospace; }
-.mobility-cone-zones > div { display: flex; gap: 6px; }
-.mobility-cone-zones button { flex: 1; padding: 7px 4px; border: 1px solid #80613c; border-radius: 5px; background: #392b1d; color: #efdfc3; font: 8px monospace; }
-.mobility-cone-zones button[aria-pressed="true"] { border-color: #ffbd59; background: #79501d; color: #fff0d3; }
-.mobility-road-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.mobility-road-title h3 { margin: 0; font-size: 13px; }
-.mobility-state-pill { padding: 4px 7px; border-radius: 20px; background: #23573d; color: #a9f0c1; font: 8px monospace; }
-.mobility-state-pill.is-blocked { background: #632e2c; color: #ffc0b3; }
-.mobility-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 13px; }
-.mobility-stats span { display: grid; gap: 4px; color: #91a8a0; font: 8px monospace; }
-.mobility-stats b { color: #ecf3eb; font-size: 10px; }
-.mobility-load-track, .mobility-action-progress i { display: block; height: 5px; overflow: hidden; margin-top: 10px; border-radius: 5px; background: #344342; }
-.mobility-load-track span, .mobility-action-progress i span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #71d49c 0%, #e5c45c 72%, #ec7966 100%); transition: width .2s; }
-.mobility-traffic-visual { padding: 11px 0 0; color: #8fe3b3; font: 14px monospace; letter-spacing: .14em; text-align: center; }
-.mobility-traffic-visual small { display: block; margin-top: 5px; color: #92aaa1; font: 8px monospace; letter-spacing: .1em; }
-.mobility-escape-summary { display: flex; justify-content: space-between; gap: 8px; margin: 10px 0; padding: 10px 12px; border: 1px solid #3c7659; border-radius: 7px; background: #21433255; color: #a5e4bd; font: 8px monospace; }
-.mobility-escape-summary b { color: #d6e6da; font-weight: 400; }
-.mobility-escape-summary.is-blocked { border-color: #75433b; background: #492a2855; color: #ffad98; }
-.mobility-actions { display: grid; gap: 7px; margin-top: 13px; }
-.mobility-actions button { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 8px 10px; border: 1px solid #5b7771; border-radius: 8px; background: #203633; color: #edf5ee; text-align: left; }
-.mobility-actions button:hover:not(:disabled) { border-color: #9be0b6; background: #294940; }
-.mobility-actions button:disabled { opacity: .42; }
-.mobility-actions kbd { display: grid; place-items: center; min-width: 24px; height: 24px; border-radius: 5px; background: #344d47; color: #bce8c9; font: 10px monospace; }
-.mobility-actions button span { display: grid; flex: 1; gap: 3px; }
-.mobility-actions button b { font-size: 9px; letter-spacing: .04em; }
-.mobility-actions button small { color: #99aea5; font-size: 8px; }
-.mobility-actions button i { color: #9eb5aa; font-size: 20px; font-style: normal; }
-.mobility-action-progress { margin-top: 13px; color: #c6dfd2; font: 8px monospace; }
-.mobility-action-progress div { display: flex; justify-content: space-between; }
-.mobility-action-message { padding: 10px; margin-top: 12px; border-radius: 7px; background: #72d49b20; color: #a4edbc; font: 9px monospace; text-align: center; }
-.mobility-panel-footer { margin-top: 14px; color: #789087; font: 8px monospace; letter-spacing: .07em; text-align: center; }
-@media (max-width: 600px) { .mobility-panel { padding: 16px; }.mobility-stats { grid-template-columns: repeat(2, 1fr); }.mobility-road-tabs button { font-size: 9px; } }
-.traffic-overview { position: absolute; z-index: 3; top: 215px; right: 24px; width: min(280px, calc(100vw - 48px)); padding: 12px; border: 1px solid #607873; border-radius: 9px; background: #102023ed; color: #e1eee5; }
-.traffic-overview header { display: flex; justify-content: space-between; margin-bottom: 8px; color: #a6c6b7; font: 8px monospace; letter-spacing: .12em; }
-.traffic-overview header b { color: #7ee0a4; font-size: 7px; }
-.traffic-overview-road { padding: 7px 0; border-top: 1px solid #ffffff13; }
-.traffic-overview-road > div:first-child { display: flex; justify-content: space-between; gap: 8px; font-size: 9px; }
-.traffic-overview-road > div:first-child span { color: #8de1a9; font: 8px monospace; }
-.traffic-overview-road > div:first-child span.is-blocked { color: #ff8c78; }
-.traffic-overview-road > div:first-child span.is-congested { color: #f0c56d; }
-.traffic-overview-bar { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 4px; background: #31413e; }
-.traffic-overview-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #68d99a, #edbd5e, #eb7665); }
-.traffic-overview-road small { display: block; margin-top: 4px; color: #93aaa0; font: 7px monospace; }
-@media (max-width: 600px) { .traffic-overview { top: 205px; right: 12px; width: 230px; } }
 .risk-panel summary { cursor: pointer; font-weight: 700; }
 .risk-panel ol { list-style: none; padding: 0; display: grid; gap: 8px; }
 .risk-panel li { padding-left: 9px; border-left: 3px solid #79b8ff; }
@@ -315,5 +246,5 @@ h1 span { color: var(--accent); }
 .risk-panel li b, .risk-panel li span { display: block; }
 .risk-panel small, .risk-panel li span { color: var(--muted); }
 .risk-message { margin-bottom: 0; }
-@media (max-width: 600px) { .risk-panel { left: 12px; right: 12px; width: auto; }.urban-problem-alert { top: 165px; right: 12px; }.dispatch-center { top: 158px; right: 12px; }.team-dispatch-notice { top: 158px; } }
+@media (max-width: 600px) { .risk-panel { left: 12px; right: 12px; width: auto; }.game-objective-hud { top: 155px; left: 12px; max-width: calc(100vw - 24px); } }
 @media (min-width: 700px) and (max-height: 650px) { .risk-panel { top: 160px; left: 190px; width: calc(100% - 390px); max-height: calc(100dvh - 220px); } }
