@@ -420,8 +420,8 @@ for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390]
         ray.setFromCamera(new three.Vector2(sx, sy), camera);
         const hit = ray.ray.intersectPlane(floor, new three.Vector3());
         assert.ok(hit);
-        assert.ok(Math.abs(hit.x) <= ORLA_CONFIG.ground.width / 2 + 1e-8);
-        assert.ok(Math.abs(hit.z) <= ORLA_CONFIG.ground.depth / 2 + 1e-8);
+        assert.ok(Math.abs(hit.x) <= orla.map.width / 2 + 1e-8);
+        assert.ok(Math.abs(hit.z) <= orla.map.depth / 2 + 1e-8);
       }
     }
     orla.dispose();
@@ -442,8 +442,8 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
     orla.update(0.05);
     orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id));
     for (let frame = 0; frame < 300; frame++) orla.update(0.05);
-    assert.ok(Math.abs(orla.player.mesh.position.x) <= ORLA_CONFIG.ground.width / 2 - ORLA_CONFIG.ground.edgeMargin);
-    assert.ok(Math.abs(orla.player.mesh.position.z) <= ORLA_CONFIG.ground.depth / 2 - ORLA_CONFIG.ground.edgeMargin);
+    assert.ok(Math.abs(orla.player.mesh.position.x) <= orla.map.width / 2 - orla.map.playerRadius);
+    assert.ok(Math.abs(orla.player.mesh.position.z) <= orla.map.depth / 2 - orla.map.playerRadius);
   }
   orla.dispose();
   orla.dispose();
@@ -483,4 +483,25 @@ test('Game segue seleção na Orla, reenquadra no resize pausado e restaura labo
   game.start();
   assert.equal(tweens.length, 1, 'a entrada animada continua no laboratório');
   game.dispose();
+});
+
+test('Orla usa óptica de perto do laboratório e suavização independente do FPS', () => {
+  const run = steps => {
+    const orla = new Fase1OrlaScene();
+    const camera = new three.PerspectiveCamera();
+    orla.player.setPosition(0, 0);
+    orla.configureCamera(camera, 1);
+    assert.equal(camera.position.y, ORLA_CAMERA.closeHeight);
+    assert.equal(camera.position.z, ORLA_CAMERA.closeHeight * ORLA_CAMERA.tilt);
+    orla.player.setPosition(2, 0);
+    orla.updateCamera(camera, 0, true);
+    assert.equal(camera.position.x, 0);
+    for (let frame = 0; frame < steps; frame++) orla.updateCamera(camera, 1 / steps, true);
+    const result = camera.position.x;
+    orla.dispose();
+    return result;
+  };
+  const expected = 2 * (1 - Math.exp(-ORLA_CAMERA.followSmoothing));
+  assert.ok(Math.abs(run(30) - expected) < 1e-9);
+  assert.ok(Math.abs(run(120) - expected) < 1e-9);
 });

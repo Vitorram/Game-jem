@@ -216,7 +216,9 @@ export class Player {
     return lock;
   }
 
-  update(delta: number, axis: { x: number; z: number }) {
+  update(delta: number, axis: { x: number; z: number }, resolveMovement?: (
+    from: { x: number; z: number }, to: { x: number; z: number },
+  ) => { x: number; z: number }) {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, GAME_CONFIG.maxDelta);
     const x = Number.isFinite(axis.x) ? MathUtils.clamp(axis.x, -1, 1) : 0;
@@ -227,8 +229,12 @@ export class Player {
     let turn = 0;
     if (length > 0) {
       const distance = GAME_CONFIG.playerSpeed * dt;
-      this.mesh.position.x = MathUtils.clamp(previousX + x / length * distance, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit);
-      this.mesh.position.z = MathUtils.clamp(previousZ + z / length * distance, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit);
+      const proposed = { x: previousX + x / length * distance, z: previousZ + z / length * distance };
+      const position = resolveMovement
+        ? resolveMovement({ x: previousX, z: previousZ }, proposed)
+        : { x: MathUtils.clamp(proposed.x, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit), z: MathUtils.clamp(proposed.z, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit) };
+      this.mesh.position.x = position.x;
+      this.mesh.position.z = position.z;
       const target = Math.atan2(x, z);
       const difference = Math.atan2(Math.sin(target - this.mesh.rotation.y), Math.cos(target - this.mesh.rotation.y));
       turn = difference * (1 - Math.exp(-12 * dt));

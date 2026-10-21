@@ -14,9 +14,7 @@ export const GAME_CONFIG = {
 
 
 export const ORLA_CONFIG = {
-  ground: { width: 22, depth: 22, color: '#eeb65a', roughness: 0.9, edgeMargin: 0.8 },
   background: '#a6dcd9',
-  playerSpacing: 2.5,
   hemisphere: { skyColor: '#fff1cf', groundColor: '#c78144', intensity: 2.2 },
   sun: {
     color: '#ffdfaa', intensity: 2.8,
@@ -42,4 +40,11 @@ export const ORLA_CAMERA = {
   portraitAspect: 0.85,
   minAspect: 0.01,
   groundPadding: 0.02,
+} as const;
+
+export const GRID_CONFIG = {
+  tileSize: 2,
+  playerRadius: 0.3,
+  floorThickness: 0.2,
+  roughness: 0.9,
 } as const;
