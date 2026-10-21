@@ -47,6 +47,38 @@ O papel errado ou uma tarefa ainda não liberada não produz intervenção. Aç�
 
 `AbilityActions.ts` compartilha as regras de inspeção, sensores, luz e paradas entre o laboratório e `RiskWorkflow.ts`. Este último contém a máquina de estados sem Three/React. `riskData.ts` define os três riscos e o desvio; a cena reaproveita `AbilityVisuals` para mostrar as intervenções. O React só recebe snapshots em ações, nunca por frame. `npm test` cobre o fluxo puro, papéis, troca de personagem, inventário, pausa e descarte de GPU.
 
+## Módulo de partida e pedidos
+
+`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. `sessionData.ts` fornece um catálogo de teste para a Orla: fase de 180 segundos, primeiro pedido imediato e próximos a cada 30 segundos. Duração, intervalo, atraso inicial, sequência de riscos, prazo, pontos, bônus máximo e penalidade são configuráveis. O catálogo se repete em ordem.
+
+- Estados: `menu` → `playing` ↔ `paused` → `finished`. `start()` inicia ou reinicia após o fim; `returnToMenu()` limpa a partida. A pausa congela fase, chegadas e prazos. Só `playing` aceita resoluções.
+- A fila é FIFO: apenas o primeiro pedido recebe progresso, seguindo seus `riskIds` em ordem. Todos os prazos contam desde a chegada, inclusive para pedidos em espera. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
+- Concluir rende `basePoints + floor(maxSpeedBonus × tempoRestante / timeLimitMs)`. Etapas isoladas não pontuam. Expirar desconta `expirationPenalty` uma única vez; o total pode ficar negativo.
+- No prazo exato, o pedido expira. No fim da fase, todas as pendências também expiram com penalidade; nenhuma chegada acontece no instante final. Empates processam expiração antes de chegada.
+- `advance(deltaMs)` recebe milissegundos, inclusive frações, e processa todos os eventos de avanços grandes. Use o tempo real decorrido enquanto jogando, sem o limite de delta usado na física. Avance o relógio antes de registrar uma resolução. Não repasse tempo passado em pausa após retomar.
+- Métodos retornam eventos de mudança; `snapshot()` devolve uma cópia com fila, próximo risco, relógios, placar e contadores. Não há callbacks ou atualizações React por frame, nem recursos de GPU a descartar.
+
+Exemplo de uso em lógica sem renderização:
+
+```ts
+import { GameSession } from './src/game/session/GameSession';
+import { ORLA_SESSION_CONFIG } from './src/game/session/sessionData';
+
+const session = new GameSession(ORLA_SESSION_CONFIG);
+session.start();
+session.advance(15_000);
+const order = session.snapshot().orders[0];
+// Depois de cada intervenção efetivamente concluída pelo RiskWorkflow:
+session.resolveRisk(order.id, 1);
+session.resolveRisk(order.id, 2);
+// Primeiro pedido: 100 pontos + 37 de bônus = 137.
+session.pause();
+session.advance(60_000); // Pausado: não altera relógios nem pedidos.
+session.resume();
+```
+
+O módulo está disponível para integração; a cena e o HUD ainda executam o teste livre de três riscos descrito acima. Ao conectar a partida, a cena deverá permitir a intervenção apenas no `nextRiskId` do primeiro pedido, enviar a conclusão com o ID desse pedido e criar um novo ciclo de riscos para as próximas instâncias. Um risco já resolvido no teste livre não deve concluir automaticamente pedidos futuros. `npm test` cobre expiração, pontuação, ordem, pausa, reinício, tempo acumulado e consumo de conclusões reais do `RiskWorkflow` sem carregar Three.
+
 ## Organização
 
 | Caminho | Responsabilidade |
