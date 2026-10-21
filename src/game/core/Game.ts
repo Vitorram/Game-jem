@@ -43,6 +43,7 @@ export class Game {
     private host: HTMLElement,
     private onStatus: (status: GameStatus) => void,
     private onAbilities?: (state: AbilitySnapshot) => void,
+    private onPlayerSelected?: (id: PlayerId) => void,
   ) {
     this.renderer = new WebGLRenderer({
       antialias: true,
@@ -175,7 +176,16 @@ export class Game {
     if (this.disposed) return;
     this.input.clear();
     const current = this.scenes.current;
-    if (current instanceof TestScene || current instanceof Fase1OrlaScene) current.selectPlayer(id);
+    if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
+      current.selectPlayer(id);
+      this.onPlayerSelected?.(id);
+    }
+  }
+
+  interact() {
+    if (this.disposed || this.status !== 'playing') return;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.interact();
   }
 
   setCloseView(enabled: boolean) {
@@ -249,6 +259,17 @@ export class Game {
     if (event.repeat) return;
     if (event.code === 'Escape') { this.togglePause(); return; }
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
+    const current = this.scenes.current;
+    if (this.status === 'playing' && current instanceof Fase1OrlaScene) {
+      if (event.code === 'KeyE') {
+        event.preventDefault();
+        this.interact();
+      } else if (event.code === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        event.preventDefault();
+        this.selectPlayer((current.player.id % current.players.length + 1) as PlayerId);
+      }
+      return;
+    }
     const world = this.world;
     if (this.status === 'playing' && world && ((world.player.id === 1 && event.code === 'KeyE') || (world.player.id === 2 && event.code === 'Enter'))) {
       event.preventDefault();

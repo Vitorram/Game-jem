@@ -27,6 +27,14 @@ Os modelos procedurais em `Player.ts` têm ombros, cotovelos, quadris, joelhos e
 
 Valide movimento, contato dos pés, seleção e liberação de recursos com `npm run test:characters` (Node 22.13+ ou 24).
 
+## Itens na Fase 1 · Orla
+
+Abra **Fase 1 · Orla** em `/jogo`. WASD/setas ou o direcional de toque movem a personagem. **E** ou **Ação · E** interage com a célula adjacente na última direção de movimento (eixo dominante nas diagonais). **Tab** troca a personagem quando o foco está no jogo; os botões de seleção continuam disponíveis. Tab em controles focados mantém a navegação normal da interface.
+
+Há três caixas infinitas na linha de bancadas: Sensor (azul), Placa (amarela) e Barreira (laranja). Cada personagem carrega uma caixa acima da cabeça. Mãos vazias pegam da caixa ou de uma bancada ocupada; mãos ocupadas depositam em uma bancada vazia. Ações incompatíveis não alteram nada. Trocar de personagem preserva os três inventários; sair da fase descarta a sessão. Não há pedidos nem pontuação.
+
+O catálogo fica em `src/game/items/itemData.ts`; as regras e direções em `ItemInteractions.ts`, sem Three.js. `orlaMap.ts` define as caixas e seus tipos; `ItemVisuals.ts` mantém os meshes e libera seus recursos no descarte da cena. Altura e tamanho dos itens ficam em `ITEM_VIEW_CONFIG`.
+
 ## Organização
 
 | Caminho | Responsabilidade |
