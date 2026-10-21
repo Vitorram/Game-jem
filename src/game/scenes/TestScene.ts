@@ -1,21 +1,24 @@
 import { Scene, Color, Fog, HemisphereLight, DirectionalLight, Mesh, PlaneGeometry, MeshStandardMaterial, GridHelper, Material } from 'three';
 import { Player, type PlayerId } from '../entities/Player';
 import type { Input } from '../core/Input';
+import type { Scene as GameScene } from '../core/Scene';
 import { AbilityLab, type AbilitySnapshot } from '../core/AbilityLab';
 import { AbilityVisuals } from './AbilityVisuals';
 
-export class TestScene {
+export class TestScene implements GameScene {
   readonly scene = new Scene();
   readonly players = [new Player(1), new Player(2), new Player(3)];
   private selectedId: PlayerId = 1;
   readonly abilities: AbilityLab;
   private readonly abilityVisuals = new AbilityVisuals();
+  private readonly input: Pick<Input, 'getAxis'>;
 
   get player() { return this.players[this.selectedId - 1]; }
 
   selectPlayer(id: PlayerId) { this.selectedId = id; this.abilities.selectRole(id); }
 
-  constructor(onAbilities?: (state: AbilitySnapshot) => void) {
+  constructor(onAbilities?: (state: AbilitySnapshot) => void, input: Pick<Input, 'getAxis'> = { getAxis: () => ({ x: 0, z: 0 }) }) {
+    this.input = input;
     this.abilities = new AbilityLab(state => {
       this.abilityVisuals.sync(state);
       onAbilities?.(state);
@@ -44,7 +47,7 @@ export class TestScene {
     });
   }
 
-  update(delta: number, input: Input) {
+  update(delta: number, input: Pick<Input, 'getAxis'> = this.input) {
     const axis = this.abilities.movementBlocked ? { x: 0, z: 0 } : input.getAxis();
     for (const player of this.players) {
       player.update(delta, player === this.player ? axis : { x: 0, z: 0 });
@@ -68,3 +71,4 @@ export class TestScene {
     this.scene.clear();
   }
 }
+

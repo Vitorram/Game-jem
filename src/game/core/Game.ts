@@ -1,4 +1,3 @@
-
 import {
   WebGLRenderer,
   PerspectiveCamera,
@@ -9,10 +8,13 @@ import {
 import { gsap } from 'gsap';
 import { Input } from './Input';
 import { TestScene } from '../scenes/TestScene';
+import { Fase1OrlaScene } from '../scenes/Fase1OrlaScene';
+import { SceneManager } from './SceneManager';
 import { GAME_CONFIG } from '../config';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 
+export type GameSceneId = 'test' | 'fase1-orla';
 export type GameStatus = 'ready' | 'playing' | 'paused';
 
 export class Game {
@@ -20,7 +22,12 @@ export class Game {
 
   private renderer: WebGLRenderer;
   private camera = new PerspectiveCamera(45, 1, 0.1, 100);
-  private world: TestScene;
+  private readonly scenes = new SceneManager();
+
+  private get world(): TestScene | undefined {
+    const current = this.scenes.current;
+    return current instanceof TestScene ? current : undefined;
+  }
   private resizeObserver: ResizeObserver;
   private intro?: gsap.core.Tween;
   private closeView = false;
@@ -55,12 +62,11 @@ export class Game {
 
     this.host.appendChild(this.renderer.domElement);
 
-    // A cena mantém os três personagens e controla o selecionado.
-    this.world = new TestScene(this.onAbilities);
-    this.onAbilities?.(this.world.abilities.snapshot());
-
-    // Gerencia as entradas do teclado.
+    // O input pertence ao Game e é injetado no laboratório.
     this.input = new Input();
+    const laboratory = new TestScene(this.onAbilities, this.input);
+    this.scenes.setScene(laboratory);
+    this.onAbilities?.(laboratory.abilities.snapshot());
 
     // Vista superior inclinada, com a frente das personagens visível.
     this.camera.up.set(0, 1, 0);
@@ -106,9 +112,10 @@ export class Game {
     this.camera.updateProjectionMatrix();
   };
 
-  start() {
+  start(sceneId: GameSceneId = 'test') {
     if (this.status !== 'ready' || this.disposed) return;
 
+    if (sceneId === 'fase1-orla') this.scenes.setScene(new Fase1OrlaScene());
     this.changeStatus('playing');
 
     const reducedMotion = window.matchMedia(
@@ -127,6 +134,22 @@ export class Game {
     });
   }
 
+  returnToMenu() {
+    if (this.disposed || this.status === 'ready') return;
+    this.intro?.kill();
+    this.intro = undefined;
+    this.closeView = false;
+    this.input.clear();
+    const laboratory = new TestScene(this.onAbilities, this.input);
+    this.scenes.setScene(laboratory);
+    this.onAbilities?.(laboratory.abilities.snapshot());
+    this.cameraTarget.set(0, 0, 0);
+    const height = GAME_CONFIG.cameraHeight + 4;
+    this.camera.position.set(0, height, height * GAME_CONFIG.cameraTilt);
+    this.camera.lookAt(this.cameraTarget);
+    this.changeStatus('ready');
+  }
+
   togglePause() {
     if (this.disposed || this.status === 'ready') return;
 
@@ -138,30 +161,34 @@ export class Game {
   selectPlayer(id: PlayerId) {
     if (this.disposed) return;
     this.input.clear();
-    this.world.selectPlayer(id);
+    this.world?.selectPlayer(id);
   }
 
   setCloseView(enabled: boolean) {
+    if (this.disposed || !this.world) return;
     this.closeView = enabled;
     this.intro?.kill();
+    this.intro = undefined;
   }
 
   useAbility() {
-    if (this.disposed || this.status !== 'playing') return;
-    const player = this.world.player.mesh;
+    const world = this.world;
+    if (this.disposed || this.status !== 'playing' || !world) return;
+    const player = world.player.mesh;
     this.input.clear();
-    this.world.abilities.activate({ x: player.position.x + Math.sin(player.rotation.y) * 1.2, z: player.position.z + Math.cos(player.rotation.y) * 1.2 });
+    world.abilities.activate({ x: player.position.x + Math.sin(player.rotation.y) * 1.2, z: player.position.z + Math.cos(player.rotation.y) * 1.2 });
   }
 
-  setAbilityTool(tool: InfraTool) { if (this.status === 'playing') this.world.abilities.setTool(tool); }
-  selectStop(index: number) { if (this.status === 'playing') this.world.abilities.selectStop(index); }
-  clickAbilityMap(point: MapPoint, mark: boolean) { if (this.status === 'playing') this.world.abilities.mapClick(point, mark); }
-  inspectIssue(id: number, mark = false) { if (this.status === 'playing') this.world.abilities.inspect(id, mark); }
-  resetAbilities() { if (this.status === 'playing') this.world.abilities.reset(); }
+  setAbilityTool(tool: InfraTool) { if (!this.disposed && this.status === 'playing') this.world?.abilities.setTool(tool); }
+  selectStop(index: number) { if (!this.disposed && this.status === 'playing') this.world?.abilities.selectStop(index); }
+  clickAbilityMap(point: MapPoint, mark: boolean) { if (!this.disposed && this.status === 'playing') this.world?.abilities.mapClick(point, mark); }
+  inspectIssue(id: number, mark = false) { if (!this.disposed && this.status === 'playing') this.world?.abilities.inspect(id, mark); }
+  resetAbilities() { if (!this.disposed && this.status === 'playing') this.world?.abilities.reset(); }
 
   private updateCamera(delta: number) {
     if (this.intro?.isActive()) return;
-    const player = this.world.player.mesh.position;
+    const player = this.world?.player.mesh.position;
+    if (!player) return;
     const height = this.closeView ? GAME_CONFIG.cameraCloseHeight : GAME_CONFIG.cameraHeight;
     // Altura e recuo variam juntos para preservar a inclinação no zoom.
     const portrait = Math.max(1, 0.85 / this.camera.aspect);
@@ -203,7 +230,8 @@ export class Game {
     if (event.repeat) return;
     if (event.code === 'Escape') { this.togglePause(); return; }
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
-    if (this.status === 'playing' && ((this.world.player.id === 1 && event.code === 'KeyE') || (this.world.player.id === 2 && event.code === 'Enter'))) {
+    const world = this.world;
+    if (this.status === 'playing' && world && ((world.player.id === 1 && event.code === 'KeyE') || (world.player.id === 2 && event.code === 'Enter'))) {
       event.preventDefault();
       this.useAbility();
     }
@@ -224,12 +252,12 @@ export class Game {
     if (document.hidden) return;
 
     if (this.status === 'playing') {
-      // Atualiza o movimento e as animações dos três personagens.
-      this.world.update(delta, this.input);
+      this.scenes.update(delta);
       this.updateCamera(delta);
     }
 
-    this.renderer.render(this.world.scene, this.camera);
+    const current = this.scenes.current;
+    if (current) this.renderer.render(current.scene, this.camera);
   };
 
   dispose() {
@@ -252,10 +280,11 @@ export class Game {
     window.removeEventListener('blur', this.onBlur);
 
     this.input.dispose();
-    this.world.dispose();
+    this.scenes.dispose();
 
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     this.renderer.domElement.remove();
   }
 }
+
