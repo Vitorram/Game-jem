@@ -9,6 +9,8 @@ import { GRID_CONFIG, ORLA_CONFIG, ORLA_CAMERA } from '../config';
 
 import { GridMap } from '../map/GridMap';
 import { GridMapView } from '../map/GridMapView';
+import { ItemInteractions } from '../items/ItemInteractions';
+import { ItemVisuals } from '../items/ItemVisuals';
 import { ORLA_MAP } from '../map/orlaMap';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
@@ -20,6 +22,8 @@ export class Fase1OrlaScene implements GameScene {
   private readonly idle = { x: 0, z: 0 };
   readonly map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
   private readonly mapView = new GridMapView(this.map);
+  readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
+  private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
   private readonly sun: DirectionalLight;
   private disposed = false;
@@ -56,6 +60,12 @@ export class Fase1OrlaScene implements GameScene {
 
   selectPlayer(id: PlayerId): void {
     if (!this.disposed) this.selectedId = id;
+  }
+
+  interact(): void {
+    if (this.disposed) return;
+    this.items.face(this.selectedId, this.input.getAxis());
+    if (this.items.interact(this.selectedId, this.player.mesh.position)) this.itemVisuals.sync(this.items);
   }
 
   configureCamera(camera: PerspectiveCamera, aspect: number, closeView = true): void {
@@ -103,6 +113,7 @@ export class Fase1OrlaScene implements GameScene {
   update(dt: number): void {
     if (this.disposed) return;
     const axis = this.input.getAxis();
+    if (dt > 0) this.items.face(this.selectedId, axis);
     for (const player of this.players) {
       player.update(dt, player === this.player ? axis : this.idle, this.resolveMovement);
     }
@@ -111,6 +122,7 @@ export class Fase1OrlaScene implements GameScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.itemVisuals.dispose();
     this.players.forEach(player => player.dispose());
     this.mapView.dispose();
     this.sun.shadow.dispose();

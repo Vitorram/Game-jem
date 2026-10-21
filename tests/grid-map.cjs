@@ -20,7 +20,7 @@ const { GRID_CONFIG } = require('../src/game/config.ts');
 const definition = (rows = ['.....', '..#..', '.....', '.....', '.....']) => ({ rows, legend: { '.': 'ground', '#': 'wall' }, spawns: [{ column: 0, row: 0 }] });
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
-test('lê 16x10, sete tipos, spawns livres e conversão entre grade e mundo', () => {
+test('lê 16x10, oito tipos, spawns livres e conversão entre grade e mundo', () => {
   const map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
   assert.equal(map.columns, 16);
   assert.equal(map.rows, 10);
@@ -63,7 +63,7 @@ test('colisão contínua nos quatro lados, raio e deslizamento sem atravessar pa
 
 test('bloqueia mar, bancada e estação; chão, calçadão e ciclovia são livres', () => {
   for (const kind of Object.keys(TILE_TYPES)) {
-    const map = new GridMap({ ...definition(), legend: { '.': 'ground', '#': kind } }, 1, 0.2);
+    const map = new GridMap({ ...definition(), legend: { '.': 'ground', '#': kind }, itemSources: kind === 'itemBox' ? [{ column: 2, row: 1, item: 'sensor' }] : [] }, 1, 0.2);
     const moved = map.resolveMovement({ x: -2, z: -1 }, { x: 2, z: -1 });
     near(moved.x, TILE_TYPES[kind].solid ? -0.7 : 2);
   }
@@ -88,7 +88,7 @@ test('construtor cria um bloco por tile, topo correto, sombras e dispose único'
       resource.addEventListener('dispose', () => resources.set(resource, resources.get(resource) + 1));
     }
   });
-  assert.equal(resources.size, 8);
+  assert.equal(resources.size, Object.keys(TILE_TYPES).length + 1);
   for (const tile of view.group.children) {
     const kind = tile.name.split('-').at(-1);
     near(tile.position.y + tile.scale.y / 2, TILE_TYPES[kind].height);

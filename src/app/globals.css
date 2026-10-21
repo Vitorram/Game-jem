@@ -191,3 +191,10 @@ h1 span { color: var(--accent); }
 @media (min-width: 901px) and (min-height: 760px) { .ability-panel { max-height: calc(100dvh - 220px); right: 28px; }.touch-controls { right: 350px; } }
 @media (max-width: 600px) { .ability-panel { top: 165px; right: 12px; width: 235px; max-height: calc(100dvh - 440px); padding: 12px; }.ability-panel h2 { font-size: 16px; }.ability-map-wrap { width: 160px; }.ability-help { font-size: 11px; } }
 @media (max-height: 650px) { .ability-panel { top: 165px; bottom: 60px; max-height: none; width: 260px; }.touch-controls { right: 310px; }.ability-map-wrap { width: 140px; } }
+
+/* A ação fica na linha acima do direcional, preservando os quatro botões. */
+.orla-touch-controls .touch-action { grid-column: 1 / -1; grid-row: 1; min-height: 44px; }
+.orla-touch-controls button:first-child { grid-row: 2; }
+.orla-touch-controls button:nth-child(n+2):nth-child(-n+4) { grid-row: 3; }
+.orla-touch-controls { right: 24px; }
+@media (max-width: 400px) { .orla-touch-controls { right: 12px; } }

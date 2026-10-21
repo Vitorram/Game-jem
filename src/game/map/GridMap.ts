@@ -1,3 +1,5 @@
+import { ITEM_TYPES, type ItemId } from '../items/itemData';
+
 export const TILE_TYPES = {
   ground: { color: '#eeb65a', height: 0, solid: false },
   promenade: { color: '#ded8cc', height: 0, solid: false },
@@ -5,6 +7,7 @@ export const TILE_TYPES = {
   sea: { color: '#398fa8', height: 0, solid: true },
   wall: { color: '#657184', height: 1.8, solid: true },
   counter: { color: '#b77b48', height: 0.9, solid: true },
+  itemBox: { color: '#536b80', height: 0.9, solid: true },
   station: { color: '#66b890', height: 1.2, solid: true },
 } as const;
 export type TileKind = keyof typeof TILE_TYPES;
@@ -14,6 +17,7 @@ export type MapDefinition = {
   rows: readonly string[];
   legend: Readonly<Record<string, TileKind>>;
   spawns: readonly TileCell[];
+  itemSources?: readonly (TileCell & { item: ItemId })[];
 };
 
 /** Centro da grade na origem; colunas crescem em +X e linhas em +Z. */
@@ -24,6 +28,7 @@ export class GridMap {
   readonly depth: number;
   readonly tiles: readonly TileKind[];
   readonly spawns: readonly Point[];
+  readonly itemSources: readonly Readonly<TileCell & { item: ItemId }>[];
 
   constructor(definition: MapDefinition, readonly tileSize: number, readonly playerRadius: number) {
     if (!Number.isFinite(tileSize) || tileSize <= 0) throw new Error('Tamanho de tile inválido.');
@@ -38,6 +43,16 @@ export class GridMap {
       if (!Object.hasOwn(TILE_TYPES, kind)) throw new Error(`Tile desconhecido: ${symbol}`);
       return kind;
     })));
+    const seen = new Set<string>();
+    this.itemSources = Object.freeze((definition.itemSources ?? []).map(source => {
+      const key = `${source.column},${source.row}`;
+      if (this.tileAt(source.column, source.row) !== 'itemBox' || !Object.hasOwn(ITEM_TYPES, source.item) || seen.has(key)) {
+        throw new Error('Caixa de itens inválida ou duplicada.');
+      }
+      seen.add(key);
+      return Object.freeze({ ...source });
+    }));
+    if (this.tiles.filter(kind => kind === 'itemBox').length !== seen.size) throw new Error('Caixa de itens sem tipo definido.');
     if (!definition.spawns.length) throw new Error('Mapa precisa de spawn.');
     this.spawns = Object.freeze(definition.spawns.map(cell => {
       if (!Number.isInteger(cell.column) || !Number.isInteger(cell.row) || this.isSolid(cell.column, cell.row)) throw new Error('Spawn inválido ou bloqueado.');

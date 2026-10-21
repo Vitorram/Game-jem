@@ -48,3 +48,10 @@ export const GRID_CONFIG = {
   floorThickness: 0.2,
   roughness: 0.9,
 } as const;
+
+export const ITEM_VIEW_CONFIG = {
+  size: 0.5,
+  carriedHeight: 2.3,
+  surfaceGap: 0.08,
+  roughness: 0.65,
+} as const;
