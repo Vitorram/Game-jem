@@ -13,6 +13,20 @@ npm run dev
 
 Abra http://localhost:3000. Clique em **Entrar no cenário**. Mova com WASD, setas ou os botões de direção. Esc pausa/retoma. Ao sair da janela, o jogo pausa e aguarda sua confirmação para continuar.
 
+## Personagens jogáveis
+
+### Teste livre de habilidades
+
+Na plataforma vazia de `/jogo`, cada personagem tem um painel próprio. **Infraestrutura:** WASD move; escolha Sensor ou Iluminação e pressione **E** (ou o botão do painel). Há cinco sensores de teste; a luz alterna suave, forte e desligada. **Mobilidade:** WASD move; **Enter** abre a edição, A/B/C escolhem o ponto a mover e um clique no mapa reposiciona esse ponto; Enter aplica a rota. Trocar de personagem descarta uma edição ainda não aplicada. **Análise:** use o mouse no mapa abstrato para inspecionar os três problemas simulados e marque riscos com o botão direito ou os botões do painel. Nesta tela, WASD não move a personagem.
+
+As marcações e equipamentos permanecem ao trocar de personagem. **Reiniciar teste das três** limpa a demonstração. Não há missão, cenário urbano ou persistência após recarregar a página. `npm test` verifica também as regras das habilidades.
+
+Em `/jogo`, escolha uma das três personagens nos botões à esquerda. Use **Ver de perto** para acompanhar os detalhes; **Visão ampla** afasta a câmera. WASD, setas e os controles de toque movimentam a personagem selecionada.
+
+Os modelos procedurais em `Player.ts` têm ombros, cotovelos, quadris, joelhos e tornozelos articulados. A caminhada posiciona os pés com cinemática inversa de duas articulações. Respiração, piscadas, mochilas e cabelos continuam animados em repouso; cachos, mechas longas e cabelo azul têm movimentos próprios. Pausar o jogo congela as animações. Os modelos são construídos em Three.js, sem arquivos GLB externos.
+
+Valide movimento, contato dos pés, seleção e liberação de recursos com `npm run test:characters` (Node 22.13+ ou 24).
+
 ## Organização
 
 | Caminho | Responsabilidade |
