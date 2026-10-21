@@ -1,12 +1,26 @@
 import { Scene, Color, Fog, HemisphereLight, DirectionalLight, Mesh, PlaneGeometry, MeshStandardMaterial, GridHelper, Material } from 'three';
-import { Player } from '../entities/Player';
+import { Player, type PlayerId } from '../entities/Player';
 import type { Input } from '../core/Input';
+import { AbilityLab, type AbilitySnapshot } from '../core/AbilityLab';
+import { AbilityVisuals } from './AbilityVisuals';
 
 export class TestScene {
   readonly scene = new Scene();
-  readonly player = new Player();
+  readonly players = [new Player(1), new Player(2), new Player(3)];
+  private selectedId: PlayerId = 1;
+  readonly abilities: AbilityLab;
+  private readonly abilityVisuals = new AbilityVisuals();
 
-  constructor() {
+  get player() { return this.players[this.selectedId - 1]; }
+
+  selectPlayer(id: PlayerId) { this.selectedId = id; this.abilities.selectRole(id); }
+
+  constructor(onAbilities?: (state: AbilitySnapshot) => void) {
+    this.abilities = new AbilityLab(state => {
+      this.abilityVisuals.sync(state);
+      onAbilities?.(state);
+    });
+    this.scene.add(this.abilityVisuals.group);
     this.scene.background = new Color('#111a20');
     this.scene.fog = new Fog('#111a20', 22, 55);
     this.scene.add(new HemisphereLight('#dcecff', '#36443b', 2.5));
@@ -22,10 +36,20 @@ export class TestScene {
     ground.receiveShadow = true;
     const grid = new GridHelper(20, 20, '#65806b', '#344947');
     grid.position.y = 0.01;
-    this.scene.add(ground, grid, this.player.mesh);
+    this.scene.add(ground, grid);
+    this.players.forEach((player, index) => {
+      player.setPosition((index - 1) * 2.5, 0);
+      player.mesh.rotation.y = (index - 1) * -0.15;
+      this.scene.add(player.mesh);
+    });
   }
 
-  update(delta: number, input: Input) { this.player.update(delta, input.getAxis()); }
+  update(delta: number, input: Input) {
+    const axis = this.abilities.movementBlocked ? { x: 0, z: 0 } : input.getAxis();
+    for (const player of this.players) {
+      player.update(delta, player === this.player ? axis : { x: 0, z: 0 });
+    }
+  }
 
   dispose() {
     // Esta cena é dona dos recursos; cache de assets compartilhados deve ter outro dono.

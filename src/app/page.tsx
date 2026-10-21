@@ -1,5 +1,5 @@
-import GameLoader from '@/components/game/GameLoader';
+import MainMenu from '@/components/menu/MainMenu';
 
 export default function Home() {
-  return <main><GameLoader /></main>;
+  return <MainMenu />;
 }

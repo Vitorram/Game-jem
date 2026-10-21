@@ -3,12 +3,15 @@ import {
   WebGLRenderer,
   PerspectiveCamera,
   PCFSoftShadowMap,
+  Vector3,
 } from 'three';
 
 import { gsap } from 'gsap';
 import { Input } from './Input';
 import { TestScene } from '../scenes/TestScene';
 import { GAME_CONFIG } from '../config';
+import type { PlayerId } from '../entities/Player';
+import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 
 export type GameStatus = 'ready' | 'playing' | 'paused';
 
@@ -20,6 +23,10 @@ export class Game {
   private world: TestScene;
   private resizeObserver: ResizeObserver;
   private intro?: gsap.core.Tween;
+  private closeView = false;
+  private readonly cameraTarget = new Vector3(0, 0, 0);
+  private readonly desiredPosition = new Vector3();
+  private readonly desiredTarget = new Vector3();
 
   private status: GameStatus = 'ready';
   private previousTime = 0;
@@ -28,6 +35,7 @@ export class Game {
   constructor(
     private host: HTMLElement,
     private onStatus: (status: GameStatus) => void,
+    private onAbilities?: (state: AbilitySnapshot) => void,
   ) {
     this.renderer = new WebGLRenderer({
       antialias: true,
@@ -47,16 +55,18 @@ export class Game {
 
     this.host.appendChild(this.renderer.domElement);
 
-    // Cria o cenário. Os três personagens devem ser
-    // adicionados e atualizados dentro de TestScene.ts.
-    this.world = new TestScene();
+    // A cena mantém os três personagens e controla o selecionado.
+    this.world = new TestScene(this.onAbilities);
+    this.onAbilities?.(this.world.abilities.snapshot());
 
     // Gerencia as entradas do teclado.
     this.input = new Input();
 
-    // Posiciona a câmera acima do cenário.
-    this.camera.position.set(0, 18, 18);
-    this.camera.lookAt(0, 0, 0);
+    // Vista superior inclinada, com a frente das personagens visível.
+    this.camera.up.set(0, 1, 0);
+    const introHeight = GAME_CONFIG.cameraHeight + 4;
+    this.camera.position.set(0, introHeight, introHeight * GAME_CONFIG.cameraTilt);
+    this.camera.lookAt(this.cameraTarget);
 
     // Ajusta o cenário quando o tamanho da tela muda.
     this.resizeObserver = new ResizeObserver(this.resize);
@@ -105,13 +115,14 @@ export class Game {
       '(prefers-reduced-motion: reduce)',
     ).matches;
 
+    const height = GAME_CONFIG.cameraHeight * Math.max(1, 0.85 / this.camera.aspect);
     this.intro = gsap.to(this.camera.position, {
-      y: 14,
-      z: 12,
+      y: height,
+      z: height * GAME_CONFIG.cameraTilt,
       duration: reducedMotion ? 0 : 1.5,
       ease: 'power2.inOut',
       onUpdate: () => {
-        this.camera.lookAt(0, 0, 0);
+        this.camera.lookAt(this.cameraTarget);
       },
     });
   }
@@ -122,6 +133,44 @@ export class Game {
     this.changeStatus(
       this.status === 'playing' ? 'paused' : 'playing',
     );
+  }
+
+  selectPlayer(id: PlayerId) {
+    if (this.disposed) return;
+    this.input.clear();
+    this.world.selectPlayer(id);
+  }
+
+  setCloseView(enabled: boolean) {
+    this.closeView = enabled;
+    this.intro?.kill();
+  }
+
+  useAbility() {
+    if (this.disposed || this.status !== 'playing') return;
+    const player = this.world.player.mesh;
+    this.input.clear();
+    this.world.abilities.activate({ x: player.position.x + Math.sin(player.rotation.y) * 1.2, z: player.position.z + Math.cos(player.rotation.y) * 1.2 });
+  }
+
+  setAbilityTool(tool: InfraTool) { if (this.status === 'playing') this.world.abilities.setTool(tool); }
+  selectStop(index: number) { if (this.status === 'playing') this.world.abilities.selectStop(index); }
+  clickAbilityMap(point: MapPoint, mark: boolean) { if (this.status === 'playing') this.world.abilities.mapClick(point, mark); }
+  inspectIssue(id: number, mark = false) { if (this.status === 'playing') this.world.abilities.inspect(id, mark); }
+  resetAbilities() { if (this.status === 'playing') this.world.abilities.reset(); }
+
+  private updateCamera(delta: number) {
+    if (this.intro?.isActive()) return;
+    const player = this.world.player.mesh.position;
+    const height = this.closeView ? GAME_CONFIG.cameraCloseHeight : GAME_CONFIG.cameraHeight;
+    // Altura e recuo variam juntos para preservar a inclinação no zoom.
+    const portrait = Math.max(1, 0.85 / this.camera.aspect);
+    this.desiredTarget.set(player.x, 0, player.z);
+    this.desiredPosition.set(player.x, height * portrait, player.z + height * portrait * GAME_CONFIG.cameraTilt);
+    const blend = 1 - Math.exp(-4 * delta);
+    this.camera.position.lerp(this.desiredPosition, blend);
+    this.cameraTarget.lerp(this.desiredTarget, blend);
+    this.camera.lookAt(this.cameraTarget);
   }
 
   private changeStatus(status: GameStatus) {
@@ -151,8 +200,12 @@ export class Game {
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
-    if (event.code === 'Escape' && !event.repeat) {
-      this.togglePause();
+    if (event.repeat) return;
+    if (event.code === 'Escape') { this.togglePause(); return; }
+    if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
+    if (this.status === 'playing' && ((this.world.player.id === 1 && event.code === 'KeyE') || (this.world.player.id === 2 && event.code === 'Enter'))) {
+      event.preventDefault();
+      this.useAbility();
     }
   };
 
@@ -171,8 +224,9 @@ export class Game {
     if (document.hidden) return;
 
     if (this.status === 'playing') {
-      // TestScene deve atualizar os três personagens.
+      // Atualiza o movimento e as animações dos três personagens.
       this.world.update(delta, this.input);
+      this.updateCamera(delta);
     }
 
     this.renderer.render(this.world.scene, this.camera);
