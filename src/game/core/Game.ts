@@ -21,7 +21,7 @@ export class Game {
   readonly input: Input;
 
   private renderer: WebGLRenderer;
-  private camera = new PerspectiveCamera(45, 1, 0.1, 100);
+  private camera = new PerspectiveCamera(GAME_CONFIG.cameraFov, 1, GAME_CONFIG.cameraNear, GAME_CONFIG.cameraFar);
   private readonly scenes = new SceneManager();
 
   private get world(): TestScene | undefined {
@@ -109,13 +109,21 @@ export class Game {
     this.renderer.setSize(width, height);
 
     this.camera.aspect = width / height;
-    this.camera.updateProjectionMatrix();
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.configureCamera(this.camera, this.camera.aspect);
+    else this.camera.updateProjectionMatrix();
   };
 
   start(sceneId: GameSceneId = 'test') {
     if (this.status !== 'ready' || this.disposed) return;
 
-    if (sceneId === 'fase1-orla') this.scenes.setScene(new Fase1OrlaScene());
+    if (sceneId === 'fase1-orla') {
+      const orla = new Fase1OrlaScene(this.input);
+      this.scenes.setScene(orla);
+      orla.configureCamera(this.camera, this.camera.aspect);
+      this.changeStatus('playing');
+      return;
+    }
     this.changeStatus('playing');
 
     const reducedMotion = window.matchMedia(
@@ -143,6 +151,10 @@ export class Game {
     const laboratory = new TestScene(this.onAbilities, this.input);
     this.scenes.setScene(laboratory);
     this.onAbilities?.(laboratory.abilities.snapshot());
+    this.camera.fov = GAME_CONFIG.cameraFov;
+    this.camera.near = GAME_CONFIG.cameraNear;
+    this.camera.far = GAME_CONFIG.cameraFar;
+    this.camera.updateProjectionMatrix();
     this.cameraTarget.set(0, 0, 0);
     const height = GAME_CONFIG.cameraHeight + 4;
     this.camera.position.set(0, height, height * GAME_CONFIG.cameraTilt);
@@ -161,7 +173,8 @@ export class Game {
   selectPlayer(id: PlayerId) {
     if (this.disposed) return;
     this.input.clear();
-    this.world?.selectPlayer(id);
+    const current = this.scenes.current;
+    if (current instanceof TestScene || current instanceof Fase1OrlaScene) current.selectPlayer(id);
   }
 
   setCloseView(enabled: boolean) {
