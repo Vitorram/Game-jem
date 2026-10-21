@@ -6,6 +6,7 @@ import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 export class GridMapView {
   readonly group = new Group();
   private readonly geometry = new BoxGeometry(1, 1, 1);
+  private readonly markingMaterial = new MeshStandardMaterial({ color: '#e9dca9', roughness: 0.85 });
   private readonly materials = new Map<TileKind, MeshStandardMaterial>();
   private disposed = false;
 
@@ -29,6 +30,13 @@ export class GridMapView {
       tile.castShadow = type.height > 0;
       tile.receiveShadow = true;
       this.group.add(tile);
+      if (kind === 'road') {
+        const marking = new Mesh(this.geometry, this.markingMaterial);
+        marking.name = `road-marking-${column}-${row}`;
+        marking.scale.set(map.tileSize * 0.42, 0.025, 0.035);
+        marking.position.set(center.x, 0.018, center.z);
+        this.group.add(marking);
+      }
     }
   }
 
@@ -36,6 +44,7 @@ export class GridMapView {
     if (this.disposed) return;
     this.disposed = true;
     this.geometry.dispose();
+    this.markingMaterial.dispose();
     this.materials.forEach(material => material.dispose());
     this.materials.clear();
     this.group.clear();

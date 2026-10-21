@@ -3,16 +3,19 @@
   Group, MathUtils, Mesh, MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
 } from 'three';
 import { GAME_CONFIG } from '../config';
+import { suburbanGameState } from '../core/GameState';
+import type { GameState } from '../core/GameState';
 
 export type PlayerId = 1 | 2 | 3;
+export type PlayerRole = 'infraestrutura' | 'mobilidade' | 'analista';
 type PlayerAppearance = {
-  name: string; skin: string; hair: string; shirt: string; pants: string;
+  name: string; role: PlayerRole; skin: string; hair: string; shirt: string; pants: string;
   backpack: string; hairstyle: 'curly' | 'long' | 'blue'; hasCap?: boolean;
 };
 export const PLAYER_APPEARANCES: Record<PlayerId, PlayerAppearance> = {
-  1: { name: 'Infraestrutura', skin: '#A96F4E', hair: '#241711', shirt: '#174E3C', pants: '#263A59', backpack: '#182A49', hairstyle: 'curly' },
-  2: { name: 'Mobilidade', skin: '#D5A17D', hair: '#211913', shirt: '#6545B5', pants: '#34304E', backpack: '#252A48', hairstyle: 'long', hasCap: true },
-  3: { name: 'Análise de dados', skin: '#E6B38D', hair: '#244DAD', shirt: '#C85C2F', pants: '#293345', backpack: '#202B43', hairstyle: 'blue' },
+  1: { name: 'Infraestrutura', role: 'infraestrutura', skin: '#A96F4E', hair: '#241711', shirt: '#174E3C', pants: '#263A59', backpack: '#182A49', hairstyle: 'curly' },
+  2: { name: 'Mobilidade', role: 'mobilidade', skin: '#D5A17D', hair: '#211913', shirt: '#6545B5', pants: '#34304E', backpack: '#252A48', hairstyle: 'long', hasCap: true },
+  3: { name: 'Analista', role: 'analista', skin: '#E6B38D', hair: '#244DAD', shirt: '#C85C2F', pants: '#293345', backpack: '#202B43', hairstyle: 'blue' },
 };
 type JointChain = { root: Group; joint: Group; end: Group; side: number };
 type HairLock = { root: Group; tip: Group; rest: number; phase: number; angle: number; velocity: number; length: number };
@@ -20,12 +23,19 @@ const TAU = Math.PI * 2;
 const LEG_LENGTH = 0.4;
 const HIP_HEIGHT = 0.82;
 const STRIDE = 0.58;
+const PLAYER_VISUAL_SCALE = 0.65;
 
 /** Modelo articulado procedural: cada peça pertence à articulação que a move. */
 export class Player {
   readonly mesh = new Group();
+  /** Referência para o modelo visual usado pela cena Three.js. */
+  readonly visualModel = this.mesh;
   readonly id: PlayerId;
   readonly name: string;
+  readonly role: PlayerRole;
+  readonly gameState: GameState = suburbanGameState;
+  /** O estado vem da fonte compartilhada, sem cópia local por personagem. */
+  get active() { return this.gameState.activeCharacter === this.id; }
   private readonly body = new Group();
   private readonly torso = new Group();
   private readonly head = new Group();
@@ -41,11 +51,13 @@ export class Player {
   private elapsed = 0;
   private gait = 0;
   private movement = 0;
+  private sprint = 0;
   private disposed = false;
 
   constructor(id: PlayerId = 1) {
     this.id = id;
     this.name = PLAYER_APPEARANCES[id].name;
+    this.role = PLAYER_APPEARANCES[id].role;
     this.mesh.name = `player-${id}`;
     this.body.name = 'body';
     this.torso.name = 'torso';
@@ -60,6 +72,7 @@ export class Player {
     this.head.position.y = 0.51;
     this.bag.position.set(0, 0.04, -0.24);
     this.build(PLAYER_APPEARANCES[id]);
+    this.mesh.scale.setScalar(PLAYER_VISUAL_SCALE);
     this.animate(0, 0, 0);
   }
 
@@ -218,17 +231,19 @@ export class Player {
 
   update(delta: number, axis: { x: number; z: number }, resolveMovement?: (
     from: { x: number; z: number }, to: { x: number; z: number },
-  ) => { x: number; z: number }) {
+  ) => { x: number; z: number }, sprinting = false) {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, GAME_CONFIG.maxDelta);
     const x = Number.isFinite(axis.x) ? MathUtils.clamp(axis.x, -1, 1) : 0;
     const z = Number.isFinite(axis.z) ? MathUtils.clamp(axis.z, -1, 1) : 0;
     const length = Math.hypot(x, z);
+    const sprint = sprinting && length > 0;
+    this.sprint = MathUtils.damp(this.sprint, sprint ? 1 : 0, 10, dt);
     const previousX = this.mesh.position.x;
     const previousZ = this.mesh.position.z;
     let turn = 0;
     if (length > 0) {
-      const distance = GAME_CONFIG.playerSpeed * dt;
+      const distance = GAME_CONFIG.playerSpeed * (sprint ? 1.45 : 1) * dt;
       const proposed = { x: previousX + x / length * distance, z: previousZ + z / length * distance };
       const position = resolveMovement
         ? resolveMovement({ x: previousX, z: previousZ }, proposed)
@@ -243,7 +258,7 @@ export class Player {
     }
     const traveled = Math.hypot(this.mesh.position.x - previousX, this.mesh.position.z - previousZ);
     this.movement = MathUtils.damp(this.movement, traveled > 0.00001 ? 1 : 0, 12, dt);
-    this.gait = (this.gait + traveled * Math.PI / STRIDE) % TAU;
+    this.gait = (this.gait + traveled * Math.PI / STRIDE * (1 + this.sprint * 0.12)) % TAU;
     this.elapsed += dt;
     this.animate(dt, turn / dt, traveled);
   }
@@ -251,12 +266,14 @@ export class Player {
   private animate(dt: number, turning: number, traveled: number) {
     const time = this.elapsed + this.id * 1.7;
     const move = this.movement;
+    const sprint = this.sprint;
     const breath = Math.sin(time * 2.2);
-    this.body.position.y = HIP_HEIGHT + breath * 0.004 + Math.cos(this.gait * 2) * 0.014 * move;
+    this.body.position.y = HIP_HEIGHT + breath * 0.004 + Math.cos(this.gait * 2) * (0.014 + sprint * 0.009) * move;
     this.torso.scale.y = 1 + breath * 0.009;
-    this.torso.rotation.x = move * 0.045;
-    this.torso.rotation.z = Math.sin(this.gait) * 0.028 * move + Math.sin(time * 1.3) * 0.008 * (1 - move);
-    this.torso.rotation.y = Math.sin(this.gait) * 0.035 * move;
+    this.torso.rotation.x = move * (0.045 + sprint * 0.075);
+    this.torso.rotation.z = Math.sin(this.gait) * (0.028 + sprint * 0.018) * move + Math.sin(time * 1.3) * 0.008 * (1 - move);
+    this.torso.rotation.y = Math.sin(this.gait) * (0.035 + sprint * 0.025) * move;
+    this.body.position.x = Math.sin(this.gait * 2) * 0.012 * sprint * move;
     this.head.rotation.y = Math.sin(time * 0.65) * 0.08 * (1 - move);
     this.head.rotation.x = Math.sin(time * 1.4) * 0.018 - move * 0.025;
     this.head.rotation.z = -this.torso.rotation.z * 0.55;
@@ -266,7 +283,7 @@ export class Player {
     for (const eye of this.eyes) eye.scale.y = blink;
     for (const arm of this.arms) {
       const swing = Math.sin(this.gait + (arm.side === 1 ? Math.PI : 0));
-      arm.root.rotation.x = swing * 0.5 * move + Math.sin(time * 1.6) * 0.025 * (1 - move);
+      arm.root.rotation.x = swing * (0.5 + sprint * 0.18) * move + Math.sin(time * 1.6) * 0.025 * (1 - move);
       arm.root.rotation.z = arm.side * (0.09 + 0.025 * Math.sin(time * 2));
       arm.joint.rotation.x = -0.12 - Math.max(0, -swing) * 0.3 * move;
       arm.end.rotation.z = Math.sin(time * 2 + arm.side) * 0.035;
@@ -275,7 +292,7 @@ export class Player {
       const phase = ((this.gait + (leg.side === 1 ? Math.PI : 0)) % TAU) / TAU;
       const swing = Math.max(0, (phase - 0.5) * 2);
       const footZ = (phase < 0.5 ? STRIDE * (0.5 - phase * 2) : -STRIDE * 0.5 + STRIDE * (0.5 - Math.cos(swing * Math.PI) * 0.5)) * move;
-      const lift = Math.sin(swing * Math.PI) * 0.13 * move;
+      const lift = Math.sin(swing * Math.PI) * (0.13 + sprint * 0.045) * move;
       const footY = 0.105 + lift - this.body.position.y;
       const distance = Math.min(Math.hypot(footY, footZ), LEG_LENGTH * 2 - 0.001);
       const knee = Math.acos(MathUtils.clamp((distance * distance - 2 * LEG_LENGTH ** 2) / (2 * LEG_LENGTH ** 2), -1, 1));
@@ -306,6 +323,8 @@ export class Player {
   }
 
   setPosition(x: number, z: number) { this.mesh.position.set(x, 0, z); }
+
+  get position() { return this.mesh.position; }
 
   dispose() {
     if (this.disposed) return;

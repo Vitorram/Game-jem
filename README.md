@@ -29,7 +29,7 @@ Valide movimento, contato dos pés, seleção e liberação de recursos com `npm
 
 ## Itens na Fase 1 · Orla
 
-Abra **Fase 1 · Orla** em `/jogo`. WASD/setas ou o direcional de toque movem a personagem. **E** ou **Ação · E** interage com a célula adjacente na última direção de movimento (eixo dominante nas diagonais). **Tab** troca a personagem quando o foco está no jogo; os botões de seleção continuam disponíveis. Tab em controles focados mantém a navegação normal da interface.
+Abra **Fase 1 · Orla** em `/jogo`. WASD/setas ou o direcional de toque movem a personagem. **E** ou **Ação · E** interage com a célula adjacente na última direção de movimento (eixo dominante nas diagonais). **T** troca a personagem; os botões de seleção continuam disponíveis.
 
 Há três caixas infinitas na linha de bancadas: Sensor (azul), Placa (amarela) e Barreira (laranja). Cada personagem carrega uma caixa acima da cabeça. Mãos vazias pegam da caixa ou de uma bancada ocupada; mãos ocupadas depositam em uma bancada vazia. Ações incompatíveis não alteram nada. Trocar de personagem preserva os três inventários; sair da fase descarta a sessão. Não há pedidos nem pontuação.
 
@@ -40,7 +40,7 @@ O catálogo fica em `src/game/items/itemData.ts`; as regras e direções em `Ite
 Há três pontos na faixa inferior do mapa: **1 · iluminação**, **2 · sensor**, **3 · rota/calçada interditada**. Um, dois ou três traços identificam os pontos no chão. A cor muda de azul (não inspecionado) para amarelo (inspecionado), vermelho (tarefa liberada), roxo (desvio em preparação) e verde (resolvido). O painel mostra o estado também em texto e pode ser recolhido.
 
 1. Selecione **Análise**, caminhe até a célula vizinha e olhe para o ponto. **E** ou **Ação · E** inspeciona; outra ação marca o risco e libera a tarefa.
-2. Troque com **Tab** ou os três botões de personagem. Posição, direção, itens e intervenções concluídas permanecem com suas donas. Na Orla, Análise também pode caminhar.
+2. Troque com **T** ou os três botões de personagem. Posição, direção, itens e intervenções concluídas permanecem com suas donas.
 3. **Infraestrutura** usa E no ponto marcado para instalar o sensor ou acender a iluminação. **Mobilidade** usa E no ponto de rota para preparar um desvio de teste predefinido, e E novamente para confirmar. A rota original permanece até a confirmação; trocar para outra personagem cancela só o rascunho.
 
 O papel errado ou uma tarefa ainda não liberada não produz intervenção. Ações repetidas em um risco resolvido não duplicam equipamento nem desligam a luz. Nesta etapa, habilidades não consomem os itens carregáveis e não há pedidos, pontuação ou multiplayer em rede. Sair da fase reinicia o teste.

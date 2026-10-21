@@ -4,6 +4,7 @@ import {
 import type { PerspectiveCamera } from 'three';
 import type { Scene as GameScene } from '../core/Scene';
 import type { Input } from '../core/Input';
+import { suburbanGameState, type ResponseTeam } from '../core/GameState';
 import { Player, type PlayerId } from '../entities/Player';
 import { GRID_CONFIG, ORLA_CONFIG, ORLA_CAMERA } from '../config';
 
@@ -16,16 +17,24 @@ import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
 import { RiskMarkers } from '../risks/RiskMarkers';
 import { AbilityVisuals } from './AbilityVisuals';
 import { ORLA_MAP } from '../map/orlaMap';
+import { TrafficSystem } from '../traffic/TrafficSystem';
+import type { MobilityRoadAction } from '../traffic/TrafficSystem';
+import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
+import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
+import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
   readonly scene = new Scene();
   readonly players = [new Player(1), new Player(2), new Player(3)];
-  private selectedId: PlayerId = 1;
-  private readonly input: Pick<Input, 'getAxis'>;
+  private readonly input: Pick<Input, 'getAxis' | 'isSprinting'>;
   private readonly idle = { x: 0, z: 0 };
   readonly map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
   private readonly mapView = new GridMapView(this.map);
+  readonly traffic = new TrafficSystem(this.map);
+  private readonly activeMobility = new ActiveMobilitySystem(this.map, this.traffic);
+  readonly brokenPoleMarker: BrokenPoleMarker;
+  private readonly objectiveMarker = new TeamObjectiveMarker();
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   readonly risks = new RiskWorkflow(
@@ -36,15 +45,21 @@ export class Fase1OrlaScene implements GameScene {
   private readonly riskMarkers = new RiskMarkers(this.risks.snapshot());
   private readonly abilityVisuals = new AbilityVisuals();
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
+  private readonly resolveInfrastructureMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
+    this.traffic.resolveWorkerMovement(from, this.map.resolveMovement(from, to), GRID_CONFIG.playerRadius);
   private readonly sun: DirectionalLight;
   private disposed = false;
   private readonly cameraTarget = new Vector3();
   private cameraHeight: number = ORLA_CAMERA.closeHeight;
+  private mobilityPanelOpen = false;
+  private lastObjectiveDistance: number | null = null;
 
-  get player() { return this.players[this.selectedId - 1]; }
+  get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
-  constructor(input: Pick<Input, 'getAxis'> = { getAxis: () => ({ x: 0, z: 0 }) }, private readonly onRisks?: (state: RiskSnapshot) => void) {
+  private currentInteractionPrompt: string | null = null;
+  constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: () => void, private readonly onMobilityPanelOpen?: (roadId: string) => void, private readonly onObjectiveDistance?: (distance: number | null) => void) {
     this.input = input;
+    suburbanGameState.setActiveCharacter(3);
     const { hemisphere, sun } = ORLA_CONFIG;
     this.scene.background = new Color(ORLA_CONFIG.background);
     this.scene.add(new HemisphereLight(hemisphere.skyColor, hemisphere.groundColor, hemisphere.intensity));
@@ -61,7 +76,9 @@ export class Fase1OrlaScene implements GameScene {
     this.sun.shadow.normalBias = sun.shadowNormalBias;
     this.sun.shadow.camera.updateProjectionMatrix();
     this.scene.add(this.sun);
-    this.scene.add(this.mapView.group, this.riskMarkers.group, this.abilityVisuals.group);
+    const brokenPole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')!;
+    this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.riskMarkers.group, this.abilityVisuals.group);
     this.players.forEach((player, index) => {
       const spawn = this.map.spawns[index];
       player.setPosition(spawn.x, spawn.z);
@@ -72,19 +89,58 @@ export class Fase1OrlaScene implements GameScene {
 
   selectPlayer(id: PlayerId): void {
     if (this.disposed) return;
-    this.selectedId = id;
+    suburbanGameState.setActiveCharacter(id);
     if (this.risks.selectRole(id)) this.syncRisks();
   }
 
   interact(): void {
     if (this.disposed) return;
-    this.items.face(this.selectedId, this.input.getAxis());
-    const cell = this.items.tileInFront(this.selectedId, this.player.mesh.position);
-    if (cell && this.risks.interact(this.selectedId, cell)) {
+    if (this.player.role === 'mobilidade') {
+      const roadId = this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z);
+      if (roadId) this.onMobilityPanelOpen?.(roadId);
+      return;
+    }
+    const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
+    if (this.player.role === 'infraestrutura' && pole && pole.status !== 'RESOLVED'
+      && pole.dispatchedTeams.includes('infraestrutura')) {
+      const dx = this.player.mesh.position.x - pole.position.x;
+      const dz = this.player.mesh.position.z - pole.position.z;
+      if (dx * dx + dz * dz <= 2.25) {
+        const workZone = this.traffic.getWorkZoneReadiness(pole.position);
+        if (workZone.prepared) {
+          if (pole.status === 'ACTIVE') suburbanGameState.setProblemStatus(pole.id, 'MAINTENANCE');
+          this.onRepairPuzzleStart?.();
+        }
+        this.updateProblemPresentation();
+        return;
+      }
+    }
+    this.items.face(suburbanGameState.activeCharacter, this.input.getAxis());
+    const cell = this.items.tileInFront(suburbanGameState.activeCharacter, this.player.mesh.position);
+    if (cell && this.risks.interact(suburbanGameState.activeCharacter, cell)) {
       this.syncRisks();
       return;
     }
-    if (this.items.interact(this.selectedId, this.player.mesh.position)) this.itemVisuals.sync(this.items);
+    if (this.items.interact(suburbanGameState.activeCharacter, this.player.mesh.position)) this.itemVisuals.sync(this.items);
+  }
+
+  dispatchTeam(team: ResponseTeam): boolean {
+    if (this.disposed || this.player.role !== 'analista') return false;
+    const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
+    if (!pole || pole.status === 'RESOLVED') return false;
+    suburbanGameState.dispatchTeam(pole.id, team);
+    this.updateProblemPresentation();
+    return true;
+  }
+
+  toggleTraffic(): boolean { return this.traffic.toggleRunning(); }
+
+  applyMobilityAction(roadId: string, action: MobilityRoadAction, coneZoneId?: string): void { this.traffic.applyMobilityAction(roadId, action, coneZoneId); }
+  setMobilityPanelOpen(open: boolean): void { this.mobilityPanelOpen = open; }
+
+  completePoleRepair(): void {
+    suburbanGameState.setProblemStatus('broken-light-pole-1', 'RESOLVED');
+    this.updateProblemPresentation();
   }
 
   private syncRisks(): void {
@@ -128,13 +184,16 @@ export class Fase1OrlaScene implements GameScene {
     const halfX = this.map.width / 2 - config.groundPadding;
     const halfZ = this.map.depth / 2 - config.groundPadding;
     const maxHeight = Math.min(2 * halfX / (maxX - minX), 2 * halfZ / (maxZ - minZ));
-    const height = Math.min(maxHeight, (closeView ? config.closeHeight : config.wideHeight) * Math.max(1, config.portraitAspect / camera.aspect));
+    const requestedHeight = (closeView ? config.closeHeight : config.wideHeight) * Math.max(1, config.portraitAspect / camera.aspect);
+    const height = closeView ? Math.min(maxHeight, requestedHeight) : requestedHeight;
     const blend = snap ? 1 : 1 - Math.exp(-config.followSmoothing * Math.max(0, dt));
-    this.cameraHeight = Math.min(maxHeight, MathUtils.lerp(this.cameraHeight, height, blend));
+    this.cameraHeight = MathUtils.lerp(this.cameraHeight, height, blend);
     this.cameraTarget.lerp(this.player.mesh.position, blend);
     const h = this.cameraHeight;
-    this.cameraTarget.x = MathUtils.clamp(this.cameraTarget.x, -halfX - minX * h, halfX - maxX * h);
-    this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, halfZ - maxZ * h);
+    if (closeView) {
+      this.cameraTarget.x = MathUtils.clamp(this.cameraTarget.x, -halfX - minX * h, halfX - maxX * h);
+      this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, halfZ - maxZ * h);
+    }
     this.cameraTarget.y = 0;
     camera.position.set(this.cameraTarget.x, h, this.cameraTarget.z + h * config.tilt);
     camera.lookAt(this.cameraTarget);
@@ -143,10 +202,54 @@ export class Fase1OrlaScene implements GameScene {
 
   update(dt: number): void {
     if (this.disposed) return;
-    const axis = this.input.getAxis();
-    if (dt > 0) this.items.face(this.selectedId, axis);
+    const axis = this.player.role === 'analista' || (this.player.role === 'mobilidade' && this.mobilityPanelOpen)
+      ? this.idle : this.input.getAxis();
+    if (dt > 0) this.items.face(suburbanGameState.activeCharacter, axis);
+    this.traffic.update(dt);
+    this.activeMobility.update(dt);
+    this.updateProblemPresentation();
     for (const player of this.players) {
-      player.update(dt, player === this.player ? axis : this.idle, this.resolveMovement);
+      const movementResolver = player.active && player.role === 'infraestrutura' ? this.resolveInfrastructureMovement : this.resolveMovement;
+      player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
+    }
+  }
+
+  private updateProblemPresentation(): void {
+    const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
+    if (pole) this.brokenPoleMarker.setState(pole.status, this.player.role === 'analista');
+    const team: ResponseTeam | null = this.player.role === 'infraestrutura' ? 'infraestrutura'
+      : this.player.role === 'mobilidade' ? 'mobilidade' : null;
+    const objectiveVisible = !!pole && !!team && pole.status !== 'RESOLVED' && pole.dispatchedTeams.includes(team);
+    this.objectiveMarker.setVisible(objectiveVisible);
+    if (objectiveVisible && pole) {
+      const target = team === 'mobilidade' ? this.traffic.getNearestPrincipalLanePosition(pole.position) : pole.position;
+      const distance = Math.round(this.objectiveMarker.update(this.player.mesh.position, target));
+      if (distance !== this.lastObjectiveDistance) {
+        this.lastObjectiveDistance = distance;
+        this.onObjectiveDistance?.(distance);
+      }
+    } else if (this.lastObjectiveDistance !== null) {
+      this.lastObjectiveDistance = null;
+      this.onObjectiveDistance?.(null);
+    }
+    const laneId = this.player.role === 'mobilidade'
+      ? this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z) : null;
+    const road = laneId && suburbanGameState.snapshot().roads.find(item => item.id === laneId);
+    const dx = pole ? this.player.mesh.position.x - pole.position.x : Infinity;
+    const dz = pole ? this.player.mesh.position.z - pole.position.z : Infinity;
+    const nearPole = this.player.role === 'infraestrutura' && dx * dx + dz * dz <= 2.25;
+    const workZone = pole ? this.traffic.getWorkZoneReadiness(pole.position) : null;
+    this.traffic.setMobilityView(this.player.role === 'mobilidade');
+    const prompt = road ? road.conesActive ? 'REMOVER CONES' : 'COLOCAR CONES'
+      : nearPole && pole?.status !== 'RESOLVED' && !pole?.dispatchedTeams.includes('infraestrutura') ? 'AGUARDE O ACIONAMENTO DA ANALISTA'
+        : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'ÁREA PREPARADA · REPARAR POSTE'
+        : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE O TRECHO FICAR LIVRE'
+          : workZone?.reason === 'WAITING_FOR_DIVERSION' ? 'AGUARDE O DESVIO DOS VEÍCULOS'
+          : workZone?.reason === 'ACCESS_TOO_NARROW' ? 'ACESSO FÍSICO INSUFICIENTE'
+            : 'ÁREA INSEGURA · PREPARE COM MOBILIDADE' : null;
+    if (prompt !== this.currentInteractionPrompt) {
+      this.currentInteractionPrompt = prompt;
+      this.onInteractionPrompt?.(prompt);
     }
   }
 
@@ -156,6 +259,10 @@ export class Fase1OrlaScene implements GameScene {
     this.riskMarkers.dispose();
     this.abilityVisuals.dispose();
     this.itemVisuals.dispose();
+    this.activeMobility.dispose();
+    this.traffic.dispose();
+    this.brokenPoleMarker.dispose();
+    this.objectiveMarker.dispose();
     this.players.forEach(player => player.dispose());
     this.mapView.dispose();
     this.sun.shadow.dispose();

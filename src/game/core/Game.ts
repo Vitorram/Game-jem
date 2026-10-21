@@ -11,9 +11,12 @@ import { TestScene } from '../scenes/TestScene';
 import { Fase1OrlaScene } from '../scenes/Fase1OrlaScene';
 import { SceneManager } from './SceneManager';
 import { GAME_CONFIG } from '../config';
+import { suburbanGameState } from './GameState';
 import type { RiskSnapshot } from '../risks/RiskWorkflow';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
+import type { MobilityRoadAction } from '../traffic/TrafficSystem';
+import type { ResponseTeam } from './GameState';
 
 export type GameSceneId = 'test' | 'fase1-orla';
 export type GameStatus = 'ready' | 'playing' | 'paused';
@@ -37,6 +40,8 @@ export class Game {
   private readonly desiredTarget = new Vector3();
 
   private status: GameStatus = 'ready';
+  private repairPuzzleOpen = false;
+  private mobilityPanelOpen = false;
   private previousTime = 0;
   private disposed = false;
 
@@ -46,6 +51,10 @@ export class Game {
     private onAbilities?: (state: AbilitySnapshot) => void,
     private onPlayerSelected?: (id: PlayerId) => void,
     private onRisks?: (state: RiskSnapshot) => void,
+    private onInteractionPrompt?: (prompt: string | null) => void,
+    private onRepairPuzzleChange?: (open: boolean) => void,
+    private onMobilityPanelChange?: (roadId: string | null) => void,
+    private onObjectiveDistance?: (distance: number | null) => void,
   ) {
     this.renderer = new WebGLRenderer({
       antialias: true,
@@ -121,9 +130,10 @@ export class Game {
     if (this.status !== 'ready' || this.disposed) return;
 
     if (sceneId === 'fase1-orla') {
-      const orla = new Fase1OrlaScene(this.input, this.onRisks);
+      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), roadId => this.openMobilityPanel(roadId), this.onObjectiveDistance);
       this.scenes.setScene(orla);
-      this.closeView = true;
+      this.closeView = false;
+      this.onPlayerSelected?.(orla.player.id);
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
       this.changeStatus('playing');
       return;
@@ -147,17 +157,19 @@ export class Game {
   }
 
   returnToMenu() {
-    if (this.disposed || this.status === 'ready') return;
+    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
     this.intro?.kill();
     this.intro = undefined;
     this.closeView = false;
     this.input.clear();
+    suburbanGameState.setActiveCharacter(1);
     const laboratory = new TestScene(this.onAbilities, this.input);
     this.scenes.setScene(laboratory);
     this.onAbilities?.(laboratory.abilities.snapshot());
     this.camera.fov = GAME_CONFIG.cameraFov;
     this.camera.near = GAME_CONFIG.cameraNear;
     this.camera.far = GAME_CONFIG.cameraFar;
+    this.camera.up.set(0, 1, 0);
     this.camera.updateProjectionMatrix();
     this.cameraTarget.set(0, 0, 0);
     const height = GAME_CONFIG.cameraHeight + 4;
@@ -167,7 +179,7 @@ export class Game {
   }
 
   togglePause() {
-    if (this.disposed || this.status === 'ready') return;
+    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
 
     this.changeStatus(
       this.status === 'playing' ? 'paused' : 'playing',
@@ -175,7 +187,7 @@ export class Game {
   }
 
   selectPlayer(id: PlayerId) {
-    if (this.disposed) return;
+    if (this.disposed || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
@@ -185,13 +197,20 @@ export class Game {
   }
 
   interact() {
-    if (this.disposed || this.status !== 'playing') return;
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    if (this.mobilityPanelOpen) { this.closeMobilityPanel(); return; }
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.interact();
   }
 
+  toggleTraffic(): boolean | undefined {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    const current = this.scenes.current;
+    return current instanceof Fase1OrlaScene ? current.toggleTraffic() : undefined;
+  }
+
   setCloseView(enabled: boolean) {
-    if (this.disposed) return;
+    if (this.disposed || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
     this.closeView = enabled;
     this.intro?.kill();
     this.intro = undefined;
@@ -252,12 +271,24 @@ export class Game {
   };
 
   private onBlur = () => {
-    if (this.status === 'playing') {
+    if (this.status === 'playing' && !this.repairPuzzleOpen && !this.mobilityPanelOpen) {
       this.changeStatus('paused');
     }
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
+    if (this.repairPuzzleOpen) {
+      if (event.code === 'Space' || event.code === 'Escape') event.preventDefault();
+      return;
+    }
+    if (this.mobilityPanelOpen) {
+      if (event.repeat) return;
+      if (event.code === 'KeyE' || event.code === 'Escape') {
+        event.preventDefault();
+        this.closeMobilityPanel();
+      }
+      return;
+    }
     if (event.repeat) return;
     if (event.code === 'Escape') { this.togglePause(); return; }
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
@@ -266,18 +297,28 @@ export class Game {
       if (event.code === 'KeyE') {
         event.preventDefault();
         this.interact();
-      } else if (event.code === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      } else if (event.code === 'KeyT' && !event.ctrlKey && !event.altKey && !event.metaKey) {
         event.preventDefault();
-        this.selectPlayer((current.player.id % current.players.length + 1) as PlayerId);
+        this.selectPlayer(this.nextPlayerId(current.player.id));
       }
       return;
     }
     const world = this.world;
+    if (this.status === 'playing' && world && event.code === 'KeyT' && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      event.preventDefault();
+      this.selectPlayer(this.nextPlayerId(world.player.id));
+      return;
+    }
     if (this.status === 'playing' && world && ((world.player.id === 1 && event.code === 'KeyE') || (world.player.id === 2 && event.code === 'Enter'))) {
       event.preventDefault();
       this.useAbility();
     }
   };
+
+  private nextPlayerId(current: PlayerId): PlayerId {
+    const cycle: readonly PlayerId[] = [3, 1, 2]; // Analista → Infraestrutura → Mobilidade
+    return cycle[(cycle.indexOf(current) + 1) % cycle.length];
+  }
 
   private tick = (time: number) => {
     if (this.disposed) return;
@@ -293,7 +334,7 @@ export class Game {
 
     if (document.hidden) return;
 
-    if (this.status === 'playing') {
+    if (this.status === 'playing' && !this.repairPuzzleOpen) {
       this.scenes.update(delta);
       this.updateCamera(delta);
     }
@@ -301,6 +342,52 @@ export class Game {
     const current = this.scenes.current;
     if (current) this.renderer.render(current.scene, this.camera);
   };
+
+  private openRepairPuzzle(): void {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    this.repairPuzzleOpen = true;
+    this.input.clear();
+    this.onRepairPuzzleChange?.(true);
+  }
+
+  completeRepairPuzzle(): void {
+    if (this.disposed || !this.repairPuzzleOpen) return;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.completePoleRepair();
+    this.repairPuzzleOpen = false;
+    this.input.clear();
+    this.onRepairPuzzleChange?.(false);
+  }
+
+  applyMobilityAction(roadId: string, action: MobilityRoadAction, coneZoneId?: string): void {
+    if (this.disposed || this.status !== 'playing' || !this.mobilityPanelOpen) return;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.applyMobilityAction(roadId, action, coneZoneId);
+  }
+
+  dispatchTeam(team: ResponseTeam): boolean {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen || this.mobilityPanelOpen) return false;
+    const current = this.scenes.current;
+    return current instanceof Fase1OrlaScene ? current.dispatchTeam(team) : false;
+  }
+
+  private openMobilityPanel(roadId: string): void {
+    if (this.disposed || this.status !== 'playing' || this.mobilityPanelOpen || this.repairPuzzleOpen) return;
+    this.mobilityPanelOpen = true;
+    this.input.clear();
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.setMobilityPanelOpen(true);
+    this.onMobilityPanelChange?.(roadId);
+  }
+
+  private closeMobilityPanel(): void {
+    if (!this.mobilityPanelOpen) return;
+    this.mobilityPanelOpen = false;
+    this.input.clear();
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.setMobilityPanelOpen(false);
+    this.onMobilityPanelChange?.(null);
+  }
 
   dispose() {
     if (this.disposed) return;

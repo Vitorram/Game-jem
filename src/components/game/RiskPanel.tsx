@@ -20,7 +20,7 @@ export default function RiskPanel({ state, player }: Props) {
           <span>{RISK_STATUS_LABELS[risk.status]}{risk.status === 'released' ? ` · ${risk.kind === 'route' ? 'Mobilidade' : 'Infraestrutura'}` : ''}</span>
         </li>)}
       </ol>
-      <small>Os traços no chão identificam os pontos 1, 2 e 3. Tab ou os botões trocam a personagem.</small>
+      <small>Os traços no chão identificam os pontos 1, 2 e 3. T ou os botões trocam a personagem.</small>
     </details>
     <p className="risk-message" role="status" aria-live="polite">{state.message}</p>
   </aside>;
