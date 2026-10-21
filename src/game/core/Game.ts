@@ -110,7 +110,7 @@ export class Game {
 
     this.camera.aspect = width / height;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.configureCamera(this.camera, this.camera.aspect);
+    if (current instanceof Fase1OrlaScene) current.configureCamera(this.camera, this.camera.aspect, this.closeView);
     else this.camera.updateProjectionMatrix();
   };
 
@@ -120,7 +120,8 @@ export class Game {
     if (sceneId === 'fase1-orla') {
       const orla = new Fase1OrlaScene(this.input);
       this.scenes.setScene(orla);
-      orla.configureCamera(this.camera, this.camera.aspect);
+      this.closeView = true;
+      orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
       this.changeStatus('playing');
       return;
     }
@@ -178,7 +179,7 @@ export class Game {
   }
 
   setCloseView(enabled: boolean) {
-    if (this.disposed || !this.world) return;
+    if (this.disposed) return;
     this.closeView = enabled;
     this.intro?.kill();
     this.intro = undefined;
@@ -199,6 +200,11 @@ export class Game {
   resetAbilities() { if (!this.disposed && this.status === 'playing') this.world?.abilities.reset(); }
 
   private updateCamera(delta: number) {
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) {
+      current.updateCamera(this.camera, delta, this.closeView);
+      return;
+    }
     if (this.intro?.isActive()) return;
     const player = this.world?.player.mesh.position;
     if (!player) return;
