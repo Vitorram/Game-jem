@@ -34,7 +34,7 @@ export class Input {
     return { x: x / length, z: z / length };
   }
 
-  isSprinting() { return this.keys.has('ShiftLeft') || this.keys.has('ShiftRight'); }
+  isSprinting() { return this.held('ShiftLeft', 'ShiftRight'); }
 
   dispose() {
     window.removeEventListener('keydown', this.onKeyDown);
@@ -43,3 +43,4 @@ export class Input {
     this.clear();
   }
 }
+

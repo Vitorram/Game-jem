@@ -239,22 +239,22 @@ test('rejeita tempos, catálogo e pontuações inválidos; delta fracionário é
   assert.equal(game.snapshot().elapsedMs, 1);
 });
 
-test('catálogo da Orla referencia riscos existentes; fluxo cooperativo fornece conclusões reais', () => {
-  const known = new Set(ORLA_RISKS.map(risk => risk.id));
-  for (const order of ORLA_SESSION_CONFIG.orders) for (const id of order.riskIds) assert.ok(known.has(id));
+test('missão da Orla tem três marcos e encerra apenas após conclusão, sem duplicar pontos', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
   game.start();
   const order = head(game);
-  const flow = new RiskWorkflow(ORLA_RISKS.map(risk => ({ ...risk, point: { x: risk.column * 2, z: risk.row * 2 } })), {
-    stops: [{ x: 0, z: 0 }, { x: 2, z: 0 }], movedIndex: 1, destination: { x: 2, z: 2 },
-  });
-  for (const id of order.riskIds) {
-    const risk = ORLA_RISKS.find(risk => risk.id === id);
-    flow.interact(3, risk); flow.interact(3, risk); flow.interact(1, risk);
-    assert.equal(flow.snapshot().risks.find(risk => risk.id === id).status, 'resolved');
-    game.resolveRisk(order.id, id);
-  }
+  assert.deepEqual(order.riskIds, [1, 2, 3]);
+  assert.deepEqual(game.finish(), []);
+  game.advance(60_000);
+  game.resolveRisk(order.id, 1);
+  game.resolveRisk(order.id, 2);
+  assert.deepEqual(game.finish(), []);
+  game.resolveRisk(order.id, 3);
+  assert.equal(game.snapshot().score, 500);
+  game.finish();
+  assert.equal(game.snapshot().status, 'finished');
   assert.equal(game.snapshot().completedOrders, 1);
-  assert.equal(game.snapshot().score, 150);
-  assert.equal(Object.keys(require.cache).some(path => path.includes('/node_modules/three/')), false);
+  assert.deepEqual(game.resolveRisk(order.id, 3), []);
+  assert.deepEqual(game.finish(), []);
+  assert.equal(game.snapshot().score, 500);
 });

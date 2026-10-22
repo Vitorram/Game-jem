@@ -22,11 +22,12 @@ import type { MobilityRoadAction } from '../traffic/TrafficSystem';
 import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
 import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
+import { PlayerFeedback } from './PlayerFeedback';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
   readonly scene = new Scene();
-  readonly players = [new Player(1), new Player(2), new Player(3)];
+  readonly players = [new Player(1, true), new Player(2, true), new Player(3, true)];
   private readonly input: Pick<Input, 'getAxis' | 'isSprinting'>;
   private readonly idle = { x: 0, z: 0 };
   readonly map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
@@ -35,6 +36,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly activeMobility = new ActiveMobilitySystem(this.map, this.traffic);
   readonly brokenPoleMarker: BrokenPoleMarker;
   private readonly objectiveMarker = new TeamObjectiveMarker();
+  private readonly playerFeedback = new PlayerFeedback();
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   readonly risks = new RiskWorkflow(
@@ -52,11 +54,12 @@ export class Fase1OrlaScene implements GameScene {
   private readonly cameraTarget = new Vector3();
   private cameraHeight: number = ORLA_CAMERA.closeHeight;
   private lastObjectiveDistance: number | null = null;
+  private missionStep = 0;
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
   private currentInteractionPrompt: string | null = null;
-  constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: () => void, private readonly onObjectiveDistance?: (distance: number | null) => void) {
+  constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: () => void, private readonly onObjectiveDistance?: (distance: number | null) => void, private readonly onMissionStep?: (step: number) => void) {
     this.input = input;
     suburbanGameState.setActiveCharacter(3);
     const { hemisphere, sun } = ORLA_CONFIG;
@@ -77,7 +80,7 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.add(this.sun);
     const brokenPole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')!;
     this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
-    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.riskMarkers.group, this.abilityVisuals.group);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.playerFeedback.group, this.riskMarkers.group, this.abilityVisuals.group);
     this.players.forEach((player, index) => {
       // A Analista começa no acesso da estação que funciona como sua cabine de observação.
       const spawn = index === 2 ? this.map.cellCenter(10, 5) : this.map.spawns[index];
@@ -89,6 +92,7 @@ export class Fase1OrlaScene implements GameScene {
 
   selectPlayer(id: PlayerId): void {
     if (this.disposed) return;
+    this.stopMovement();
     suburbanGameState.setActiveCharacter(id);
     if (this.risks.selectRole(id)) this.syncRisks();
   }
@@ -99,6 +103,7 @@ export class Fase1OrlaScene implements GameScene {
       const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
       if (pole && pole.status !== 'RESOLVED') {
         if (suburbanGameState.snapshot().selectedProblemId !== pole.id) {
+          this.playerFeedback.action();
           suburbanGameState.selectProblem(pole.id);
           this.updateProblemPresentation();
           return;
@@ -117,7 +122,8 @@ export class Fase1OrlaScene implements GameScene {
         const road = suburbanGameState.snapshot().roads.find(candidate => candidate.id === roadId);
         if (road?.type !== 'PRINCIPAL') return;
         const position = this.player.mesh.position;
-        if (!this.traffic.removeNearestCone(position.x, position.z)) this.traffic.placeConeAt(roadId, position.x);
+        const changed = this.traffic.removeNearestCone(position.x, position.z) || this.traffic.placeConeAt(roadId, position.x);
+        if (changed) this.playerFeedback.action();
       }
       return;
     }
@@ -149,7 +155,9 @@ export class Fase1OrlaScene implements GameScene {
     if (this.disposed || this.player.role !== 'analista') return false;
     const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
     if (!pole || pole.status === 'RESOLVED' || suburbanGameState.snapshot().selectedProblemId !== pole.id) return false;
+    if (pole.dispatchedTeams.includes(team)) return false;
     suburbanGameState.dispatchTeam(pole.id, team);
+    this.playerFeedback.action();
     this.updateProblemPresentation();
     return true;
   }
@@ -167,6 +175,7 @@ export class Fase1OrlaScene implements GameScene {
     const action = actions[key];
     if (!action) return false;
     this.traffic.applyMobilityAction(roadId, action);
+    this.playerFeedback.action();
     return true;
   }
 
@@ -175,8 +184,21 @@ export class Fase1OrlaScene implements GameScene {
   applyMobilityAction(roadId: string, action: MobilityRoadAction): void { this.traffic.applyMobilityAction(roadId, action); }
 
   completePoleRepair(): void {
+    if (this.disposed || this.player.role !== 'infraestrutura') return;
+    const pole = suburbanGameState.snapshot().problems[0];
+    if (!pole || pole.status !== 'MAINTENANCE' || !pole.dispatchedTeams.includes('infraestrutura')
+      || Math.hypot(this.player.mesh.position.x - pole.position.x, this.player.mesh.position.z - pole.position.z) > 1.5
+      || !this.traffic.getWorkZoneReadiness(pole.position).prepared) return;
     suburbanGameState.setProblemStatus('broken-light-pole-1', 'RESOLVED');
+    this.playerFeedback.action();
+    this.reportMissionStep(3);
     this.updateProblemPresentation();
+  }
+
+  private reportMissionStep(step: number): void {
+    if (step !== this.missionStep + 1) return;
+    this.missionStep = step;
+    this.onMissionStep?.(step);
   }
 
   private syncRisks(): void {
@@ -217,37 +239,41 @@ export class Fase1OrlaScene implements GameScene {
       minX = Math.min(minX, px); maxX = Math.max(maxX, px);
       minZ = Math.min(minZ, pz); maxZ = Math.max(maxZ, pz);
     }
-    const halfX = this.map.width / 2 - config.groundPadding;
-    const halfZ = this.map.depth / 2 - config.groundPadding;
+    const apron = closeView ? 0 : config.groundApron;
+    const halfX = this.map.width / 2 + apron - config.groundPadding;
+    const halfZ = this.map.depth / 2 + apron - config.groundPadding;
     const maxHeight = Math.min(2 * halfX / (maxX - minX), 2 * halfZ / (maxZ - minZ));
     const requestedHeight = (closeView ? config.closeHeight : config.wideHeight) * Math.max(1, config.portraitAspect / camera.aspect);
-    const height = closeView ? Math.min(maxHeight, requestedHeight) : requestedHeight;
+    const height = Math.min(maxHeight, requestedHeight);
     const blend = snap ? 1 : 1 - Math.exp(-config.followSmoothing * Math.max(0, dt));
-    this.cameraHeight = MathUtils.lerp(this.cameraHeight, height, blend);
+    this.cameraHeight = Math.min(maxHeight, MathUtils.lerp(this.cameraHeight, height, blend));
     this.cameraTarget.lerp(this.player.mesh.position, blend);
     const h = this.cameraHeight;
-    if (closeView) {
-      this.cameraTarget.x = MathUtils.clamp(this.cameraTarget.x, -halfX - minX * h, halfX - maxX * h);
-      this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, halfZ - maxZ * h);
-    }
+    this.cameraTarget.x = MathUtils.clamp(this.cameraTarget.x, -halfX - minX * h, halfX - maxX * h);
+    this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, halfZ - maxZ * h);
     this.cameraTarget.y = 0;
     camera.position.set(this.cameraTarget.x, h, this.cameraTarget.z + h * config.tilt);
     camera.lookAt(this.cameraTarget);
     camera.updateMatrixWorld(true);
   }
 
+  stopMovement(): void { this.players.forEach(player => player.stopMovement()); }
+
   update(dt: number): void {
     if (this.disposed) return;
     const axis = this.player.role === 'analista'
       ? this.idle : this.input.getAxis();
     if (dt > 0) this.items.face(suburbanGameState.activeCharacter, axis);
+    this.mapView.update(dt);
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.updateProblemPresentation();
     for (const player of this.players) {
       const movementResolver = player.active && player.role === 'infraestrutura' ? this.resolveInfrastructureMovement : this.resolveMovement;
+      if (!player.active) player.stopMovement();
       player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
     }
+    this.playerFeedback.update(dt, this.player.mesh.position);
   }
 
   private updateProblemPresentation(): void {
@@ -262,7 +288,7 @@ export class Fase1OrlaScene implements GameScene {
     this.objectiveMarker.setVisible(objectiveVisible);
     if (objectiveVisible && pole) {
       const target = team === 'mobilidade'
-        ? intervention ?? this.traffic.getNearestPrincipalLanePosition(pole.position) : pole.position;
+        ? intervention ?? this.traffic.getWorkZoneApproachPosition(pole.position) : pole.position;
       const distance = Math.round(this.objectiveMarker.update(this.player.mesh.position, target));
       if (distance !== this.lastObjectiveDistance) {
         this.lastObjectiveDistance = distance;
@@ -281,6 +307,10 @@ export class Fase1OrlaScene implements GameScene {
     const dz = pole ? this.player.mesh.position.z - pole.position.z : Infinity;
     const nearPole = this.player.role === 'infraestrutura' && dx * dx + dz * dz <= 2.25;
     const workZone = pole ? this.traffic.getWorkZoneReadiness(pole.position) : null;
+    if (pole?.dispatchedTeams.length === 2) {
+      this.reportMissionStep(1);
+      if (workZone?.prepared) this.reportMissionStep(2);
+    }
     this.traffic.setMobilityView(this.player.role === 'mobilidade');
     const prompt = road?.type === 'PRINCIPAL' ? nearCone ? 'REMOVER CONE' : 'COLOCAR CONE'
       : nearPole && pole?.status !== 'RESOLVED' && !pole?.dispatchedTeams.includes('infraestrutura') ? 'AGUARDE O ACIONAMENTO DA ANALISTA'
@@ -305,6 +335,7 @@ export class Fase1OrlaScene implements GameScene {
     this.traffic.dispose();
     this.brokenPoleMarker.dispose();
     this.objectiveMarker.dispose();
+    this.playerFeedback.dispose();
     this.players.forEach(player => player.dispose());
     this.mapView.dispose();
     this.sun.shadow.dispose();
@@ -312,3 +343,4 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.background = null;
   }
 }
+

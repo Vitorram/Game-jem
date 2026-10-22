@@ -9,6 +9,7 @@ import AbilityPanel from './AbilityPanel';
 import type { RiskSnapshot } from '@/game/risks/RiskWorkflow';
 import RepairPuzzle from './RepairPuzzle';
 import GameObjectiveHUD from './GameObjectiveHUD';
+import OrdersHud from './OrdersHud';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -29,7 +30,7 @@ export default function GameCanvas() {
   const [initialized, setInitialized] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
   const [closeView, setCloseView] = useState(false);
-  const [trafficRunning, setTrafficRunning] = useState(true);
+
   const [error, setError] = useState<string | null>(null);
   const [, setRisks] = useState<RiskSnapshot | null>(null);
   const [interactionPrompt, setInteractionPrompt] = useState<string | null>(null);
@@ -41,7 +42,7 @@ export default function GameCanvas() {
     if (!host.current) return;
     let instance: Game;
     try {
-      instance = new Game(host.current, setStatus, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, setRepairPuzzleOpen, setObjectiveDistance);
+      instance = new Game(host.current, value => { setStatus(value); if (value === 'playing') setCloseView(game.current?.isCloseView ?? false); }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, setRepairPuzzleOpen, setObjectiveDistance);
       game.current = instance;
       setInitialized(true);
       setError(null);
@@ -70,41 +71,43 @@ export default function GameCanvas() {
     setRisks(null);
     setSelectedPlayer(1);
     setCloseView(false);
-    setTrafficRunning(true);
+
     setObjectiveDistance(null);
   };
 
   return (
-    <section className="game-shell" aria-label="Protótipo do jogo">
+    <section className={`game-shell${isLaboratory ? '' : ' is-orla'}`} aria-label="Suburban — jogo de mobilidade urbana">
       <div ref={host} className="viewport" />
       <header className="topbar">
         <div className="brand"><span className="brand-mark">S</span><span>SUBURBAN<small>{isLaboratory ? 'LABORATÓRIO DE HABILIDADES' : 'FASE 1 · ORLA'}</small></span></div>
         <span className="build-label">{isLaboratory ? 'TESTE LIVRE' : 'BASE DA ORLA'}</span>
       </header>
-      {(status !== 'playing' || error) && (
+      {((status !== 'playing' && status !== 'finished') || error) && (
         <div className="overlay">
           <div ref={panel} className="panel">
             <span className="eyebrow">{error ? 'INICIALIZAÇÃO' : status === 'paused' ? 'UM RESPIRO' : 'O COMEÇO DE UM MUNDO'}</span>
             <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? 'Jogo pausado.' : <>Tudo começa<br />por aqui<span>.</span></>}</h1>
-            <p>{error ?? (status === 'paused' ? 'Sua cena está esperando. Continue quando quiser.' : 'Experimente as três habilidades na plataforma vazia. Troque de personagem para descobrir seus controles.')}</p>
+            <p>{error ?? (status === 'paused' ? 'Sua cena está esperando. Continue quando quiser.' : 'Recupere a iluminação da Orla em três minutos. Acione as equipes, proteja o trecho e repare o poste.')}</p>
             {error ? <button onClick={() => window.location.reload()}>Tentar novamente ↗</button> :
-              <button disabled={!initialized} onClick={event => { status === 'ready' ? game.current?.start() : game.current?.togglePause(); event.currentTarget.blur(); }}>
-                {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Entrar no cenário →'}
+              <button disabled={!initialized} onClick={event => { if (status === 'ready') { game.current?.start('fase1-orla'); setSceneId('fase1-orla'); setCloseView(true); } else game.current?.togglePause(); event.currentTarget.blur(); }}>
+                {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Jogar na Orla →'}
               </button>}
             {!error && status === 'ready' && <button className="secondary" disabled={!initialized}
-              onClick={event => { game.current?.start('fase1-orla'); setSceneId('fase1-orla'); setCloseView(true); event.currentTarget.blur(); }}>
-              Abrir fase 1 · Orla →
+              onClick={event => { game.current?.start(); setSceneId('test'); event.currentTarget.blur(); }}>
+              Laboratório de habilidades →
             </button>}
             {!error && status === 'paused' && <button className="secondary" onClick={returnToMenu}>Voltar ao menu</button>}
-            <div className="stack">NEXT.JS <i /> THREE.JS <i /> GSAP</div>
+            <div className="stack">ANALISAR <i /> ORGANIZAR <i /> REPARAR</div>
           </div>
         </div>
       )}
+      {!isLaboratory && !error && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
+      {!isLaboratory && repairPuzzleOpen && <RepairPuzzle paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {status === 'playing' && !error && <>
         <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{!isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {!isLaboratory && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} />}
         {!isLaboratory && interactionPrompt && <div className="interaction-prompt" role="status"><kbd>E</kbd> {interactionPrompt}</div>}
-        {!isLaboratory && repairPuzzleOpen && <RepairPuzzle onComplete={() => game.current?.completeRepairPuzzle()} />}
+
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
         <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
@@ -115,24 +118,30 @@ export default function GameCanvas() {
           <button aria-pressed={closeView} onClick={() => { game.current?.setCloseView(!closeView); setCloseView(!closeView); }}>
             {closeView ? 'Visão ampla' : 'Ver de perto'}
           </button>
-          {!isLaboratory && <button aria-pressed={!trafficRunning} onClick={() => {
-            const running = game.current?.toggleTraffic();
-            if (running !== undefined) setTrafficRunning(running);
-          }}>{trafficRunning ? 'Parar veículos' : 'Retomar veículos'}</button>}
+
         </div>
-        {(!isLaboratory || (selectedPlayer !== 3 && !abilities.editing)) && <div className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}`} aria-label="Controles de movimento">
+        {!isLaboratory && !repairPuzzleOpen && <div className="orla-actions" role="group" aria-label="Ações da equipe">
+          <button onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
+          {selectedPlayer === 2 && ['Liberar', 'Bloquear', 'Inverter', 'Escape', 'Desviar'].map((label, index) =>
+            <button key={label} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}><kbd>{index + 1}</kbd> {label}</button>)}
+        </div>}
+        {(!isLaboratory && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}`} aria-label="Controles de movimento">
           {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}
             onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, code); }}
             onPointerUp={event => game.current?.input.setTouch(event.pointerId)}
             onPointerCancel={event => game.current?.input.setTouch(event.pointerId)}
             onLostPointerCapture={event => game.current?.input.setTouch(event.pointerId)}
           >{symbol}</button>)}
-          {!isLaboratory && <button className="touch-action" aria-label="Interagir com tile à frente"
-            onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}>Ação · E</button>}
+          {!isLaboratory && <button className="touch-action" aria-label="Segurar para correr"
+            onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, 'ShiftLeft'); }}
+            onPointerUp={event => game.current?.input.setTouch(event.pointerId)}
+            onPointerCancel={event => game.current?.input.setTouch(event.pointerId)}
+            onLostPointerCapture={event => game.current?.input.setTouch(event.pointerId)}>Correr</button>}
         </div>}
       </>}
       <footer className="bottom-bar"><span>{isLaboratory && selectedPlayer === 3 ? 'MOUSE' : 'WASD / SETAS'} <small>{isLaboratory && selectedPlayer === 3 ? 'ANALISAR' : 'MOVER · SHIFT CORRER'}</small></span><span>ESC <small>PAUSAR</small></span><span className="prototype-label">{isLaboratory ? 'HABILIDADES · SEM MISSÃO' : 'FASE 1 · ORLA'}</span></footer>
     </section>
   );
 }
+
 

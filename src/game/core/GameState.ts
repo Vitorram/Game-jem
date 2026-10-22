@@ -52,6 +52,8 @@ export class GameState {
     ],
   };
 
+  reset(): void { this.state = new GameState().snapshot(); }
+
   snapshot(): GameStateSnapshot { return structuredClone(this.state); }
 
   get activeCharacter(): PlayerId { return this.state.activeCharacter; }
@@ -90,3 +92,4 @@ export class GameState {
 
 /** Uma única instância para o jogo; todas as personagens leem e escrevem aqui. */
 export const suburbanGameState = new GameState();
+

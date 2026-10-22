@@ -33,6 +33,7 @@ class SessionStore {
   private readonly listeners = new Set<Listener>();
   private lastSecond = -1;
   private seq = 0;
+  private onRestart?: () => void;
 
   readonly subscribe = (listener: Listener): (() => void) => {
     this.listeners.add(listener);
@@ -41,8 +42,10 @@ class SessionStore {
   readonly getSnapshot = (): SessionView => this.view;
   readonly getServerSnapshot = (): SessionView => EMPTY;
 
-  bind(session: GameSession): void {
+  bind(session: GameSession, onRestart?: () => void): void {
     this.session = session;
+    this.onRestart = onRestart;
+    this.view = EMPTY;
     this.lastSecond = -1;
     this.publish(session.snapshot(), []);
   }
@@ -51,6 +54,7 @@ class SessionStore {
   unbind(session: GameSession): void {
     if (this.session !== session) return;
     this.session = null;
+    this.onRestart = undefined;
     this.view = EMPTY;
     this.emit();
   }
@@ -61,7 +65,26 @@ class SessionStore {
     this.publish(this.session.snapshot(), this.session.start());
   }
 
-  restart(): void { this.start(); }
+  restart(): void {
+    if (this.session?.snapshot().status !== 'finished') return;
+    if (this.onRestart) this.onRestart();
+    else this.start();
+  }
+
+  setPaused(paused: boolean): void {
+    if (!this.session) return;
+    this.publish(this.session.snapshot(), paused ? this.session.pause() : this.session.resume());
+  }
+
+  resolveStep(step: number): void {
+    const session = this.session;
+    const order = session?.snapshot().orders[0];
+    if (!session || !order) return;
+    const events = session.resolveRisk(order.id, step);
+    if (!events.length) return;
+    if (events.some(event => event.type === 'order-completed')) events.push(...session.finish());
+    this.publish(session.snapshot(), events);
+  }
 
   /** Chame uma vez por frame com o tempo real decorrido, em ms (sem o teto da física). */
   tick(deltaMs: number): void {
@@ -102,3 +125,4 @@ class SessionStore {
 }
 
 export const sessionStore = new SessionStore();
+
