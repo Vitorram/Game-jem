@@ -2,20 +2,22 @@ const fs = require('node:fs');
 const Module = require('node:module');
 const { stripTypeScriptTypes } = Module;
 const assert = require('node:assert/strict');
-const { test } = require('node:test');
+const { test, beforeEach } = require('node:test');
 const three = require('three');
 
 // Mesmo carregamento dos testes de personagens; transform aceita o construtor do Game.
 require.extensions['.ts'] = (module, filename) => {
   let source = stripTypeScriptTypes(fs.readFileSync(filename, 'utf8'), { mode: 'transform' });
-  const names = [...source.matchAll(/export (?:class|const) (\w+)/g)].map(match => match[1]);
+  const names = [...source.matchAll(/export (?:class|const|function) (\w+)/g)].map(match => match[1]);
   source = source.replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g, 'const {$1} = require(\'$2\');')
-    .replace(/export (class|const) /g, '$1 ');
+    .replace(/export (class|const|function) /g, '$1 ');
   module._compile(source + '\nObject.assign(exports, {' + names.join(',') + '});', filename);
 };
 const { SceneManager } = require('../src/game/core/SceneManager.ts');
 const { TestScene } = require('../src/game/scenes/TestScene.ts');
 const { Fase1OrlaScene } = require('../src/game/scenes/Fase1OrlaScene.ts');
+const { suburbanGameState } = require('../src/game/core/GameState.ts');
+beforeEach(() => suburbanGameState.reset());
 
 function stubScene(name, calls) {
   return {
@@ -110,7 +112,7 @@ test('manager descartado rejeita cenas novas sem assumir sua propriedade', () =>
 
 test('TestScene recebe input injetado por update(dt) e libera GPU ao trocar por Orla', t => {
   const manager = new SceneManager();
-  const lab = new TestScene(undefined, { getAxis: () => ({ x: 1, z: 0 }) });
+  const lab = new TestScene(undefined, { isSprinting: () => false, getAxis: () => ({ x: 1, z: 0 }) });
   lab.abilities.activate({ x: 0, z: 0 });
   lab.abilities.setTool('light');
   lab.abilities.activate({ x: 2, z: 0 });
@@ -420,8 +422,8 @@ for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390]
         ray.setFromCamera(new three.Vector2(sx, sy), camera);
         const hit = ray.ray.intersectPlane(floor, new three.Vector3());
         assert.ok(hit);
-        assert.ok(Math.abs(hit.x) <= orla.map.width / 2 + 1e-8);
-        assert.ok(Math.abs(hit.z) <= orla.map.depth / 2 + 1e-8);
+        assert.ok(Math.abs(hit.x) <= orla.map.width / 2 + (close ? 0 : ORLA_CAMERA.groundApron) + 1e-8);
+        assert.ok(Math.abs(hit.z) <= orla.map.depth / 2 + (close ? 0 : ORLA_CAMERA.groundApron) + 1e-8);
       }
     }
     orla.dispose();
@@ -429,18 +431,18 @@ for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390]
 }
 
 test('Orla move cada personagem selecionada, respeita o chão e libera recursos uma vez', t => {
-  const orla = new Fase1OrlaScene({ getAxis: () => ({ x: 1, z: 1 }) });
+  const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 1, z: 1 }) });
   const counts = watchResources(orla.scene);
   const sun = orla.scene.children.find(child => child instanceof three.DirectionalLight);
   const shadowDispose = t.mock.method(sun.shadow, 'dispose');
   assert.ok(sun.castShadow);
   assert.ok(orla.scene.children.some(child => child instanceof three.HemisphereLight));
-  assert.ok(orla.scene.getObjectByName('orla-ground').receiveShadow);
+  assert.ok(orla.scene.getObjectByName('tile-0-0-sea').receiveShadow);
   for (const id of [1, 2, 3]) {
     orla.selectPlayer(id);
     const before = orla.players.map(player => player.mesh.position.clone());
     orla.update(0.05);
-    orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id));
+    orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id || id === 3));
     for (let frame = 0; frame < 300; frame++) orla.update(0.05);
     assert.ok(Math.abs(orla.player.mesh.position.x) <= orla.map.width / 2 - orla.map.playerRadius);
     assert.ok(Math.abs(orla.player.mesh.position.z) <= orla.map.depth / 2 - orla.map.playerRadius);
@@ -466,7 +468,7 @@ test('Game segue seleção na Orla, reenquadra no resize pausado e restaura labo
   const camera = renderer.lastCamera;
   const fixed = camera.position.clone();
   const rotation = camera.quaternion.clone();
-  game.selectPlayer(3);
+  game.selectPlayer(1);
   game.input.setTouch(1, 'KeyD');
   renderer.loop(150);
   renderer.loop(200);
@@ -508,7 +510,8 @@ test('Orla usa óptica de perto do laboratório e suavização independente do F
 
 test('Orla preserva item e direção ao selecionar outra personagem; meshes seguem o dono', () => {
   let axis = { x: 0, z: -1 };
-  const orla = new Fase1OrlaScene({ getAxis: () => axis });
+  const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => axis });
+  orla.selectPlayer(1);
   const sourcePosition = orla.map.cellCenter(6, 5);
   orla.player.setPosition(sourcePosition.x, sourcePosition.z);
   orla.interact();
@@ -520,7 +523,7 @@ test('Orla preserva item e direção ao selecionar outra personagem; meshes segu
   orla.selectPlayer(2);
   orla.player.setPosition(sourcePosition.x, sourcePosition.z);
   orla.interact();
-  assert.equal(orla.items.heldBy(2), 'sign', 'fonte continua infinita');
+  assert.equal(orla.items.heldBy(2), null, 'mobilidade aguarda acionamento e usa cones');
   orla.selectPlayer(3);
   assert.equal(orla.items.heldBy(3), null);
   orla.selectPlayer(1);
@@ -541,9 +544,10 @@ test('Orla preserva item e direção ao selecionar outra personagem; meshes segu
 });
 
 test('GPU dos itens é compartilhada e descartada uma vez, inclusive carregados e nas bancadas', () => {
-  const orla = new Fase1OrlaScene({ getAxis: () => ({ x: 0, z: -1 }) });
+  const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 0, z: -1 }) });
   const counts = watchResources(orla.scene);
   const geometry = orla.scene.getObjectByName('item-carried-1').geometry;
+  orla.selectPlayer(1);
   const source = orla.map.cellCenter(6, 5);
   orla.player.setPosition(source.x, source.z);
   orla.interact();
@@ -559,13 +563,14 @@ test('GPU dos itens é compartilhada e descartada uma vez, inclusive carregados 
   assert.equal(orla.scene.children.length, 0);
 });
 
-test('Game: E/toque interagem, Tab cicla inventários e UI, pausa e repetição não acionam', t => {
+test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição não acionam', t => {
   const { Game, Element, created } = gameHarness(t);
   const selected = [];
   const game = new Game(new Element(), () => {}, undefined, id => selected.push(id));
   t.after(() => game.dispose());
   game.start('fase1-orla');
   const phase = game.scenes.current;
+  game.selectPlayer(1);
   const source = phase.map.cellCenter(6, 5);
   phase.player.setPosition(source.x, source.z);
   game.input.setTouch(1, 'KeyW');
@@ -577,21 +582,21 @@ test('Game: E/toque interagem, Tab cicla inventários e UI, pausa e repetição 
   assert.equal(key('KeyE').defaultPrevented, true);
   assert.equal(phase.items.heldBy(1), 'sign');
   const firstItem = phase.player.mesh.getObjectByName('item-carried-1');
-  assert.equal(key('Tab').defaultPrevented, true);
+  assert.equal(key('KeyT').defaultPrevented, true);
   assert.equal(phase.player.id, 2);
   assert.equal(phase.items.heldBy(1), 'sign');
   assert.equal(firstItem.visible, true);
   assert.deepEqual(game.input.getAxis(), { x: 0, z: 0 });
-  key('Tab', { repeat: true });
+  key('KeyT', { repeat: true });
   assert.equal(phase.player.id, 2);
-  assert.equal(key('Tab', { shiftKey: true }).defaultPrevented, false);
-  key('Tab'); key('Tab');
+  assert.equal(key('KeyT', { ctrlKey: true }).defaultPrevented, false);
+  key('KeyT'); key('KeyT');
   assert.equal(phase.player.id, 1);
-  assert.deepEqual(selected, [2, 3, 1]);
+  assert.deepEqual(selected, [3, 1, 2, 3, 1]);
   const counter = phase.map.cellCenter(5, 5);
   phase.player.setPosition(counter.x, counter.z);
   game.togglePause();
-  key('KeyE'); key('Tab'); game.interact();
+  key('KeyE'); key('KeyT'); game.interact();
   assert.equal(phase.items.heldBy(1), 'sign');
   assert.equal(phase.player.id, 1);
   game.togglePause();
@@ -608,70 +613,118 @@ test('Game: E/toque interagem, Tab cicla inventários e UI, pausa e repetição 
   game.dispose();
 });
 
-test('fluxo cooperativo na Orla usa tile à frente e não publica estado por frame', () => {
-  const events = [];
-  const orla = new Fase1OrlaScene({ getAxis: () => ({ x: 0, z: 1 }) }, state => events.push(state));
-  const risks = orla.risks.snapshot().risks;
-  const place = (id, risk) => {
-    orla.selectPlayer(id);
-    const position = orla.map.cellCenter(risk.column, risk.row - 1);
-    orla.player.setPosition(position.x, position.z);
-  };
-  const beforeUpdates = events.length;
-  for (let i = 0; i < 10; i++) orla.update(0.01);
-  assert.equal(events.length, beforeUpdates);
-  for (const risk of risks) {
-    place(3, risk);
-    orla.interact(); orla.interact();
-    place(risk.kind === 'route' ? 2 : 1, risk);
-    orla.interact();
-    if (risk.kind === 'route') orla.interact();
-  }
-  assert.ok(events.at(-1).risks.every(r => r.status === 'resolved'));
-  assert.equal(events.at(-1).sensors.length, 1);
-  assert.equal(events.at(-1).light.level, 1);
-  const counts = watchResources(orla.scene);
-  orla.dispose(); orla.dispose();
-  assert.ok([...counts.values()].every(count => count === 1));
-  const finalEvents = events.length;
-  orla.interact(); orla.selectPlayer(2); orla.update(0.05);
-  assert.equal(events.length, finalEvents);
-});
 
-test('Tab e botões preservam posições, inventário e riscos; pausa bloqueia intervenção', t => {
-  const { Game, Element } = gameHarness(t);
-  const game = new Game(new Element(), () => {});
+const { sessionStore } = require('../src/game/session/sessionStore.ts');
+
+test('missão real: equipes, área segura, reparo, pontuação e reinício de todo o mundo', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const statuses = [], puzzles = [];
+  const game = new Game(new Element(), value => statuses.push(value), undefined, undefined, undefined, undefined, open => puzzles.push(open));
   t.after(() => game.dispose());
   game.start('fase1-orla');
   const orla = game.scenes.current;
-  const source = orla.map.cellCenter(6, 5);
-  orla.player.setPosition(source.x, source.z);
-  game.input.setTouch(1, 'KeyW'); game.interact();
-  assert.equal(orla.items.heldBy(1), 'sign');
-  game.selectPlayer(3);
-  const risk = orla.risks.snapshot().risks[0];
-  const position = orla.map.cellCenter(risk.column, risk.row - 1);
-  orla.player.setPosition(position.x, position.z);
-  game.input.setTouch(2, 'KeyS'); game.interact(); game.interact();
-  assert.equal(orla.risks.snapshot().risks[0].status, 'released');
-  const positions = orla.players.map(player => player.mesh.position.clone());
-  const tab = () => window.dispatchEvent(Object.assign(new Event('keydown'), { code: 'Tab' }));
-  tab(); tab(); tab();
-  assert.equal(orla.player.id, 3);
-  orla.players.forEach((player, i) => assert.ok(player.mesh.position.equals(positions[i])));
-  assert.equal(orla.items.heldBy(1), 'sign');
+  const renderer = created[0];
+  renderer.loop(0);
+  game.completeRepairPuzzle();
+  assert.equal(sessionStore.getSnapshot().snapshot.score, 0);
+  // A Analista seleciona a ocorrência e aciona as duas equipes pelo mesmo E da UI.
+  game.interact(); game.interact(); game.interact();
+  assert.equal(sessionStore.getSnapshot().snapshot.orders[0].completedSteps, 1);
+  assert.deepEqual(suburbanGameState.snapshot().problems[0].dispatchedTeams, ['infraestrutura', 'mobilidade']);
   game.selectPlayer(1);
-  orla.player.setPosition(position.x, position.z);
-  game.input.setTouch(3, 'KeyS');
-  // Registra a direção antes da pausa, que limpa os controles ativos.
-  orla.update(0.001);
-  game.togglePause(); game.interact(); tab();
-  assert.equal(orla.player.id, 1);
-  assert.equal(orla.risks.snapshot().risks[0].status, 'released');
-  game.togglePause(); game.interact();
-  assert.equal(orla.risks.snapshot().risks[0].status, 'resolved');
-  assert.equal(orla.items.heldBy(1), 'sign', 'habilidade não consome o inventário nesta etapa');
-  game.returnToMenu(); game.start('fase1-orla');
-  assert.ok(game.scenes.current.risks.snapshot().risks.every(r => r.status === 'hidden'));
+  orla.player.setPosition(-9, 5.7);
+  game.interact();
+  assert.equal(puzzles.includes(true), false, 'área insegura impede abrir reparo');
+  game.selectPlayer(2);
+  const lane = orla.traffic.getWorkZoneApproachPosition({ x: -9, z: 5.7 });
+  assert.equal(lane.x, -12, 'seta orienta a colocar o cone antes da área de trabalho');
+  orla.player.setPosition(lane.x, lane.z);
+  game.interact();
+  let time = 0;
+  for (let i = 0; i < 1200 && !orla.traffic.getWorkZoneReadiness({ x: -9, z: 5.7 }).prepared; i++) renderer.loop(time += 50);
+  assert.ok(orla.traffic.getWorkZoneReadiness({ x: -9, z: 5.7 }).prepared, 'tráfego real deve liberar o trecho protegido');
+  assert.equal(sessionStore.getSnapshot().snapshot.orders[0].completedSteps, 2);
+  game.selectPlayer(1);
+  game.interact();
+  assert.equal(puzzles.at(-1), true);
+  const remaining = sessionStore.getSnapshot().snapshot.remainingMs;
+  window.dispatchEvent(new Event('blur'));
+  renderer.loop(time += 5000);
+  assert.equal(statuses.at(-1), 'paused');
+  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, remaining);
+  game.completeRepairPuzzle();
+  assert.equal(suburbanGameState.snapshot().problems[0].status, 'MAINTENANCE');
+  game.togglePause();
+  renderer.loop(time += 50);
+  renderer.loop(time += 2000);
+  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, remaining - 2000, 'puzzle conta tempo real, não delta limitado da física');
+  game.completeRepairPuzzle();
+  assert.equal(statuses.at(-1), 'finished');
+  assert.equal(suburbanGameState.snapshot().problems[0].status, 'RESOLVED');
+  const result = sessionStore.getSnapshot().snapshot;
+  assert.equal(result.completedOrders, 1);
+  assert.ok(result.score >= 300 && result.score <= 600);
+  game.completeRepairPuzzle(); game.interact(); game.togglePause();
+  assert.equal(sessionStore.getSnapshot().snapshot.score, result.score);
+  const counts = watchResources(orla.scene);
+  sessionStore.restart();
+  assert.equal(statuses.at(-1), 'playing');
+  assert.notEqual(game.scenes.current, orla);
+  assert.ok([...counts.values()].every(count => count === 1));
+  assert.equal(suburbanGameState.snapshot().problems[0].status, 'ACTIVE');
+  assert.deepEqual(suburbanGameState.snapshot().problems[0].dispatchedTeams, []);
+  assert.ok(suburbanGameState.snapshot().roads.every(road => !road.conesActive));
+  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 180000);
+  assert.equal(sessionStore.getSnapshot().snapshot.score, 0);
+  game.dispose();
+  assert.equal(sessionStore.getSnapshot().snapshot, null);
+});
+
+test('troca e pausa param inércia; toque suporta correr e perder foco limpa comandos', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  t.after(() => game.dispose());
+  game.start('fase1-orla'); game.selectPlayer(2);
+  const scene = game.scenes.current;
+  const player = scene.player;
+  const renderer = created[0];
+  game.input.setTouch(1, 'KeyD'); game.input.setTouch(2, 'ShiftLeft');
+  assert.equal(game.input.isSprinting(), true);
+  renderer.loop(0); renderer.loop(50); renderer.loop(100);
+  const moved = player.mesh.position.clone();
+  game.selectPlayer(1);
+  renderer.loop(150);
+  assert.ok(player.mesh.position.equals(moved));
+  game.selectPlayer(2);
+  renderer.loop(200);
+  assert.ok(player.mesh.position.equals(moved));
+  game.input.setTouch(1, 'KeyD'); renderer.loop(250);
+  const stopped = player.mesh.position.clone();
+  window.dispatchEvent(new Event('blur'));
+  assert.equal(game.input.isSprinting(), false);
+  game.togglePause(); renderer.loop(300); renderer.loop(350);
+  assert.ok(player.mesh.position.equals(stopped));
+  game.dispose();
+});
+
+test('prazo encerra ações, relógio ignora pausa e menu desmonta a sessão', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const statuses = [];
+  const game = new Game(new Element(), value => statuses.push(value));
+  t.after(() => game.dispose());
+  game.start('fase1-orla');
+  const renderer = created[0];
+  renderer.loop(0); renderer.loop(2000);
+  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 178000);
+  game.togglePause(); renderer.loop(100000);
+  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 178000);
+  game.togglePause(); renderer.loop(100100); renderer.loop(278100);
+  assert.equal(statuses.at(-1), 'finished');
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 1);
+  game.interact();
+  assert.equal(suburbanGameState.snapshot().selectedProblemId, null);
+  game.returnToMenu();
+  assert.equal(sessionStore.getSnapshot().snapshot, null);
+  assert.equal(statuses.at(-1), 'ready');
   game.dispose();
 });

@@ -13,12 +13,19 @@ const makeZones = (): Zone[] => zoneWidths.map(width => ({
   width,
 }));
 
-export default function RepairPuzzle({ onComplete }: { onComplete: () => void }) {
+export default function RepairPuzzle({ onComplete, paused = false }: { onComplete: () => void; paused?: boolean }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const barRefs = useRef<Array<HTMLDivElement | null>>([]);
   const pinRefs = useRef<Array<HTMLSpanElement | null>>([]);
   const answerRef = useRef<() => void>(() => undefined);
   const locked = useRef(false);
+  const pending = useRef<gsap.core.Tween | null>(null);
+  const pins = useRef<gsap.core.Tween[]>([]);
+  useEffect(() => () => { pending.current?.kill(); }, []);
+  useEffect(() => {
+    pending.current?.paused(paused);
+    pins.current.forEach(tween => tween.paused(paused));
+  }, [paused]);
   const [step, setStep] = useState(0);
   const [zones, setZones] = useState<Zone[]>(makeZones);
   const [feedback, setFeedback] = useState<Feedback>(null);
@@ -37,11 +44,12 @@ export default function RepairPuzzle({ onComplete }: { onComplete: () => void })
       gsap.set(pin, { left: '0%' });
       return gsap.to(pin, { left: '100%', duration: speeds[index], repeat: -1, yoyo: true, ease: 'none' });
     });
+    pins.current = tweens.filter((tween): tween is gsap.core.Tween => !!tween);
     return () => tweens.forEach(tween => tween?.kill());
   }, [feedback, step]);
 
   const resolveAttempt = useCallback(() => {
-    if (locked.current || feedback) return;
+    if (paused || locked.current || feedback) return;
     const bar = barRefs.current[step];
     const pin = pinRefs.current[step];
     if (!bar || !pin) return;
@@ -54,26 +62,26 @@ export default function RepairPuzzle({ onComplete }: { onComplete: () => void })
     if (position >= zone.left && position <= zone.left + zone.width) {
       if (step === 2) {
         setFeedback('POSTE REPARADO');
-        window.setTimeout(onComplete, 900);
+        pending.current = gsap.delayedCall(0.9, onComplete);
       } else {
         setFeedback('ACERTO');
-        window.setTimeout(() => {
+        pending.current = gsap.delayedCall(0.48, () => {
           setStep(current => current + 1);
           setFeedback(null);
           locked.current = false;
-        }, 480);
+        });
       }
       return;
     }
 
     setFeedback('ERRO');
-    window.setTimeout(() => {
+    pending.current = gsap.delayedCall(0.65, () => {
       setStep(0);
       setZones(makeZones());
       setFeedback(null);
       locked.current = false;
-    }, 650);
-  }, [feedback, onComplete, step, zones]);
+    });
+  }, [feedback, onComplete, paused, step, zones]);
 
   useEffect(() => { answerRef.current = resolveAttempt; }, [resolveAttempt]);
 
@@ -88,7 +96,7 @@ export default function RepairPuzzle({ onComplete }: { onComplete: () => void })
   }, []);
 
   return (
-    <div className="repair-puzzle-overlay" role="dialog" aria-modal="true" aria-labelledby="repair-puzzle-title" onPointerDown={() => answerRef.current()}>
+    <div style={paused ? { display: 'none' } : undefined} className="repair-puzzle-overlay" role="dialog" aria-modal="true" aria-labelledby="repair-puzzle-title" onPointerDown={() => answerRef.current()}>
       <div ref={cardRef} className="repair-puzzle-card">
         <span className="repair-puzzle-kicker">MANUTENÇÃO ELÉTRICA</span>
         <h2 id="repair-puzzle-title">REPARO DE INFRAESTRUTURA</h2>
@@ -113,3 +121,4 @@ export default function RepairPuzzle({ onComplete }: { onComplete: () => void })
     </div>
   );
 }
+

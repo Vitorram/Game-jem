@@ -103,6 +103,13 @@ export class GameSession {
     return [{ type: 'status', status: this.status }];
   }
 
+  /** Vitória antecipada somente após concluir todos os pedidos emitidos. */
+  finish(): SessionEvent[] {
+    if (this.status !== 'playing' || this.orders.length || this.completedOrders === 0) return [];
+    this.status = 'finished';
+    return [{ type: 'status', status: this.status }];
+  }
+
   returnToMenu(): SessionEvent[] {
     if (this.status === 'menu') return [];
     this.reset();
@@ -216,3 +223,4 @@ export class GameSession {
     }
   }
 }
+

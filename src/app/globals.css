@@ -248,3 +248,41 @@ h1 span { color: var(--accent); }
 .risk-message { margin-bottom: 0; }
 @media (max-width: 600px) { .risk-panel { left: 12px; right: 12px; width: auto; }.game-objective-hud { top: 155px; left: 12px; max-width: calc(100vw - 24px); } }
 @media (min-width: 700px) and (max-height: 650px) { .risk-panel { top: 160px; left: 190px; width: calc(100% - 390px); max-height: calc(100dvh - 220px); } }
+
+
+/* Interface da partida: o cenário ocupa a tela, os controles ficam nas bordas. */
+.is-orla { min-height: 320px; }
+.is-orla .topbar, .is-orla .bottom-bar { display: none; }
+.is-orla .overlay { z-index: 12; background: #142b32d9; }
+.is-orla .hud { top: 14px; right: 14px; z-index: 6; }
+.is-orla .hud > span { display: none; }
+.is-orla .hud button { background: #fff4d6; color: #4a311c; border: 2px solid #4a311c; box-shadow: 0 3px 0 #4a311c55; }
+.is-orla .character-selector { left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); flex-direction: row; z-index: 5; gap: 6px; }
+.is-orla .character-selector button { background: #fff4d6; color: #4a311c; border: 2px solid #4a311c; box-shadow: 0 4px 0 #4a311c55; min-height: 46px; }
+.is-orla .character-selector button[aria-pressed="true"] { background: #ffd35e; transform: translateY(-4px); box-shadow: 0 7px 0 #4a311c55; }
+.is-orla .game-objective-hud { top: 160px; left: 16px; max-width: 320px; padding: 12px; border-radius: 12px; background: #173c42ed; border-left: 4px solid #ffd35e; font-family: inherit; letter-spacing: normal; }
+.is-orla .game-objective-hud b { font-size: 12px; }
+.is-orla .game-objective-hud span { font-size: 11px; line-height: 1.4; }
+.is-orla .interaction-prompt { bottom: 128px; z-index: 4; pointer-events: none; background: #fff4d6; color: #4a311c; border: 2px solid #4a311c; }
+.orla-actions { position: absolute; bottom: 78px; left: 50%; transform: translateX(-50%); display: flex; justify-content: center; gap: 5px; z-index: 5; }
+.orla-actions button { padding: 9px 12px; min-height: 44px; font-size: 12px; color: #fff4d6; background: #173c42ed; border: 1px solid #93c4ba; white-space: nowrap; }
+.orla-actions kbd { margin-right: 4px; color: #ffd35e; }
+.is-orla .touch-controls { z-index: 5; bottom: 142px; right: 14px; }
+@media (hover: hover) and (pointer: fine) { .is-orla .touch-controls { display: none; } }
+@media (max-width: 700px) {
+  .is-orla .character-selector { width: calc(100% - 20px); gap: 4px; }
+  .is-orla .character-selector button { flex: 1; justify-content: center; gap: 4px; padding: 6px 4px; font-size: 10px; }
+  .is-orla .character-color { width: 10px; height: 10px; }
+  .is-orla .game-objective-hud { top: 152px; left: 10px; max-width: min(250px, 70vw); padding: 8px; }
+  .orla-actions { bottom: 76px; width: calc(100% - 16px); flex-wrap: wrap; gap: 3px; }
+  .orla-actions button { padding: 7px 6px; min-height: 40px; font-size: 10px; }
+  .orla-actions kbd { display: none; }
+  .is-orla .interaction-prompt { bottom: 306px; font-size: 10px; padding: 6px 9px; }
+}
+@media (max-height: 500px) {
+  .is-orla .game-objective-hud { top: 110px; max-width: 205px; }
+  .is-orla .game-objective-hud span { font-size: 9px; }
+  .is-orla .touch-controls { right: 10px; bottom: 68px; grid-template-columns: repeat(3, 38px); gap: 3px; }
+  .is-orla .touch-controls button { padding: 6px; min-height: 36px; }
+  .is-orla .interaction-prompt { bottom: 130px; max-width: 260px; font-size: 10px; }
+}
