@@ -42,7 +42,6 @@ export class GridMapView {
       const kind = map.tileAt(column, row)!;
       const type = TILE_TYPES[kind];
       const center = map.cellCenter(column, row);
-<<<<<<< feat/visual-orla-e-hud
       const isObject = type.height > 0;
       // Objetos sólidos apoiam-se num piso de calçadão.
       const floorKind: TileKind = isObject ? 'promenade' : kind;
@@ -56,32 +55,6 @@ export class GridMapView {
       if (isObject) this.addObject(kind, column, row, center);
       else this.addMarkings(kind, column, row, center);
       if (kind === 'sea') this.addFoam(column, row, center);
-=======
-      tile.name = `tile-${column}-${row}-${kind}`;
-      tile.scale.set(map.tileSize, height, map.tileSize);
-      tile.position.set(center.x, height / 2 - GRID_CONFIG.floorThickness, center.z);
-      tile.castShadow = type.height > 0;
-      tile.receiveShadow = true;
-      this.group.add(tile);
-    }
-
-    const roadRows = Array.from({ length: map.rows }, (_, row) => row)
-      .filter(row => Array.from({ length: map.columns }, (_, column) => map.tileAt(column, row)).includes('road'));
-    if (roadRows.length) {
-      const roadMinZ = Math.min(...roadRows.map(row => map.cellCenter(0, row).z - map.tileSize / 2));
-      const roadMaxZ = Math.max(...roadRows.map(row => map.cellCenter(0, row).z + map.tileSize / 2));
-      const laneCount = 5; // faixa de escape mais quatro faixas principais
-      for (let column = 0; column < map.columns; column++) {
-        const x = map.cellCenter(column, roadRows[0]).x;
-        for (let divider = 1; divider < laneCount; divider++) {
-          const marking = new Mesh(this.geometry, this.markingMaterial);
-          marking.name = `road-lane-divider-${column}-${divider}`;
-          marking.scale.set(map.tileSize * 0.42, 0.025, 0.035);
-          marking.position.set(x, 0.018, roadMinZ + (roadMaxZ - roadMinZ) * divider / laneCount);
-          this.group.add(marking);
-        }
-      }
->>>>>>> main
     }
     this.addApron();
   }

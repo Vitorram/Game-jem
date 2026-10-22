@@ -15,7 +15,6 @@ import { suburbanGameState } from './GameState';
 import type { RiskSnapshot } from '../risks/RiskWorkflow';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
-import type { MobilityRoadAction } from '../traffic/TrafficSystem';
 import type { ResponseTeam } from './GameState';
 
 export type GameSceneId = 'test' | 'fase1-orla';
@@ -41,7 +40,6 @@ export class Game {
 
   private status: GameStatus = 'ready';
   private repairPuzzleOpen = false;
-  private mobilityPanelOpen = false;
   private previousTime = 0;
   private disposed = false;
 
@@ -53,7 +51,6 @@ export class Game {
     private onRisks?: (state: RiskSnapshot) => void,
     private onInteractionPrompt?: (prompt: string | null) => void,
     private onRepairPuzzleChange?: (open: boolean) => void,
-    private onMobilityPanelChange?: (roadId: string | null) => void,
     private onObjectiveDistance?: (distance: number | null) => void,
   ) {
     this.renderer = new WebGLRenderer({
@@ -130,7 +127,7 @@ export class Game {
     if (this.status !== 'ready' || this.disposed) return;
 
     if (sceneId === 'fase1-orla') {
-      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), roadId => this.openMobilityPanel(roadId), this.onObjectiveDistance);
+      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), this.onObjectiveDistance);
       this.scenes.setScene(orla);
       this.closeView = false;
       this.onPlayerSelected?.(orla.player.id);
@@ -157,7 +154,7 @@ export class Game {
   }
 
   returnToMenu() {
-    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen) return;
     this.intro?.kill();
     this.intro = undefined;
     this.closeView = false;
@@ -179,7 +176,7 @@ export class Game {
   }
 
   togglePause() {
-    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen) return;
 
     this.changeStatus(
       this.status === 'playing' ? 'paused' : 'playing',
@@ -187,7 +184,7 @@ export class Game {
   }
 
   selectPlayer(id: PlayerId) {
-    if (this.disposed || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    if (this.disposed || this.repairPuzzleOpen) return;
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
@@ -198,19 +195,18 @@ export class Game {
 
   interact() {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
-    if (this.mobilityPanelOpen) { this.closeMobilityPanel(); return; }
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.interact();
   }
 
   toggleTraffic(): boolean | undefined {
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
     const current = this.scenes.current;
     return current instanceof Fase1OrlaScene ? current.toggleTraffic() : undefined;
   }
 
   setCloseView(enabled: boolean) {
-    if (this.disposed || this.repairPuzzleOpen || this.mobilityPanelOpen) return;
+    if (this.disposed || this.repairPuzzleOpen) return;
     this.closeView = enabled;
     this.intro?.kill();
     this.intro = undefined;
@@ -271,7 +267,7 @@ export class Game {
   };
 
   private onBlur = () => {
-    if (this.status === 'playing' && !this.repairPuzzleOpen && !this.mobilityPanelOpen) {
+    if (this.status === 'playing' && !this.repairPuzzleOpen) {
       this.changeStatus('paused');
     }
   };
@@ -281,19 +277,25 @@ export class Game {
       if (event.code === 'Space' || event.code === 'Escape') event.preventDefault();
       return;
     }
-    if (this.mobilityPanelOpen) {
-      if (event.repeat) return;
-      if (event.code === 'KeyE' || event.code === 'Escape') {
-        event.preventDefault();
-        this.closeMobilityPanel();
-      }
-      return;
-    }
     if (event.repeat) return;
     if (event.code === 'Escape') { this.togglePause(); return; }
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
     const current = this.scenes.current;
     if (this.status === 'playing' && current instanceof Fase1OrlaScene) {
+      if (current.player.role === 'analista' && event.code === 'Digit1') {
+        event.preventDefault();
+        current.dispatchTeam('infraestrutura');
+        return;
+      }
+      if (current.player.role === 'analista' && event.code === 'Digit2') {
+        event.preventDefault();
+        current.dispatchTeam('mobilidade');
+        return;
+      }
+      if (current.player.role === 'mobilidade' && current.useMobilityHotkey(event.code)) {
+        event.preventDefault();
+        return;
+      }
       if (event.code === 'KeyE') {
         event.preventDefault();
         this.interact();
@@ -359,34 +361,10 @@ export class Game {
     this.onRepairPuzzleChange?.(false);
   }
 
-  applyMobilityAction(roadId: string, action: MobilityRoadAction, coneZoneId?: string): void {
-    if (this.disposed || this.status !== 'playing' || !this.mobilityPanelOpen) return;
-    const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.applyMobilityAction(roadId, action, coneZoneId);
-  }
-
   dispatchTeam(team: ResponseTeam): boolean {
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen || this.mobilityPanelOpen) return false;
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const current = this.scenes.current;
     return current instanceof Fase1OrlaScene ? current.dispatchTeam(team) : false;
-  }
-
-  private openMobilityPanel(roadId: string): void {
-    if (this.disposed || this.status !== 'playing' || this.mobilityPanelOpen || this.repairPuzzleOpen) return;
-    this.mobilityPanelOpen = true;
-    this.input.clear();
-    const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setMobilityPanelOpen(true);
-    this.onMobilityPanelChange?.(roadId);
-  }
-
-  private closeMobilityPanel(): void {
-    if (!this.mobilityPanelOpen) return;
-    this.mobilityPanelOpen = false;
-    this.input.clear();
-    const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setMobilityPanelOpen(false);
-    this.onMobilityPanelChange?.(null);
   }
 
   dispose() {

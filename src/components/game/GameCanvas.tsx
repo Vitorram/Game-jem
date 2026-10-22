@@ -6,13 +6,9 @@ import { Game, type GameSceneId, type GameStatus } from '@/game/core/Game';
 import { PLAYER_APPEARANCES, type PlayerId } from '@/game/entities/Player';
 import { AbilityLab } from '@/game/core/AbilityLab';
 import AbilityPanel from './AbilityPanel';
-import RiskPanel from './RiskPanel';
 import type { RiskSnapshot } from '@/game/risks/RiskWorkflow';
 import RepairPuzzle from './RepairPuzzle';
-import MobilityPanel from './MobilityPanel';
-import TrafficOverview from './TrafficOverview';
-import { AnalystDispatchPanel, TeamDispatchNotice } from './TeamDispatchPanels';
-import type { ResponseTeam } from '@/game/core/GameState';
+import GameObjectiveHUD from './GameObjectiveHUD';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -35,10 +31,9 @@ export default function GameCanvas() {
   const [closeView, setCloseView] = useState(false);
   const [trafficRunning, setTrafficRunning] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [risks, setRisks] = useState<RiskSnapshot | null>(null);
+  const [, setRisks] = useState<RiskSnapshot | null>(null);
   const [interactionPrompt, setInteractionPrompt] = useState<string | null>(null);
   const [repairPuzzleOpen, setRepairPuzzleOpen] = useState(false);
-  const [mobilityRoadId, setMobilityRoadId] = useState<string | null>(null);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
 
@@ -46,7 +41,7 @@ export default function GameCanvas() {
     if (!host.current) return;
     let instance: Game;
     try {
-      instance = new Game(host.current, setStatus, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, setRepairPuzzleOpen, setMobilityRoadId, setObjectiveDistance);
+      instance = new Game(host.current, setStatus, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, setRepairPuzzleOpen, setObjectiveDistance);
       game.current = instance;
       setInitialized(true);
       setError(null);
@@ -107,15 +102,10 @@ export default function GameCanvas() {
       )}
       {status === 'playing' && !error && <>
         <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{!isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
-        {!isLaboratory && selectedPlayer === 3 && <AnalystDispatchPanel onDispatch={(team: ResponseTeam) => game.current?.dispatchTeam(team)} />}
-        {!isLaboratory && selectedPlayer === 1 && <TeamDispatchNotice team="infraestrutura" distance={objectiveDistance} />}
-        {!isLaboratory && selectedPlayer === 2 && <TeamDispatchNotice team="mobilidade" distance={objectiveDistance} />}
+        {!isLaboratory && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} />}
         {!isLaboratory && interactionPrompt && <div className="interaction-prompt" role="status"><kbd>E</kbd> {interactionPrompt}</div>}
         {!isLaboratory && repairPuzzleOpen && <RepairPuzzle onComplete={() => game.current?.completeRepairPuzzle()} />}
-        {!isLaboratory && mobilityRoadId && <MobilityPanel initialRoadId={mobilityRoadId} onAction={(roadId, action, zoneId) => game.current?.applyMobilityAction(roadId, action, zoneId)} onClose={() => { game.current?.interact(); setMobilityRoadId(null); }} />}
-        {!isLaboratory && selectedPlayer === 3 && <TrafficOverview />}
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
-        {!isLaboratory && risks && <RiskPanel state={risks} player={selectedPlayer} />}
         <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>

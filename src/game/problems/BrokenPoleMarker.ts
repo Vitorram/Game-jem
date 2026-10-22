@@ -69,7 +69,7 @@ export class BrokenPoleMarker {
     this.group.add(this.cones);
   }
 
-  setState(status: 'ACTIVE' | 'MAINTENANCE' | 'RESOLVED', showAlert: boolean): void {
+  setState(status: 'ACTIVE' | 'MAINTENANCE' | 'RESOLVED', showAlert: boolean, selected = false): void {
     this.group.visible = true;
     this.alert.visible = showAlert && status === 'ACTIVE';
     this.resolvedBadge.visible = status === 'RESOLVED';
@@ -81,6 +81,8 @@ export class BrokenPoleMarker {
     this.materials[1].color.set(status === 'RESOLVED' ? '#435b56' : '#394147');
     this.materials[1].emissive?.set(status === 'RESOLVED' ? '#65d5a0' : '#000000');
     this.materials[1].emissiveIntensity = status === 'RESOLVED' ? 0.9 : 0;
+    this.materials[0].color.set(selected ? '#ffe46f' : '#ff9f35');
+    this.materials[0].emissive.set(selected ? '#8a6814' : '#6b2c00');
   }
 
   private add(
