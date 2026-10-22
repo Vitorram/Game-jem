@@ -17,11 +17,11 @@ import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
 import { ORLA_MAP } from '../map/orlaMap';
 import { TrafficSystem } from '../traffic/TrafficSystem';
 import type { MobilityRoadAction } from '../traffic/TrafficSystem';
+import { TrafficSignals } from '../traffic/TrafficSignals';
 import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
 import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
 import { AnalystCabin } from './AnalystCabin';
-
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
   readonly scene = new Scene();
@@ -33,6 +33,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly mapView = new GridMapView(this.map);
   readonly traffic = new TrafficSystem(this.map);
   private readonly activeMobility = new ActiveMobilitySystem(this.map, this.traffic);
+  private readonly trafficSignals = new TrafficSignals(this.map, this.traffic);
   readonly brokenPoleMarker: BrokenPoleMarker;
   private readonly objectiveMarker = new TeamObjectiveMarker();
   private readonly analystCabin: AnalystCabin;
@@ -100,7 +101,7 @@ export class Fase1OrlaScene implements GameScene {
     this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
     const analystSpawn = this.map.cellCenter(12, 5);
     this.analystCabin = new AnalystCabin(analystSpawn.x, analystSpawn.z);
-    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.trafficSignals.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
     this.players.forEach((player, index) => {
       const spawn = index === 2 ? analystSpawn : this.map.spawns[index];
       player.setPosition(spawn.x, spawn.z - (index === 2 ? 0.3 : 0));
@@ -317,6 +318,7 @@ export class Fase1OrlaScene implements GameScene {
     this.activeMobility.setPlayerPosition(pedestrianPosition);
     this.traffic.update(dt);
     this.activeMobility.update(dt);
+    this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {
       const movementResolver = player.active && player.role === 'infraestrutura'
@@ -449,6 +451,7 @@ export class Fase1OrlaScene implements GameScene {
     this.sun.shadow.dispose();
     this.scene.clear();
     this.scene.background = null;
+    this.trafficSignals.dispose();
   }
 }
 
