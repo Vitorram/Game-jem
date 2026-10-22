@@ -12,13 +12,16 @@ import { Fase1OrlaScene } from '../scenes/Fase1OrlaScene';
 import { SceneManager } from './SceneManager';
 import { GAME_CONFIG } from '../config';
 import { suburbanGameState } from './GameState';
+import { GameSession } from '../session/GameSession';
+import { sessionStore } from '../session/sessionStore';
+import { ORLA_SESSION_CONFIG } from '../session/sessionData';
 import type { RiskSnapshot } from '../risks/RiskWorkflow';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 import type { ResponseTeam } from './GameState';
 
 export type GameSceneId = 'test' | 'fase1-orla';
-export type GameStatus = 'ready' | 'playing' | 'paused';
+export type GameStatus = 'ready' | 'playing' | 'paused' | 'finished';
 
 export class Game {
   readonly input: Input;
@@ -34,13 +37,15 @@ export class Game {
   private resizeObserver: ResizeObserver;
   private intro?: gsap.core.Tween;
   private closeView = false;
+  get isCloseView(): boolean { return this.closeView; }
   private readonly cameraTarget = new Vector3(0, 0, 0);
   private readonly desiredPosition = new Vector3();
   private readonly desiredTarget = new Vector3();
 
   private status: GameStatus = 'ready';
   private repairPuzzleOpen = false;
-  private previousTime = 0;
+  private previousTime: number | null = null;
+  private session?: GameSession;
   private disposed = false;
 
   constructor(
@@ -127,9 +132,13 @@ export class Game {
     if (this.status !== 'ready' || this.disposed) return;
 
     if (sceneId === 'fase1-orla') {
-      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), this.onObjectiveDistance);
+      suburbanGameState.reset();
+      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
       this.scenes.setScene(orla);
-      this.closeView = false;
+      this.session = new GameSession(ORLA_SESSION_CONFIG);
+      sessionStore.bind(this.session, () => this.restartPhase());
+      sessionStore.start();
+      this.closeView = true;
       this.onPlayerSelected?.(orla.player.id);
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
       this.changeStatus('playing');
@@ -154,10 +163,14 @@ export class Game {
   }
 
   returnToMenu() {
-    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen) return;
+    if (this.disposed || this.status === 'ready') return;
+    this.repairPuzzleOpen = false;
+    this.onRepairPuzzleChange?.(false);
     this.intro?.kill();
     this.intro = undefined;
     this.closeView = false;
+    if (this.session) sessionStore.unbind(this.session);
+    this.session = undefined;
     this.input.clear();
     suburbanGameState.setActiveCharacter(1);
     const laboratory = new TestScene(this.onAbilities, this.input);
@@ -176,7 +189,7 @@ export class Game {
   }
 
   togglePause() {
-    if (this.disposed || this.status === 'ready' || this.repairPuzzleOpen) return;
+    if (this.disposed || this.status === 'ready' || this.status === 'finished') return;
 
     this.changeStatus(
       this.status === 'playing' ? 'paused' : 'playing',
@@ -184,7 +197,7 @@ export class Game {
   }
 
   selectPlayer(id: PlayerId) {
-    if (this.disposed || this.repairPuzzleOpen) return;
+    if (this.disposed || this.repairPuzzleOpen || this.status !== 'playing') return;
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
@@ -197,6 +210,18 @@ export class Game {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.interact();
+  }
+
+  useMobilityHotkey(key: string): boolean {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    const scene = this.scenes.current;
+    return scene instanceof Fase1OrlaScene && scene.useMobilityHotkey(key);
+  }
+
+  private restartPhase(): void {
+    if (this.disposed || this.status !== 'finished') return;
+    this.returnToMenu();
+    this.start('fase1-orla');
   }
 
   toggleTraffic(): boolean | undefined {
@@ -249,7 +274,10 @@ export class Game {
   private changeStatus(status: GameStatus) {
     this.status = status;
     this.input.clear();
-    this.previousTime = 0;
+    this.previousTime = null;
+    const scene = this.scenes.current;
+    if (scene instanceof Fase1OrlaScene) scene.stopMovement();
+    if (this.session) sessionStore.setPaused(status === 'paused');
 
     if (status === 'paused') {
       this.intro?.pause();
@@ -267,18 +295,18 @@ export class Game {
   };
 
   private onBlur = () => {
-    if (this.status === 'playing' && !this.repairPuzzleOpen) {
+    if (this.status === 'playing') {
       this.changeStatus('paused');
     }
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
+    if (event.repeat) return;
+    if (event.code === 'Escape') { event.preventDefault(); this.togglePause(); return; }
     if (this.repairPuzzleOpen) {
-      if (event.code === 'Space' || event.code === 'Escape') event.preventDefault();
+      if (event.code === 'Space') event.preventDefault();
       return;
     }
-    if (event.repeat) return;
-    if (event.code === 'Escape') { this.togglePause(); return; }
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, a, [contenteditable="true"]')) return;
     const current = this.scenes.current;
     if (this.status === 'playing' && current instanceof Fase1OrlaScene) {
@@ -325,17 +353,17 @@ export class Game {
   private tick = (time: number) => {
     if (this.disposed) return;
 
-    const delta = this.previousTime
-      ? Math.min(
-          (time - this.previousTime) / 1000,
-          GAME_CONFIG.maxDelta,
-        )
-      : 0;
+    const elapsedMs = this.previousTime === null ? 0 : Math.max(0, time - this.previousTime);
+    const delta = Math.min(elapsedMs / 1000, GAME_CONFIG.maxDelta);
 
     this.previousTime = time;
 
     if (document.hidden) return;
 
+    if (this.status === 'playing' && this.session) {
+      sessionStore.tick(elapsedMs);
+      this.checkSessionEnd();
+    }
     if (this.status === 'playing' && !this.repairPuzzleOpen) {
       this.scenes.update(delta);
       this.updateCamera(delta);
@@ -349,16 +377,26 @@ export class Game {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
     this.repairPuzzleOpen = true;
     this.input.clear();
+    const scene = this.scenes.current;
+    if (scene instanceof Fase1OrlaScene) scene.stopMovement();
     this.onRepairPuzzleChange?.(true);
   }
 
   completeRepairPuzzle(): void {
-    if (this.disposed || !this.repairPuzzleOpen) return;
+    if (this.disposed || this.status !== 'playing' || !this.repairPuzzleOpen) return;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.completePoleRepair();
     this.repairPuzzleOpen = false;
     this.input.clear();
     this.onRepairPuzzleChange?.(false);
+    this.checkSessionEnd();
+  }
+
+  private checkSessionEnd(): void {
+    if (this.session?.snapshot().status !== 'finished') return;
+    this.repairPuzzleOpen = false;
+    this.onRepairPuzzleChange?.(false);
+    this.changeStatus('finished');
   }
 
   dispatchTeam(team: ResponseTeam): boolean {
@@ -386,6 +424,8 @@ export class Game {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('blur', this.onBlur);
 
+    if (this.session) sessionStore.unbind(this.session);
+    this.session = undefined;
     this.input.dispose();
     this.scenes.dispose();
 
@@ -394,4 +434,5 @@ export class Game {
     this.renderer.domElement.remove();
   }
 }
+
 

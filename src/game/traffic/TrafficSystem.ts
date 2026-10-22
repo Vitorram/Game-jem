@@ -1,3 +1,4 @@
+import { ORLA_INTERACTION } from '../config';
 import {
   BoxGeometry, BufferGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry,
 } from 'three';
@@ -233,6 +234,15 @@ export class TrafficSystem {
     const lane = this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
       .reduce((nearest, candidate) => Math.abs(candidate.z - position.z) < Math.abs(nearest.z - position.z) ? candidate : nearest);
     return { x: MathUtils.clamp(position.x, this.minX + 0.8, this.minX + this.width - 0.8), z: lane.z };
+  }
+
+  getWorkZoneApproachPosition(position: { x: number; z: number }): { x: number; z: number } {
+    const target = this.getNearestPrincipalLanePosition(position);
+    const lane = this.lanes.find(candidate => candidate.type === 'PRINCIPAL' && candidate.z === target.z)!;
+    // O cone precisa deter os carros antes da área de trabalho, não em cima do poste.
+    target.x = MathUtils.clamp(position.x - lane.direction * ORLA_INTERACTION.coneApproachDistance,
+      this.minX + 1, this.minX + this.width - 1);
+    return target;
   }
 
   getNearbyCone(x: number, z: number, radius = 1.8): boolean {
@@ -695,3 +705,4 @@ export class TrafficSystem {
     suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
   }
 }
+

@@ -1,6 +1,6 @@
 import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { GRID_CONFIG } from '../config';
+import { GRID_CONFIG, ORLA_CAMERA } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
@@ -18,7 +18,7 @@ const SEA_HIGH = new Color('#55d0e2');
 /** O mar fica mais baixo que a areia, o que desenha a borda da praia. */
 const SEA_DROP = 0.12;
 /** Quanto o chão se estende além do mapa, para não aparecer o vazio do fundo. */
-const APRON = 30;
+const APRON = ORLA_CAMERA.groundApron;
 /** Objetos ocupam 94% do tile: ficam como blocos separados, estilo brinquedo. */
 const OBJECT_FILL = 0.94;
 
@@ -198,3 +198,4 @@ export class GridMapView {
     strip('se', this.map.tileAt(columns - 1, rows - 1)!, east, south, APRON, APRON);
   }
 }
+

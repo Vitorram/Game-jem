@@ -33,13 +33,14 @@ export const ORLA_CAMERA = {
   fov: GAME_CONFIG.cameraFov,
   near: GAME_CONFIG.cameraNear,
   far: GAME_CONFIG.cameraFar,
-  closeHeight: 16,
+  closeHeight: 9,
   wideHeight: 18,
   tilt: GAME_CONFIG.cameraTilt,
   followSmoothing: 4,
   portraitAspect: 0.85,
   minAspect: 0.01,
   groundPadding: 0.02,
+  groundApron: 30,
 } as const;
 
 export const GRID_CONFIG = {
@@ -55,3 +56,18 @@ export const ITEM_VIEW_CONFIG = {
   surfaceGap: 0.08,
   roughness: 0.65,
 } as const;
+
+
+/** Resposta rápida, com frenagem mais forte que a aceleração. Unidades por segundo. */
+export const ORLA_MOVEMENT = {
+  speed: 4.2, sprintMultiplier: 1.5, acceleration: 18, braking: 28,
+  stopThreshold: 0.01, turnSmoothing: 16,
+} as const;
+
+export const ORLA_FEEDBACK = {
+  ringInnerRadius: 0.42, ringOuterRadius: 0.52, ringHeight: 0.025,
+  ringColor: '#fff2a6', actionColor: '#75f2ab', actionDuration: 0.24,
+} as const;
+
+/** Distância antes do poste onde a Mobilidade é orientada a colocar o cone. */
+export const ORLA_INTERACTION = { coneApproachDistance: 3 } as const;

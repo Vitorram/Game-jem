@@ -141,3 +141,36 @@ Definir perspectiva (top-down, terceira pessoa ou outra), controles principais e
 - https://vercel.com/docs/frameworks/full-stack/nextjs
 - https://threejs.org/docs/
 - https://gsap.com/docs/v3/
+
+
+### Rodada jogável da Orla
+
+Em `/jogo`, escolha **Jogar na Orla**. A rodada dura até três minutos e termina ao
+reparar o poste ou esgotar o prazo. A pontuação combina 300 pontos pela missão
+concluída e até 300 de bônus pelo tempo restante.
+
+1. Com a Analista, use **E** três vezes: selecionar a ocorrência, acionar
+   Infraestrutura e acionar Mobilidade.
+2. Escolha Mobilidade, siga a seta e coloque um cone com **E**. O alvo fica antes
+   do poste, para os veículos pararem fora da área de trabalho. Espere o trecho
+   ficar livre.
+3. Escolha Infraestrutura, aproxime-se do poste e use **E**. Acerte os três pinos
+   com **Espaço** ou toque. O resumo permite reiniciar a fase inteira ou voltar.
+
+**Controles:** WASD/setas para mover, Shift para correr, T para trocar de equipe,
+E para interagir e Esc para pausar. A Analista permanece na cabine, como antes.
+No celular há botões de direção, corrida e ações das vias. Usar os botões de personagens
+seleciona a equipe; o anel no chão identifica quem está sob controle.
+
+O movimento da Orla usa aceleração, frenagem e deslizamento nas colisões;
+`ORLA_MOVEMENT` em `src/game/config.ts` concentra seu ajuste. O laboratório e
+`/teste-personagem` mantêm o comportamento anterior. O relógio conta tempo real
+(inclusive durante o reparo), mas congela ao pausar ou sair da janela. O puzzle
+preserva a etapa e pausa suas animações e callbacks.
+
+**Validação manual:** confira movimento diagonal, corrida, colisão em bancadas,
+troca de equipe sem deslocar a anterior, pausa por Esc e ao sair da janela,
+zoom/resize, vitória, tempo esgotado e reinício com poste, cones e placar limpos.
+Repita em celular e confirme que os controles não cobrem o alvo. Verifique também
+`/teste-personagem`. Os testes automatizados usam Three.js com renderer simulado;
+não substituem a inspeção visual nem uma medição de desempenho em aparelho real.

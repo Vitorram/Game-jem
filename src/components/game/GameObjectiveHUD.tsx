@@ -41,7 +41,7 @@ export default function GameObjectiveHUD({ player, distance }: { player: PlayerI
     return <div className="game-objective-hud" role="status">
       <b className={`traffic-state ${traffic.color}`}>{traffic.icon} {traffic.label}</b>
       <b>⚠ POSTE DANIFICADO · SETOR 02</b>
-      <span>{selected ? `1 ACIONAR INFRA ${infrastructure ? '✓' : ''} · 2 ACIONAR MOBILIDADE ${mobility ? '✓' : ''} · E PRÓXIMA` : 'E SELECIONAR OCORRÊNCIA'}</span>
+      <span>{infrastructure && mobility ? 'Equipes acionadas! Escolha Mobilidade e siga a seta.' : selected ? `1 INFRA ${infrastructure ? '✓' : ''} · 2 MOBILIDADE ${mobility ? '✓' : ''} · E ACIONAR PRÓXIMA` : 'E ou Acionar equipe para selecionar a ocorrência.'}</span>
     </div>;
   }
 
@@ -57,6 +57,7 @@ export default function GameObjectiveHUD({ player, distance }: { player: PlayerI
   if (!problem.dispatchedTeams.includes(team)) return null;
   return <div className={`game-objective-hud ${player === 1 ? 'for-infrastructure' : 'for-mobility'}`} role="status">
     <b>{problem.status === 'RESOLVED' ? 'OBJETIVO · NORMALIZAR FLUXO' : player === 1 ? 'OBJETIVO · POSTE' : 'OBJETIVO · FLUXO'} · SETOR 02 {distance === null ? '' : `· ~${distance} m`}</b>
-    {player === 2 && <span>1–5 AÇÕES NA VIA · E COLOCAR / REMOVER CONE</span>}
+    {player === 2 ? <span>Siga a seta e coloque um cone antes do poste (E). Quando o trecho ficar livre, escolha Infraestrutura.</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
   </div>;
 }
+

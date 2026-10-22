@@ -8,11 +8,11 @@ import styles from './OrdersHud.module.css';
 
 type HudOrder = SessionSnapshot['orders'][number];
 
-/** Ícones dos riscos (ids de ORLA_RISKS): 1 iluminação, 2 sensor, 3 rota. */
+/** Marcos confirmados pela cena, e não por cliques no HUD. */
 const RISK_STEPS: Record<number, { icon: string; label: string }> = {
-  1: { icon: '💡', label: 'Iluminação' },
-  2: { icon: '📡', label: 'Sensor' },
-  3: { icon: '🚧', label: 'Rota' },
+  1: { icon: '📡', label: 'Acionar as duas equipes' },
+  2: { icon: '🚧', label: 'Preparar uma área segura' },
+  3: { icon: '💡', label: 'Reparar o poste' },
 };
 
 const reducedMotion = () =>
@@ -25,8 +25,6 @@ const formatTime = (ms: number) => {
 
 function Ticket({ order, queued, frozen }: { order: HudOrder; queued: boolean; frozen: boolean }) {
   const root = useRef<HTMLLIElement>(null);
-  // Lido só na montagem: a barra é uma animação CSS que corre sozinha, sem re-render por frame.
-  const elapsedAtMount = useRef(order.timeLimitMs - order.remainingMs);
 
   useEffect(() => {
     if (!root.current || reducedMotion()) return;
@@ -54,9 +52,9 @@ function Ticket({ order, queued, frozen }: { order: HudOrder; queued: boolean; f
         <i
           className={styles.fill}
           style={{
-            animationDuration: `${order.timeLimitMs}ms`,
-            animationDelay: `-${elapsedAtMount.current}ms`,
-            animationPlayState: frozen ? 'paused' : 'running',
+            width: `${order.remainingMs / order.timeLimitMs * 100}%`,
+            background: order.remainingMs < 30_000 ? '#e5484d' : '#46c46a',
+            transition: frozen ? 'none' : 'width 1s linear',
           }}
         />
       </span>
@@ -68,10 +66,10 @@ function Coin({ score }: { score: number }) {
   const root = useRef<HTMLDivElement>(null);
   const previous = useRef(score);
   useEffect(() => {
-    if (previous.current !== score && root.current && !reducedMotion()) {
-      gsap.fromTo(root.current, { scale: 1.3 }, { scale: 1, duration: 0.4, ease: 'back.out(3)' });
-    }
+    const tween = previous.current !== score && root.current && !reducedMotion()
+      ? gsap.fromTo(root.current, { scale: 1.3 }, { scale: 1, duration: 0.4, ease: 'back.out(3)' }) : undefined;
     previous.current = score;
+    return () => { tween?.kill(); };
   }, [score]);
   return (
     <div ref={root} className={styles.coin} role="status" aria-label={`Pontuação: ${score}`}>
@@ -84,11 +82,11 @@ function Coin({ score }: { score: number }) {
 function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | 'info' } | null {
   switch (event.type) {
     case 'order-completed':
-      return { tone: 'good', text: `Pedido entregue! +${event.points}${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
+      return { tone: 'good', text: `Missão cumprida! +${event.points}${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
     case 'order-expired':
-      return { tone: 'bad', text: `Pedido expirou −${event.penalty}` };
+      return { tone: 'bad', text: `Prazo encerrado −${event.penalty}` };
     case 'order-arrived':
-      return { tone: 'info', text: 'Novo pedido na fila' };
+      return { tone: 'info', text: 'Acione as equipes com a Analista' };
     default:
       return null;
   }
@@ -126,7 +124,7 @@ const SUMMARY_MESSAGES = [
   'Orla segura para todas!',
 ];
 
-function Summary({ snapshot }: { snapshot: SessionSnapshot }) {
+function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
 
@@ -143,17 +141,18 @@ function Summary({ snapshot }: { snapshot: SessionSnapshot }) {
   return (
     <div ref={root} className={styles.summary} role="dialog" aria-modal="true" aria-label="Fim de fase">
       <div className={styles.card}>
-        <h2>Fim de fase</h2>
+        <h2>{snapshot.completedOrders ? 'Orla recuperada!' : 'Tempo esgotado!'}</h2>
         <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
           {[1, 2, 3].map(n => <span key={n} className={styles.star} data-on={n <= stars}>★</span>)}
         </div>
         <p className={styles.verdict}>{SUMMARY_MESSAGES[stars]}</p>
         <dl className={styles.stats}>
           <div><dt>Pontos</dt><dd>{snapshot.score}</dd></div>
-          <div><dt>Entregues</dt><dd>{snapshot.completedOrders}</dd></div>
-          <div><dt>Expirados</dt><dd>{snapshot.expiredOrders}</dd></div>
+          <div><dt>Missões</dt><dd>{snapshot.completedOrders}</dd></div>
+          <div><dt>Não concluídas</dt><dd>{snapshot.expiredOrders}</dd></div>
         </dl>
         <button type="button" className={styles.primary} onClick={() => sessionStore.restart()}>Jogar de novo</button>
+        {onMenu && <button type="button" className={styles.primary} onClick={onMenu}>Voltar ao menu</button>}
       </div>
     </div>
   );
@@ -163,7 +162,7 @@ function Summary({ snapshot }: { snapshot: SessionSnapshot }) {
  * HUD de pedidos. `paused` congela as barras (a cena também para de avançar o relógio).
  * Renderize FORA do bloco `status === 'playing'` para a barra continuar sincronizada ao retomar.
  */
-export default function OrdersHud({ paused, showDebug = false }: { paused: boolean; showDebug?: boolean }) {
+export default function OrdersHud({ paused, showDebug = false, onMenu }: { paused: boolean; showDebug?: boolean; onMenu?: () => void }) {
   const { snapshot, feedback } = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
   if (!snapshot) return null;
 
@@ -188,7 +187,8 @@ export default function OrdersHud({ paused, showDebug = false }: { paused: boole
           Resolver passo do pedido (teste)
         </button>
       )}
-      {snapshot.status === 'finished' && <Summary snapshot={snapshot} />}
+      {snapshot.status === 'finished' && <Summary snapshot={snapshot} onMenu={onMenu} />}
     </>
   );
 }
+

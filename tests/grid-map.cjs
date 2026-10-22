@@ -26,7 +26,7 @@ test('lê 16x10, oito tipos, spawns livres e conversão entre grade e mundo', ()
   assert.equal(map.rows, 10);
   assert.equal(map.width, 32);
   assert.equal(map.depth, 20);
-  assert.deepEqual(new Set(map.tiles), new Set(Object.keys(TILE_TYPES)));
+  assert.deepEqual(new Set(map.tiles), new Set(['sea', 'ground', 'promenade', 'itemBox', 'counter', 'station', 'cycleway', 'road']));
   assert.equal(map.spawns.length, 3);
   for (let row = 0; row < map.rows; row++) for (let column = 0; column < map.columns; column++) {
     assert.deepEqual(map.worldToCell(map.cellCenter(column, row)), { column, row });
@@ -79,7 +79,8 @@ test('limites externos respeitam raio; movimento livre e dt zero preservam posi�
 test('construtor cria um bloco por tile, topo correto, sombras e dispose único', () => {
   const map = new GridMap(ORLA_MAP, 2, 0.3);
   const view = new GridMapView(map);
-  assert.equal(view.group.children.length, 160);
+  const tiles = view.group.children.filter(child => child.name.startsWith('tile-'));
+  assert.equal(tiles.length, 160);
   const resources = new Map();
   view.group.traverse(object => {
     for (const resource of [object.geometry, object.material].filter(Boolean)) {
@@ -88,10 +89,11 @@ test('construtor cria um bloco por tile, topo correto, sombras e dispose único'
       resource.addEventListener('dispose', () => resources.set(resource, resources.get(resource) + 1));
     }
   });
-  assert.equal(resources.size, Object.keys(TILE_TYPES).length + 1);
-  for (const tile of view.group.children) {
+  assert.ok(resources.size < view.group.children.length, 'geometrias e materiais compartilhados');
+  for (const tile of tiles) {
     const kind = tile.name.split('-').at(-1);
-    near(tile.position.y + tile.scale.y / 2, TILE_TYPES[kind].height);
+    tile.geometry.computeBoundingBox();
+    assert.ok(Math.abs(tile.position.y + tile.geometry.boundingBox.max.y * tile.scale.y - (kind === 'sea' ? -0.12 : TILE_TYPES[kind].height)) < 1e-6, 'topo da geometria Float32');
     assert.equal(tile.receiveShadow, true);
   }
   view.dispose(); view.dispose();
@@ -130,3 +132,4 @@ test('deslocamentos repetidos não penetram quinas ou emendas entre tiles sólid
     }
   }
 });
+

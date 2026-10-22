@@ -1,8 +1,9 @@
-﻿import {
+import {
   BoxGeometry, BufferGeometry, CapsuleGeometry, CatmullRomCurve3, Color,
   Group, MathUtils, Mesh, MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
 } from 'three';
-import { GAME_CONFIG } from '../config';
+import { GAME_CONFIG, ORLA_MOVEMENT } from '../config';
+import { CharacterMotor } from '../core/CharacterMotor';
 import { suburbanGameState } from '../core/GameState';
 import type { GameState } from '../core/GameState';
 
@@ -52,9 +53,11 @@ export class Player {
   private gait = 0;
   private movement = 0;
   private sprint = 0;
+  private readonly motor?: CharacterMotor;
   private disposed = false;
 
-  constructor(id: PlayerId = 1) {
+  constructor(id: PlayerId = 1, responsiveMovement = false) {
+    if (responsiveMovement) this.motor = new CharacterMotor(ORLA_MOVEMENT);
     this.id = id;
     this.name = PLAYER_APPEARANCES[id].name;
     this.role = PLAYER_APPEARANCES[id].role;
@@ -242,17 +245,21 @@ export class Player {
     const previousX = this.mesh.position.x;
     const previousZ = this.mesh.position.z;
     let turn = 0;
-    if (length > 0) {
+    if (length > 0 || this.motor) {
       const distance = GAME_CONFIG.playerSpeed * (sprint ? 1.45 : 1) * dt;
-      const proposed = { x: previousX + x / length * distance, z: previousZ + z / length * distance };
-      const position = resolveMovement
-        ? resolveMovement({ x: previousX, z: previousZ }, proposed)
-        : { x: MathUtils.clamp(proposed.x, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit), z: MathUtils.clamp(proposed.z, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit) };
+      const proposed = { x: previousX + x / (length || 1) * distance, z: previousZ + z / (length || 1) * distance };
+      const resolver = resolveMovement ?? ((_from: { x: number; z: number }, to: { x: number; z: number }) => ({
+        x: MathUtils.clamp(to.x, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit),
+        z: MathUtils.clamp(to.z, -GAME_CONFIG.worldLimit, GAME_CONFIG.worldLimit),
+      }));
+      const position = this.motor
+        ? this.motor.step(dt, { x: previousX, z: previousZ }, { x, z }, sprint, resolver)
+        : resolver({ x: previousX, z: previousZ }, proposed);
       this.mesh.position.x = position.x;
       this.mesh.position.z = position.z;
       const target = Math.atan2(x, z);
       const difference = Math.atan2(Math.sin(target - this.mesh.rotation.y), Math.cos(target - this.mesh.rotation.y));
-      turn = difference * (1 - Math.exp(-12 * dt));
+      turn = length > 0 ? difference * (1 - Math.exp(-(this.motor ? ORLA_MOVEMENT.turnSmoothing : 12) * dt)) : 0;
       this.mesh.rotation.y += turn;
       this.mesh.rotation.y = Math.atan2(Math.sin(this.mesh.rotation.y), Math.cos(this.mesh.rotation.y));
     }
@@ -322,7 +329,9 @@ export class Player {
     }
   }
 
-  setPosition(x: number, z: number) { this.mesh.position.set(x, 0, z); }
+  stopMovement(): void { this.motor?.stop(); }
+
+  setPosition(x: number, z: number) { this.stopMovement(); this.mesh.position.set(x, 0, z); }
 
   get position() { return this.mesh.position; }
 
@@ -334,3 +343,4 @@ export class Player {
     this.mesh.clear();
   }
 }
+
