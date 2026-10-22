@@ -77,8 +77,8 @@ export class TrafficSystem {
   private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
     .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
   private readonly dark = new MeshStandardMaterial({ color: '#20272c', roughness: 0.9 });
-  private readonly roadMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
-  private readonly connectorMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
+  private readonly roadMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
+  private readonly connectorMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
   private readonly directionGeometry: ShapeGeometry;
   private readonly directionMaterial = new MeshStandardMaterial({ color: '#d8e3dc', emissive: '#253a35', side: 2, roughness: 0.8 });
@@ -195,14 +195,14 @@ export class TrafficSystem {
   private createEscapeConnectors(mainZ: number, escapeZ: number): void {
     for (const x of [this.minX + 1.4, -this.minX - 1.4]) {
       const connector = new Mesh(this.connectorGeometry, this.connectorMaterial);
-      connector.position.set(x, 0.012, (mainZ + escapeZ) / 2);
+      connector.position.set(x, -0.034, (mainZ + escapeZ) / 2);
       this.group.add(connector);
     }
     // A clear asphalt strip makes the escape lane legible even when it is closed.
     const road = new Mesh(this.roadGeometry, this.roadMaterial);
     road.scale.x = this.width;
     road.scale.z = 0.8 / 1.78;
-    road.position.set(0, 0, escapeZ);
+    road.position.set(0, -0.033, escapeZ);
     this.group.add(road);
   }
 

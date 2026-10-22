@@ -1,11 +1,11 @@
 import { ITEM_TYPES, type ItemId } from '../items/itemData';
 
 export const TILE_TYPES = {
-  ground: { color: '#eeb65a', height: 0, solid: false },
-  promenade: { color: '#ded8cc', height: 0, solid: false },
-  cycleway: { color: '#e7c45d', height: 0, solid: false },
-  road: { color: '#42494f', height: 0, solid: false },
-  sea: { color: '#398fa8', height: 0, solid: true },
+  ground: { color: '#ecc078', height: 0, solid: false },
+  promenade: { color: '#dfd9ce', height: 0, solid: false },
+  cycleway: { color: '#b83b32', height: 0, solid: false },
+  road: { color: '#33393e', height: 0, solid: false },
+  sea: { color: '#2b879e', height: 0, solid: true },
   wall: { color: '#657184', height: 1.8, solid: true },
   counter: { color: '#b77b48', height: 0.9, solid: true },
   itemBox: { color: '#536b80', height: 0.9, solid: true },
