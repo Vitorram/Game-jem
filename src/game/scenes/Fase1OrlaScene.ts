@@ -1,4 +1,4 @@
-﻿import {
+import {
   Scene, Color, HemisphereLight, DirectionalLight, MathUtils, Vector3,
 } from 'three';
 import type { PerspectiveCamera } from 'three';
@@ -17,6 +17,7 @@ import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
 import { ORLA_MAP } from '../map/orlaMap';
 import { TrafficSystem } from '../traffic/TrafficSystem';
 import type { MobilityRoadAction } from '../traffic/TrafficSystem';
+import { TrafficSignals } from '../traffic/TrafficSignals';
 import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
 import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
@@ -43,6 +44,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly mapView = new GridMapView(this.map);
   readonly traffic = new TrafficSystem(this.map);
   private readonly activeMobility = new ActiveMobilitySystem(this.map, this.traffic);
+  private readonly trafficSignals = new TrafficSignals(this.map, this.traffic);
   readonly brokenPoleMarker: BrokenPoleMarker;
   private readonly objectiveMarker = new TeamObjectiveMarker();
   private readonly analystCabin: AnalystCabin;
@@ -57,7 +59,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
   private readonly resolveOrlaMovement = (from: { x: number; z: number }, to: { x: number; z: number }) => {
     const resolved = this.map.resolveMovement(from, to);
-    const crate = this.map.cellCenter(10, 4);
+    const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
     const radius = GRID_CONFIG.playerRadius;
     const left = crate.x - 0.95 - radius, right = crate.x + 0.95 + radius;
     const near = crate.z - 0.78 - radius, far = crate.z + 0.78 + radius;
@@ -124,9 +126,9 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.add(this.sun);
     const brokenPole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')!;
     this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
-    const analystSpawn = this.map.cellCenter(12, 5);
+    const analystSpawn = this.map.spawns[2];
     this.analystCabin = new AnalystCabin(analystSpawn.x, analystSpawn.z);
-    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.trafficSignals.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
     this.players.forEach((player, index) => {
       const spawn = index === 2 ? analystSpawn : this.map.spawns[index];
       player.setPosition(spawn.x, spawn.z - (index === 2 ? 0.3 : 0));
@@ -414,9 +416,10 @@ export class Fase1OrlaScene implements GameScene {
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.phase?.update(dt, this.player);
+    this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {
-      const movementResolver = player.active && player.role === 'infraestrutura'
+      const movementResolver = player.active && player.role === 'infraestrutura' && !this.phase?.isServicing(player)
         ? this.resolveInfrastructureMovement : this.resolveOrlaMovement;
       if (!player.active) player.stopMovement();
       player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
@@ -425,6 +428,7 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   private checkPlayerCollision(): void {
+    if (this.phase?.isServicing(this.player)) return;
     const hitPlayer = this.player;
     const position = hitPlayer.mesh.position;
     const push = this.traffic.getPlayerCollision(position) ?? this.activeMobility.getPlayerCollision(position);
@@ -505,7 +509,7 @@ export class Fase1OrlaScene implements GameScene {
       const carryingCone = this.items.heldBy(2) === 'cone';
       const target = team === 'mobilidade'
         ? intervention ?? (carryingCone && !this.returningConeToCrate
-          ? this.traffic.getWorkZoneApproachPosition(pole.position) : this.map.cellCenter(10, 4)) : pole.position;
+          ? this.traffic.getWorkZoneApproachPosition(pole.position) : this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row)) : pole.position;
       const distance = Math.round(this.objectiveMarker.update(this.player.mesh.position, target));
       if (distance !== this.lastObjectiveDistance) {
         this.lastObjectiveDistance = distance;
@@ -562,6 +566,7 @@ export class Fase1OrlaScene implements GameScene {
     this.sun.shadow.dispose();
     this.scene.clear();
     this.scene.background = null;
+    this.trafficSignals.dispose();
   }
 }
 

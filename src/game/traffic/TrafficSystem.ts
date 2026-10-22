@@ -1,11 +1,10 @@
-import { ORLA_INTERACTION, ORLA_CROSSING } from '../config';
-import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
-import { VehicleModels, VEHICLE_KINDS } from './VehicleModels';
 import {
-  BoxGeometry, BufferGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry,
+  BoxGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry,
 } from 'three';
 import type { GridMap } from '../map/GridMap';
 import { suburbanGameState, type RoadState } from '../core/GameState';
+import { ORLA_CROSSING } from '../config';
+import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 
 type Lane = {
   id: string;
@@ -20,7 +19,7 @@ type Lane = {
   barriers: Group;
   coneGroup: Group;
 };
-type ConeObstacle = { lane: Lane; mesh: Group; x: number };
+type ConeObstacle = { lane: Lane; mesh: Mesh; x: number };
 type Vehicle = {
   mesh: Group;
   lane: Lane;
@@ -41,17 +40,17 @@ type TrafficConnection = {
   direction: 1 | -1;
   x: number;
 };
-export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'escape';
+export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'reverse' | 'escape' | 'redirect';
 export type WorkZoneReadiness = {
   prepared: boolean;
-  reason: 'NEEDS_INTERVENTION' | 'CARS_IN_WORK_ZONE' | 'ACCESS_TOO_NARROW' | null;
+  reason: 'NEEDS_INTERVENTION' | 'WAITING_FOR_DIVERSION' | 'CARS_IN_WORK_ZONE' | 'ACCESS_TOO_NARROW' | null;
   nearbyVehicles: number;
 };
 
 const INITIAL_VEHICLES_PER_LANE = 1;
 const MAX_VEHICLES_PER_LANE = 7;
-// Envelope do maior modelo (ônibus), usado também na segurança das filas.
-const VEHICLE_LENGTH = 2.2;
+const VEHICLE_LENGTH = 1.35;
+const VEHICLE_WIDTH = 0.56;
 const SAFE_GAP = 4.2;
 const MIN_BUMPER_GAP = 0.16;
 const LANE_CHANGE_DURATION = 0.7;
@@ -60,34 +59,33 @@ const ROUTE_DECISION_THRESHOLD = 0.38;
 const ROUTE_LOOKAHEAD = 8;
 const CONNECTION_APPROACH_DISTANCE = 1.8;
 const ESCAPE_CAPACITY = 30;
-export const WORK_ZONE_CLEARANCE = 2.6;
+/** Raio do círculo de trabalho; compartilhado com o ActiveMobilitySystem. */
+export const WORK_ZONE_CLEARANCE = 2.9;
 const CONE_LOOKAHEAD = 9;
 const CONE_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.3;
-const PLAYER_YIELD_LOOKAHEAD = 9;
-const PLAYER_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.42;
+const CROSSING_STOP_DISTANCE = 2.45;
+const CROSSING_BRAKE_DISTANCE = 7;
+const CROSSING_SAFE_DISTANCE = 2.35;
+const CROSSING_CLEARING_DISTANCE = 1.8;
+/** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
+const PLAYER_HIT_RADIUS = 0.26;
 
 /** Fluxo de tráfego de protótipo em duas vias principais e uma via de escape paralela. */
 export class TrafficSystem {
   readonly group = new Group();
-  private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, 0.68);
-  private readonly vehicleModels = new VehicleModels();
-  private modelIndex = 0;
+  private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, VEHICLE_WIDTH);
+  private readonly cabinGeometry = new BoxGeometry(0.62, 0.3, 0.46);
+  private readonly wheelGeometry = new CylinderGeometry(0.1, 0.1, 0.08, 10);
   private readonly roadGeometry = new BoxGeometry(1, 0.035, 1.78);
   private readonly connectorGeometry = new BoxGeometry(0.72, 0.045, 2.05);
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.12, 1.5);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
-  private readonly coneBaseGeometry = new BoxGeometry(0.42, 0.06, 0.42);
-  private readonly coneBandGeometry = new CylinderGeometry(0.125, 0.16, 0.09, 8, 1, true);
-  private readonly coneTopBandGeometry = new CylinderGeometry(0.05, 0.08, 0.09, 8, 1, true);
   private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
     .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
   private readonly dark = new MeshStandardMaterial({ color: '#20272c', roughness: 0.9 });
-  private readonly roadMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
-  private readonly connectorMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
+  private readonly roadMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
+  private readonly connectorMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
-  private readonly coneMaterial = new MeshStandardMaterial({ color: '#f26b32', roughness: 0.72 });
-  private readonly coneStripeMaterial = new MeshStandardMaterial({ color: '#fff1cf', roughness: 0.45, emissive: '#554322', emissiveIntensity: 0.12 });
-  private readonly coneBaseMaterial = new MeshStandardMaterial({ color: '#c94f30', roughness: 0.82 });
   private readonly directionGeometry: ShapeGeometry;
   private readonly directionMaterial = new MeshStandardMaterial({ color: '#d8e3dc', emissive: '#253a35', side: 2, roughness: 0.8 });
   private readonly escapeDirectionMaterial = new MeshStandardMaterial({ color: '#8ee0b4', emissive: '#1d5038', side: 2, roughness: 0.8 });
@@ -103,9 +101,11 @@ export class TrafficSystem {
   private redirecting = false;
   private escapeSourceId = 'orla-eastbound';
   private mobilityView = false;
+  private pedestrianCrossingRequested = false;
   private waitingPedestrians = 0;
   private pedestrianCrossingOccupied = false;
-  private playerPosition: { x: number; z: number } | null = null;
+  private crossingSignalPhase: 'green' | 'yellow' | 'red' = 'green';
+  private crossingSignalTimer = 0;
   private demandClock = 0;
   private demandLevel = 0.5;
   private scheduledDemand: number | null = null;
@@ -117,6 +117,8 @@ export class TrafficSystem {
   private incidentTime = 0;
   private trafficRandomSeed = 173;
   private readonly pedestrianCrossingX = ORLA_CROSSING.centerX;
+  /** Posição do personagem a pé, usada para frear e para detectar atropelamento. */
+  private playerPosition: { x: number; z: number } | null = null;
   private disposed = false;
 
   constructor(map: GridMap) {
@@ -129,7 +131,7 @@ export class TrafficSystem {
     this.directionGeometry = new ShapeGeometry(arrowShape);
     const mainRoadZ = map.cellCenter(0, map.rows - 1).z;
     const roadLowEdge = mainRoadZ - map.tileSize * 1.5;
-    const escapeRoadZ = roadLowEdge - map.tileSize * 0.4;
+    const escapeRoadZ = roadLowEdge + map.tileSize * 0.2;
     this.lanes = [
       this.createLane('orla-eastbound', 1, roadLowEdge + map.tileSize * 0.6, 'PRINCIPAL', 100, 1),
       this.createLane('orla-eastbound-2', 1, roadLowEdge + map.tileSize, 'PRINCIPAL', 100, 1),
@@ -161,7 +163,6 @@ export class TrafficSystem {
 
   private createConnections(): TrafficConnection[] {
     const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
-    const escapeOpen = escape.status === 'open';
     const leftNodeX = this.minX + 1.4;
     const rightNodeX = this.minX + this.width - 1.4;
     return this.lanes.filter(lane => lane.type === 'PRINCIPAL').flatMap(lane => ([1, -1] as const).flatMap(direction => {
@@ -209,14 +210,14 @@ export class TrafficSystem {
   private createEscapeConnectors(mainZ: number, escapeZ: number): void {
     for (const x of [this.minX + 1.4, -this.minX - 1.4]) {
       const connector = new Mesh(this.connectorGeometry, this.connectorMaterial);
-      connector.position.set(x, -0.034, (mainZ + escapeZ) / 2);
+      connector.position.set(x, 0.012, (mainZ + escapeZ) / 2);
       this.group.add(connector);
     }
     // A clear asphalt strip makes the escape lane legible even when it is closed.
     const road = new Mesh(this.roadGeometry, this.roadMaterial);
     road.scale.x = this.width;
-    road.scale.z = 1.45 / 1.78;
-    road.position.set(0, -0.033, escapeZ);
+    road.scale.z = 0.8 / 1.78;
+    road.position.set(0, 0, escapeZ);
     this.group.add(road);
   }
 
@@ -237,6 +238,7 @@ export class TrafficSystem {
     this.lanes.forEach(lane => this.syncLaneVisual(lane));
   }
 
+  /** Posição do personagem a pé (null quando a Analista está ativa). */
   setPlayerPosition(position: { x: number; z: number } | null): void {
     this.playerPosition = position ? { x: position.x, z: position.z } : null;
   }
@@ -275,7 +277,7 @@ export class TrafficSystem {
     vehicle.laneChangeElapsed = LANE_CHANGE_DURATION;
     vehicle.mesh.position.z = lane.z;
     for (const x of [-0.8, 0.8]) {
-      const light = new Mesh(this.coneBaseGeometry, this.barrierMaterial);
+      const light = new Mesh(this.barrierGeometry, this.barrierMaterial);
       light.position.set(x, 0.55, 0);
       light.scale.set(0.4, 1.5, 0.6);
       this.incidentLights.add(light);
@@ -329,13 +331,17 @@ export class TrafficSystem {
 
   getPlayerCollision(position: { x: number; z: number }, radius = 0.34): { x: number; z: number } | null {
     const impact = this.vehicles
-      .filter(vehicle => vehicle.speed > 0.75
+      .filter(vehicle => vehicle.speed > 0.05
         && Math.abs(vehicle.mesh.position.x - position.x) <= VEHICLE_LENGTH / 2 + radius
-        && Math.abs(vehicle.mesh.position.z - position.z) <= 0.68 / 2 + radius)
+        && Math.abs(vehicle.mesh.position.z - position.z) <= VEHICLE_WIDTH / 2 + radius)
       .sort((a, b) => Math.hypot(a.mesh.position.x - position.x, a.mesh.position.z - position.z)
         - Math.hypot(b.mesh.position.x - position.x, b.mesh.position.z - position.z))[0];
     if (!impact) return null;
-    return { x: 0, z: position.z >= impact.mesh.position.z ? 1 : -1 };
+    const dx = position.x - impact.mesh.position.x;
+    const dz = position.z - impact.mesh.position.z;
+    const push = { x: impact.lane.direction * 0.8, z: dz >= 0 ? 1 : -1 };
+    const length = Math.hypot(push.x, push.z) || 1;
+    return { x: push.x / length, z: push.z / length };
   }
 
   getNearbyLane(x: number, z: number): string | null {
@@ -350,13 +356,13 @@ export class TrafficSystem {
     return { x: MathUtils.clamp(position.x, this.minX + 0.8, this.minX + this.width - 0.8), z: lane.z };
   }
 
-  getWorkZoneApproachPosition(position: { x: number; z: number }): { x: number; z: number } {
-    const target = this.getNearestPrincipalLanePosition(position);
-    const lane = this.lanes.find(candidate => candidate.type === 'PRINCIPAL' && candidate.z === target.z)!;
-    // O cone precisa deter os carros antes da área de trabalho, não em cima do poste.
-    target.x = MathUtils.clamp(position.x - lane.direction * ORLA_INTERACTION.coneApproachDistance,
-      this.minX + 1, this.minX + this.width - 1);
-    return target;
+  /** Ponto da via em que a Mobilidade deve largar o cone para proteger o poste. */
+  getWorkZoneApproachPosition(polePosition: { x: number; z: number }): { x: number; z: number } {
+    const lane = this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
+      .reduce((nearest, candidate) => Math.abs(candidate.z - polePosition.z) < Math.abs(nearest.z - polePosition.z) ? candidate : nearest);
+    // O cone fica alguns metros antes do poste, no sentido de quem chega.
+    const x = polePosition.x - lane.direction * 1.6;
+    return { x: MathUtils.clamp(x, this.minX + 1, this.minX + this.width - 1), z: lane.z };
   }
 
   getNearbyCone(x: number, z: number, radius = 1.8): boolean {
@@ -368,21 +374,9 @@ export class TrafficSystem {
     if (!lane || this.cones.length >= 18) return false;
     const coneX = MathUtils.clamp(x, this.minX + 1, this.minX + this.width - 1);
     if (this.cones.some(cone => cone.lane === lane && Math.abs(cone.x - coneX) < 1.5)) return false;
-    const cone = new Group();
-    cone.name = 'placed-traffic-cone';
-    cone.position.set(coneX, 0, lane.z);
-    const body = new Mesh(this.coneGeometry, this.coneMaterial);
-    body.position.y = 0.31;
-    body.castShadow = true;
-    const base = new Mesh(this.coneBaseGeometry, this.coneBaseMaterial);
-    base.position.y = 0.03;
-    base.castShadow = true;
-    const lowStripe = new Mesh(this.coneBandGeometry, this.coneStripeMaterial);
-    lowStripe.position.y = 0.2;
-    const highStripe = new Mesh(this.coneTopBandGeometry, this.coneStripeMaterial);
-    highStripe.position.y = 0.42;
-    cone.add(body, base, lowStripe, highStripe);
-    cone.traverse(object => { if (object instanceof Mesh) object.receiveShadow = true; });
+    const cone = new Mesh(this.coneGeometry, this.barrierMaterial);
+    cone.position.set(coneX, 0.31, lane.z);
+    cone.castShadow = true;
     lane.coneGroup.add(cone);
     this.cones.push({ lane, mesh: cone, x: coneX });
     this.publishRoadState();
@@ -430,22 +424,33 @@ export class TrafficSystem {
     });
   }
 
-  getWorkZoneReadiness(position: { x: number; z: number }, additionalTrafficInZone = 0): WorkZoneReadiness {
+  /**
+   * `cyclistsInZone` vem do ActiveMobilitySystem: ciclistas dentro do círculo de
+   * trabalho também impedem o reparo, não só os carros.
+   */
+  getWorkZoneReadiness(position: { x: number; z: number }, cyclistsInZone = 0): WorkZoneReadiness {
     const principalLanes = this.lanes.filter(lane => lane.type === 'PRINCIPAL');
     const workLane = principalLanes.reduce((nearest, lane) => Math.abs(lane.z - position.z) < Math.abs(nearest.z - position.z) ? lane : nearest);
-    const approachSpace = Math.abs(workLane.z - position.z) - this.bodyGeometry.parameters.depth / 2;
+    const approachSpace = Math.abs(workLane.z - position.z) - VEHICLE_WIDTH / 2;
+    const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
+    const escapeOpen = escape.status === 'open';
     const workCones = this.cones.filter(cone => cone.lane === workLane && Math.abs(cone.x - position.x) <= 3.2);
     const coneIntervention = workCones.length > 0;
-    const nearbyVehicles = additionalTrafficInZone + this.vehicles.filter(vehicle => {
-      const dx = Math.max(0, Math.abs(vehicle.mesh.position.x - position.x) - VEHICLE_LENGTH / 2);
-      const dz = Math.max(0, Math.abs(vehicle.mesh.position.z - position.z) - 0.68 / 2);
-      return Math.hypot(dx, dz) <= WORK_ZONE_CLEARANCE;
-    }).length;
+    const escapeIntervention = escapeOpen
+      && this.vehicles.some(vehicle => vehicle.lane === escape && vehicle.homeLane.direction === workLane.direction);
+    const blockIntervention = workLane.status === 'blocked';
+    const nearbyVehicles = this.vehicles.filter(vehicle =>
+      Math.hypot(vehicle.mesh.position.x - position.x, vehicle.mesh.position.z - position.z) <= WORK_ZONE_CLEARANCE).length
+      + Math.max(0, cyclistsInZone);
+    const vehiclesRespectingCones = !coneIntervention || !this.vehicles.some(vehicle => workCones.some(cone =>
+      Math.abs(vehicle.mesh.position.x - cone.x) < VEHICLE_LENGTH && Math.abs(vehicle.mesh.position.z - cone.lane.z) < 0.72));
     const spaceAvailable = approachSpace >= 0.9;
-    const prepared = coneIntervention && nearbyVehicles === 0 && spaceAvailable;
+    const intervened = coneIntervention || escapeIntervention || blockIntervention;
+    const prepared = intervened && vehiclesRespectingCones && nearbyVehicles === 0 && spaceAvailable;
     const reason: WorkZoneReadiness['reason'] = prepared ? null
       : !spaceAvailable ? 'ACCESS_TOO_NARROW'
-        : !coneIntervention ? 'NEEDS_INTERVENTION'
+        : !intervened && escapeOpen ? 'WAITING_FOR_DIVERSION'
+          : !intervened ? 'NEEDS_INTERVENTION'
           : 'CARS_IN_WORK_ZONE';
     return { prepared, reason, nearbyVehicles };
   }
@@ -481,23 +486,33 @@ export class TrafficSystem {
 
   applyMobilityAction(roadId: string, action: MobilityRoadAction): void {
     const lane = this.lanes.find(candidate => candidate.id === roadId);
-    if (!lane || lane.type !== 'PRINCIPAL') return;
+    if (!lane) return;
     const escape = this.lanes.find(candidate => candidate.type === 'ESCAPE')!;
+    if (lane.type === 'PRINCIPAL' && (action === 'block' || action === 'blockAll' || action === 'redirect' || action === 'escape')) this.escapeSourceId = lane.id;
     if (action === 'release') {
-      this.lanes.filter(candidate => candidate.type === 'PRINCIPAL').forEach(candidate => { candidate.status = 'open'; });
+      // Libera a faixa e, junto com ela, qualquer outra do mesmo sentido fechada antes.
+      this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
+        .forEach(candidate => { candidate.status = 'open'; });
       escape.status = 'blocked';
       this.redirecting = false;
     }
-    if (action === 'block') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL'
-      && candidate.normalDirection === lane.normalDirection).forEach(candidate => { candidate.status = 'blocked'; });
-    if (action === 'blockAll') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
-      .forEach(candidate => { candidate.status = 'blocked'; });
+    if (action === 'block') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL' && candidate.direction === lane.direction).forEach(candidate => { candidate.status = 'blocked'; });
+    if (action === 'blockAll') {
+      this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
+        .forEach(candidate => { candidate.status = 'blocked'; });
+    }
+    if (action === 'reverse') {
+      const directionLane = lane.type === 'ESCAPE' ? this.lanes.find(candidate => candidate.id === this.escapeSourceId)! : lane;
+      directionLane.direction = directionLane.direction === directionLane.normalDirection ? -directionLane.normalDirection as 1 | -1 : directionLane.normalDirection;
+      directionLane.arrows.children.forEach(marker => { (marker as Mesh).rotation.z = directionLane.direction === 1 ? 0 : Math.PI; });
+      this.vehicles.filter(vehicle => vehicle.lane === directionLane).forEach(vehicle => { vehicle.mesh.rotation.y = directionLane.direction === 1 ? 0 : Math.PI; });
+    }
     if (action === 'escape') {
-      this.escapeSourceId = lane.id;
       const opening = escape.status !== 'open';
       escape.status = opening ? 'open' : 'blocked';
       this.redirecting = opening;
     }
+    if (action === 'redirect') this.redirecting = !this.redirecting;
     this.lanes.forEach(candidate => this.syncLaneVisual(candidate));
     this.publishRoadState();
   }
@@ -516,20 +531,46 @@ export class TrafficSystem {
     return this.running;
   }
 
-  setPedestrianCrossingState(waiting: number, occupied: boolean): void {
-    this.waitingPedestrians = Math.max(0, Math.floor(waiting));
+  /**
+   * `waiting` é a quantidade de pedestres aguardando (o ActiveMobilitySystem
+   * publica o tamanho do grupo formado); qualquer valor acima de zero chama o
+   * ciclo amarelo → vermelho para os veículos.
+   */
+  setPedestrianCrossingState(waiting: number | boolean, occupied: boolean): void {
+    this.waitingPedestrians = typeof waiting === 'number' ? waiting : waiting ? CROSSING_RULES.roadGroupSize : 0;
+    this.pedestrianCrossingRequested = typeof waiting === 'number' ? waiting > 0 : waiting;
     this.pedestrianCrossingOccupied = occupied;
   }
+
+  getPedestrianSignalPhase(): 'green' | 'yellow' | 'red' { return this.crossingSignalPhase; }
 
   isPedestrianCrossingClear(): boolean {
     if (this.unsafeCrossing && !this.guardedCrossing) return false;
     if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize) return false;
+    if (this.crossingSignalPhase !== 'red') return false;
     return this.vehicles.every(vehicle => {
       const distance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
-      // Também verifica a traseira de quem acabou de passar, sem distância circular.
       if (Math.abs(vehicle.mesh.position.x - this.pedestrianCrossingX) < CROSSING_RULES.roadConflictHalfWidth) return false;
       return distance < 0 || distance > CROSSING_RULES.roadApproachDistance || vehicle.speed <= CROSSING_RULES.stoppedSpeed;
     });
+  }
+
+  private updateCrossingSignal(dt: number): void {
+    if (this.guardedCrossing || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize)) {
+      if (this.crossingSignalPhase === 'green') {
+        this.crossingSignalPhase = 'yellow';
+        this.crossingSignalTimer = 1.25;
+      } else if (this.crossingSignalPhase === 'yellow') {
+        this.crossingSignalTimer -= dt;
+        if (this.crossingSignalTimer <= 0) this.crossingSignalPhase = 'red';
+      }
+    } else if (this.crossingSignalPhase === 'red') {
+      this.crossingSignalPhase = 'yellow';
+      this.crossingSignalTimer = 0.65;
+    } else if (this.crossingSignalPhase === 'yellow') {
+      this.crossingSignalTimer -= dt;
+      if (this.crossingSignalTimer <= 0) this.crossingSignalPhase = 'green';
+    }
   }
 
   private updateTrafficGeneration(dt: number): void {
@@ -583,6 +624,7 @@ export class TrafficSystem {
   update(delta: number): void {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, 0.05);
+    this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
     this.incidentTime += dt;
     this.incidentLights.visible = Math.floor(this.incidentTime * 3) % 2 === 0;
@@ -605,21 +647,22 @@ export class TrafficSystem {
         || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize);
       const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
+      const clearingCrosswalk = crossingDistance <= CROSSING_CLEARING_DISTANCE;
+      const crossingBrake = carsYield && this.crossingSignalPhase !== 'green' && !clearingCrosswalk
+        ? this.getCrossingBrake(vehicle) : 1;
+      const atCrossingStopLine = carsYield && this.crossingSignalPhase !== 'green' && !clearingCrosswalk
+        && crossingDistance <= CROSSING_STOP_DISTANCE;
+      const playerBrake = this.getPlayerBrake(vehicle);
       const approachingConnection = connectionDistance !== null && connectionDistance <= CONNECTION_APPROACH_DISTANCE;
       const connectionBrake = approachingConnection && vehicle.laneChangeElapsed >= LANE_CHANGE_DURATION ? 0 : 1;
       const mayLeaveBlockedLane = vehicle.plannedConnectionId !== null;
       const mayExitClosedEscape = vehicle.lane.type === 'ESCAPE' && vehicle.homeLane !== vehicle.lane;
       const laneAvailable = vehicle.lane.status === 'open' || mayLeaveBlockedLane || mayExitClosedEscape;
-      let targetSpeed = this.running && laneAvailable ? vehicle.maxSpeed * following * coneBrake * connectionBrake : 0;
+      let targetSpeed = this.running && laneAvailable ? vehicle.maxSpeed * following * coneBrake * connectionBrake * playerBrake : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
-      const coneRoom = Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity;
-      const playerDistance = this.playerPosition && Math.abs(this.playerPosition.z - vehicle.mesh.position.z) <= 1.15
-        ? (this.playerPosition.x - vehicle.mesh.position.x) * vehicle.lane.direction : Infinity;
-      const playerRoom = playerDistance >= 0 && playerDistance <= PLAYER_YIELD_LOOKAHEAD
-        ? Math.max(0, playerDistance - PLAYER_STOP_DISTANCE) : Infinity;
-      const room = Math.min(crossingRoom, coneRoom, playerRoom, Math.max(0, gap - MIN_BUMPER_GAP));
+      const room = Math.min(crossingRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity);
       const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
@@ -638,6 +681,22 @@ export class TrafficSystem {
       }
     }
     this.publishRoadState();
+  }
+
+  /** Freia ao ver o personagem a pé na própria faixa, logo à frente. */
+  private getPlayerBrake(vehicle: Vehicle): number {
+    const player = this.playerPosition;
+    if (!player) return 1;
+    if (Math.abs(player.z - vehicle.mesh.position.z) > 0.75) return 1;
+    const distance = (player.x - vehicle.mesh.position.x) * vehicle.lane.direction;
+    if (distance <= 0 || distance >= CROSSING_BRAKE_DISTANCE) return 1;
+    return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
+  }
+
+  private getCrossingBrake(vehicle: Vehicle): number {
+    const distance = this.distanceToPoint(vehicle.mesh.position.x, this.pedestrianCrossingX, vehicle.lane.direction);
+    if (distance >= CROSSING_BRAKE_DISTANCE) return 1;
+    return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
   }
 
   private updateRouteDecision(vehicle: Vehicle): number | null {
@@ -798,12 +857,14 @@ export class TrafficSystem {
   private makeVehicle(bodyMaterial: MeshStandardMaterial): Group {
     const vehicle = new Group();
     vehicle.name = 'traffic-vehicle';
-    const kind = VEHICLE_KINDS[this.modelIndex++ % VEHICLE_KINDS.length];
-    const model = this.vehicleModels.create(kind, `#${bodyMaterial.color.getHexString()}`);
-    model.group.scale.setScalar(.58);
-    model.group.rotation.y = Math.PI / 2;
-    model.group.position.y = -.27;
-    vehicle.add(model.group);
+    const body = new Mesh(this.bodyGeometry, bodyMaterial);
+    body.castShadow = true; body.receiveShadow = true; vehicle.add(body);
+    const cabin = new Mesh(this.cabinGeometry, bodyMaterial);
+    cabin.position.set(-0.08, 0.29, 0); cabin.castShadow = true; vehicle.add(cabin);
+    for (const x of [-0.42, 0.42]) for (const z of [-0.26, 0.26]) {
+      const wheel = new Mesh(this.wheelGeometry, this.dark);
+      wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.13, z); vehicle.add(wheel);
+    }
     return vehicle;
   }
 
@@ -812,11 +873,9 @@ export class TrafficSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.vehicleModels.dispose();
-    [this.bodyGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.coneBaseGeometry, this.coneBandGeometry, this.coneTopBandGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
-    [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.coneMaterial, this.coneStripeMaterial, this.coneBaseMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
+    [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
+    [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
     this.group.clear();
     suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
   }
 }
-
