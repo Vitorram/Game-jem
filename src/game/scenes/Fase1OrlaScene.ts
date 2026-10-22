@@ -14,8 +14,6 @@ import { ItemInteractions } from '../items/ItemInteractions';
 import { ItemVisuals } from '../items/ItemVisuals';
 import { RiskWorkflow, type RiskSnapshot } from '../risks/RiskWorkflow';
 import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
-import { RiskMarkers } from '../risks/RiskMarkers';
-import { AbilityVisuals } from './AbilityVisuals';
 import { ORLA_MAP } from '../map/orlaMap';
 import { TrafficSystem } from '../traffic/TrafficSystem';
 import type { MobilityRoadAction } from '../traffic/TrafficSystem';
@@ -42,8 +40,6 @@ export class Fase1OrlaScene implements GameScene {
     { stops: ORLA_ROUTE.stops.map(cell => this.map.cellCenter(cell.column, cell.row)), movedIndex: ORLA_ROUTE.movedIndex,
       destination: this.map.cellCenter(ORLA_ROUTE.destination.column, ORLA_ROUTE.destination.row) },
   );
-  private readonly riskMarkers = new RiskMarkers(this.risks.snapshot());
-  private readonly abilityVisuals = new AbilityVisuals();
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
   private readonly resolveInfrastructureMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
     this.traffic.resolveWorkerMovement(from, this.map.resolveMovement(from, to), GRID_CONFIG.playerRadius);
@@ -77,7 +73,7 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.add(this.sun);
     const brokenPole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')!;
     this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
-    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.riskMarkers.group, this.abilityVisuals.group);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group);
     this.players.forEach((player, index) => {
       // A Analista começa no acesso da estação que funciona como sua cabine de observação.
       const spawn = index === 2 ? this.map.cellCenter(10, 5) : this.map.spawns[index];
@@ -181,13 +177,6 @@ export class Fase1OrlaScene implements GameScene {
 
   private syncRisks(): void {
     const state = this.risks.snapshot();
-    this.riskMarkers.sync(state);
-    // Reutiliza os sensores, iluminação e desenho de rota do laboratório.
-    this.abilityVisuals.sync({
-      role: 2, tool: 'sensor', sensors: state.sensors, light: state.light,
-      stops: state.stops, draft: state.draft ?? state.stops, editing: state.draft !== null,
-      selectedStop: ORLA_ROUTE.movedIndex, issues: [], selectedIssue: null, message: state.message,
-    });
     this.onRisks?.(state);
   }
 
@@ -298,8 +287,6 @@ export class Fase1OrlaScene implements GameScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.riskMarkers.dispose();
-    this.abilityVisuals.dispose();
     this.itemVisuals.dispose();
     this.activeMobility.dispose();
     this.traffic.dispose();

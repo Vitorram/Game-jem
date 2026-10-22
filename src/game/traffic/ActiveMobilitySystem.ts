@@ -4,7 +4,17 @@ import {
 import type { GridMap } from '../map/GridMap';
 import type { TrafficSystem } from './TrafficSystem';
 
-type Walker = { mesh: Group; x: number; z: number; speed: number; state: 'walking' | 'waiting' | 'crossing' };
+type Walker = {
+  mesh: Group;
+  x: number;
+  z: number;
+  speed: number;
+  state: 'walking' | 'waiting' | 'aligning' | 'crossing';
+  wantsToCross: boolean;
+  alignmentStartX?: number;
+  alignmentTargetX?: number;
+  alignmentElapsed?: number;
+};
 type Cyclist = { mesh: Group; x: number; z: number; speed: number; baseSpeed: number };
 
 const CROSSING_X = 1;
@@ -13,6 +23,10 @@ const WALK_Z = 5.15;
 const CROSSING_END_Z = 9.55;
 const CYCLIST_SAFE_GAP = 1.05;
 const WALKER_SAFE_GAP = 0.82;
+const CROSSING_MERGE_CLEARANCE = 0.85;
+const CROSSING_GROUP_THRESHOLD = 4;
+const CROSSING_GROUP_X_OFFSETS = [0.63, 0.21, -0.21, -0.63];
+const CROSSING_ALIGNMENT_DURATION = 0.8;
 
 /** Ciclovia com tráfego leve e travessia de pedestres simples. */
 export class ActiveMobilitySystem {
@@ -22,13 +36,6 @@ export class ActiveMobilitySystem {
   private readonly minX: number;
   private readonly maxX: number;
   private readonly crossingGeometries: BoxGeometry[] = [];
-  private readonly signalGeometries = [new CylinderGeometry(0.055, 0.07, 1.55, 8), new BoxGeometry(0.42, 0.92, 0.24), new SphereGeometry(0.115, 12, 10)];
-  private readonly signalMaterials = [
-    new MeshStandardMaterial({ color: '#e74d42', emissive: '#e74d42', emissiveIntensity: 0.12, roughness: 0.4 }),
-    new MeshStandardMaterial({ color: '#f0c747', emissive: '#f0c747', emissiveIntensity: 0.12, roughness: 0.4 }),
-    new MeshStandardMaterial({ color: '#57cf7c', emissive: '#57cf7c', emissiveIntensity: 0.12, roughness: 0.4 }),
-  ];
-  private readonly signalBulbs: Mesh[] = [];
   private readonly agentGeometries = [
     new BoxGeometry(0.58, 0.045, 0.045), new CylinderGeometry(0.035, 0.035, 0.48, 6),
     new CylinderGeometry(0.035, 0.035, 0.42, 6), new TorusGeometry(0.22, 0.035, 6, 14),
@@ -42,6 +49,7 @@ export class ActiveMobilitySystem {
   private readonly skin = new MeshStandardMaterial({ color: '#d99b70', roughness: 0.85 });
   private spawnCycleTimer = 4.5;
   private spawnWalkerTimer = 7;
+  private crossingBatchActive = false;
   private randomSeed = 827;
   private disposed = false;
 
@@ -50,7 +58,6 @@ export class ActiveMobilitySystem {
     this.minX = -map.width / 2 + 1;
     this.maxX = map.width / 2 - 1;
     this.createCrossing();
-    this.createTrafficSignal();
     for (let i = 0; i < 4; i++) this.spawnCyclist(this.minX + i * 7.3);
     for (let i = 0; i < 3; i++) this.spawnWalker(this.minX + i * 4.5);
   }
@@ -65,31 +72,6 @@ export class ActiveMobilitySystem {
       stripe.receiveShadow = true;
       this.group.add(stripe);
     }
-  }
-
-  private createTrafficSignal(): void {
-    const pole = new Mesh(this.signalGeometries[0], this.tire);
-    pole.position.set(CROSSING_X + 1.55, 0.78, 5.68);
-    pole.castShadow = true;
-    this.group.add(pole);
-    const housing = new Mesh(this.signalGeometries[1], this.tire);
-    housing.position.set(CROSSING_X + 1.55, 1.62, 5.68);
-    housing.castShadow = true;
-    this.group.add(housing);
-    this.signalMaterials.forEach((material, index) => {
-      const bulb = new Mesh(this.signalGeometries[2], material);
-      bulb.position.set(CROSSING_X + 1.55, 1.91 - index * 0.29, 5.84);
-      this.signalBulbs.push(bulb);
-      this.group.add(bulb);
-    });
-  }
-
-  private syncTrafficSignal(): void {
-    const activeIndex = this.traffic.getPedestrianSignalPhase() === 'green' ? 2
-      : this.traffic.getPedestrianSignalPhase() === 'yellow' ? 1 : 0;
-    this.signalMaterials.forEach((material, index) => {
-      material.emissiveIntensity = index === activeIndex ? 1.35 : 0.08;
-    });
   }
 
   private spawnCyclist(x: number): void {
@@ -110,7 +92,7 @@ export class ActiveMobilitySystem {
     const z = WALK_Z + (this.random() - 0.5) * 0.22;
     mesh.position.set(x, 0, z);
     this.group.add(mesh);
-    this.walkers.push({ mesh, x, z, speed: 0.68 + this.random() * 0.22, state: 'walking' });
+    this.walkers.push({ mesh, x, z, speed: 0.68 + this.random() * 0.22, state: 'walking', wantsToCross: this.random() < 0.78 });
   }
 
   update(delta: number): void {
@@ -129,7 +111,6 @@ export class ActiveMobilitySystem {
 
     this.moveCyclists(dt);
     this.moveWalkers(dt);
-    this.syncTrafficSignal();
   }
 
   private moveCyclists(dt: number): void {
@@ -157,24 +138,49 @@ export class ActiveMobilitySystem {
 
   private moveWalkers(dt: number): void {
     const frontToBack = [...this.walkers].sort((a, b) => b.x - a.x);
+    let crossingActive = this.walkers.some(walker => walker.state === 'crossing' || walker.state === 'aligning');
     for (const walker of frontToBack) {
       if (walker.state === 'walking') {
-        const ahead = frontToBack.find(other => other !== walker && other.state !== 'crossing' && other.x > walker.x);
+        const ahead = frontToBack.find(other => other !== walker && other.x > walker.x
+          && (other.state !== 'crossing' || other.z < WALK_Z + CROSSING_MERGE_CLEARANCE));
         const gap = ahead ? ahead.x - walker.x : Infinity;
         const following = ahead ? MathUtils.clamp((gap - WALKER_SAFE_GAP) / 1.15, 0, 1) : 1;
         const step = Math.min(walker.speed * following * dt, Math.max(0, gap - WALKER_SAFE_GAP));
         const nextCell = this.map.worldToCell({ x: walker.x + step, z: WALK_Z });
         if (this.map.tileAt(nextCell.column, nextCell.row) === 'cycleway') {
-          if (walker.x < CROSSING_X - 0.18 && walker.x + step >= CROSSING_X - 0.18) {
-            walker.x = CROSSING_X - 0.18;
+          const curbQueue = this.walkers.filter(other => other !== walker
+            && (other.state === 'waiting'
+            || (other.state === 'crossing' && other.z < WALK_Z + CROSSING_MERGE_CLEARANCE)
+            || other.state === 'aligning')
+            && other.x > walker.x);
+          const queueTargetX = CROSSING_X - 0.18 - (curbQueue.length + 1) * WALKER_SAFE_GAP;
+          if (walker.wantsToCross && walker.x < queueTargetX && walker.x + step >= queueTargetX) {
+            walker.x = queueTargetX;
             walker.state = 'waiting';
           } else {
             walker.x += step;
           }
         }
       }
-      const anotherPedestrianCrossing = this.walkers.some(other => other !== walker && other.state === 'crossing');
-      if (walker.state === 'waiting' && !anotherPedestrianCrossing && this.traffic.isPedestrianCrossingClear()) walker.state = 'crossing';
+      if (walker.state === 'waiting' && !this.walkers.some(other => other.state === 'aligning')) {
+        const curbQueue = this.walkers.filter(other => other.state === 'waiting'
+          || (other.state === 'crossing' && other.z < WALK_Z + CROSSING_MERGE_CLEARANCE))
+          .sort((a, b) => b.x - a.x);
+        const queueIndex = curbQueue.indexOf(walker);
+        const targetX = CROSSING_X - 0.18 - Math.max(0, queueIndex) * WALKER_SAFE_GAP;
+        walker.x += Math.min(walker.speed * dt, Math.max(0, targetX - walker.x));
+      }
+      if (walker.state === 'aligning') {
+        const elapsed = Math.min(CROSSING_ALIGNMENT_DURATION, (walker.alignmentElapsed ?? 0) + dt);
+        walker.alignmentElapsed = elapsed;
+        const progress = elapsed / CROSSING_ALIGNMENT_DURATION;
+        const eased = progress * progress * (3 - 2 * progress);
+        walker.x = MathUtils.lerp(walker.alignmentStartX ?? walker.x, walker.alignmentTargetX ?? walker.x, eased);
+        if (elapsed >= CROSSING_ALIGNMENT_DURATION) {
+          walker.state = 'crossing';
+          walker.z = WALK_Z;
+        }
+      }
       if (walker.state === 'crossing') walker.z += walker.speed * dt;
       walker.mesh.position.set(walker.x, 0, walker.state === 'crossing' ? walker.z : WALK_Z);
       walker.mesh.rotation.y = walker.state === 'crossing' ? 0 : Math.PI / 2;
@@ -184,9 +190,27 @@ export class ActiveMobilitySystem {
         this.walkers.splice(this.walkers.indexOf(walker), 1);
       }
     }
-    const waiting = this.walkers.some(walker => walker.state === 'waiting');
     const occupied = this.walkers.some(walker => walker.state === 'crossing');
-    this.traffic.setPedestrianCrossingState(waiting || occupied, occupied);
+    const waitingGroup = this.walkers.filter(walker => walker.state === 'waiting').sort((a, b) => b.x - a.x);
+    const aligning = this.walkers.some(walker => walker.state === 'aligning');
+    if (!this.crossingBatchActive && waitingGroup.length >= CROSSING_GROUP_THRESHOLD) {
+      this.crossingBatchActive = true;
+    }
+    if (this.crossingBatchActive && !occupied && !aligning && waitingGroup.length >= CROSSING_GROUP_THRESHOLD
+      && this.traffic.isPedestrianCrossingClear()) {
+      waitingGroup.slice(0, CROSSING_GROUP_THRESHOLD).forEach((walker, index) => {
+        walker.state = 'aligning';
+        walker.alignmentStartX = walker.x;
+        walker.alignmentTargetX = CROSSING_X + CROSSING_GROUP_X_OFFSETS[index];
+        walker.alignmentElapsed = 0;
+      });
+    }
+    if (this.crossingBatchActive && !occupied && !aligning && waitingGroup.length < CROSSING_GROUP_THRESHOLD) {
+      this.crossingBatchActive = false;
+    }
+    // Cars yield only for an assembled group (four waiting pedestrians) or
+    // while someone is physically crossing. Others continue along the path.
+    this.traffic.setPedestrianCrossingState(this.crossingBatchActive || occupied, occupied);
   }
 
   private makeCyclist(index: number): Group {
@@ -248,10 +272,10 @@ export class ActiveMobilitySystem {
     if (this.disposed) return;
     this.disposed = true;
     this.traffic.setPedestrianCrossingState(false, false);
+    this.crossingBatchActive = false;
     this.agentGeometries.forEach(geometry => geometry.dispose());
     this.crossingGeometries.forEach(geometry => geometry.dispose());
-    this.signalGeometries.forEach(geometry => geometry.dispose());
-    [this.white, this.bikeFrame, this.tire, this.skin, ...this.clothes, ...this.signalMaterials].forEach(material => material.dispose());
+    [this.white, this.bikeFrame, this.tire, this.skin, ...this.clothes].forEach(material => material.dispose());
     this.group.clear();
     this.cyclists.length = 0;
     this.walkers.length = 0;
