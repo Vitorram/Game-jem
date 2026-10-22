@@ -198,4 +198,3 @@ export class GridMapView {
     strip('se', this.map.tileAt(columns - 1, rows - 1)!, east, south, APRON, APRON);
   }
 }
-
