@@ -1,0 +1,319 @@
+/* Paleta: papel de ticket, marrom de contorno, verde/amarelo/vermelho do tempo. */
+.strip {
+  --paper: #fff4d6;
+  --ink: #4a311c;
+  --shadow: 0 4px 0 rgba(58, 38, 22, 0.35);
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 12px;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  pointer-events: none;
+  color: var(--ink);
+  font-family: ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+}
+
+.tickets {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ticket {
+  display: grid;
+  gap: 6px;
+  width: 150px;
+  padding: 8px 10px 10px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.ticket[data-queued] {
+  opacity: 0.8;
+  border-color: rgba(74, 49, 28, 0.6);
+}
+
+.title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.steps {
+  display: flex;
+  gap: 6px;
+}
+
+.step {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--ink);
+  border-radius: 50%;
+  background: #eadbb5;
+  font-size: 0.9rem;
+  font-weight: 900;
+}
+
+.step[data-state='done'] {
+  background: #46c46a;
+  color: #fff;
+}
+
+.step[data-state='next'] {
+  background: #ffd23f;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+
+.hint {
+  min-height: 1em;
+  font-size: 0.7rem;
+  font-weight: 700;
+  opacity: 0.75;
+}
+
+.bar {
+  display: block;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: rgba(74, 49, 28, 0.2);
+}
+
+/* A largura e a cor mudam por CSS; duração e atraso vêm do estilo inline (sem re-render). */
+.fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  animation-name: drain;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@keyframes drain {
+  0% { width: 100%; background: #46c46a; }
+  55% { background: #f2c230; }
+  100% { width: 0%; background: #e5484d; }
+}
+
+@keyframes pulse {
+  50% { transform: scale(1.15); }
+}
+
+.coin,
+.clock {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 6px;
+  background: var(--paper);
+  border: 3px solid var(--ink);
+  border-radius: 99px;
+  box-shadow: var(--shadow);
+  font-size: 1.2rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock {
+  padding: 6px 14px;
+}
+
+.clock[data-urgent] {
+  background: #ffd9d4;
+  animation: urgent 1s ease-in-out infinite;
+}
+
+@keyframes urgent {
+  50% { background: #ffb3aa; }
+}
+
+.coinFace {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 3px solid var(--ink);
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #ffe27a, #f2b01e 70%);
+  color: #7a4a05;
+  font-size: 1.05rem;
+}
+
+.toast {
+  position: fixed;
+  top: 36%;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  z-index: 6;
+  padding: 10px 20px;
+  border: 3px solid #4a311c;
+  border-radius: 14px;
+  background: #4a311c;
+  color: #fff4d6;
+  font: 900 1.15rem/1.2 ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+  box-shadow: 0 4px 0 rgba(58, 38, 22, 0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.toast[data-tone='good'] { background: #2fa855; }
+.toast[data-tone='bad'] { background: #d6403f; }
+
+.summary {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(40, 25, 10, 0.55);
+  font-family: ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+}
+
+.card {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  width: min(380px, 100%);
+  padding: 22px 24px 24px;
+  border: 4px solid #4a311c;
+  border-radius: 20px;
+  background: #fff4d6;
+  color: #4a311c;
+  text-align: center;
+  box-shadow: 0 8px 0 rgba(58, 38, 22, 0.4);
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.7rem;
+  font-weight: 900;
+}
+
+.stars {
+  display: flex;
+  gap: 6px;
+}
+
+.star {
+  font-size: 3.2rem;
+  line-height: 1;
+  color: #d9c9a0;
+}
+
+.star[data-on='true'] {
+  color: #ffc400;
+  text-shadow: 0 3px 0 #b07a00;
+}
+
+.verdict {
+  margin: 0;
+  max-width: 28ch;
+  font-weight: 700;
+}
+
+.stats {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+}
+
+.stats div {
+  display: grid;
+  gap: 2px;
+}
+
+.stats dt {
+  font-size: 0.78rem;
+  font-weight: 700;
+  opacity: 0.7;
+}
+
+.stats dd {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+}
+
+.primary,
+.debug {
+  pointer-events: auto;
+  cursor: pointer;
+  border: 3px solid #4a311c;
+  border-radius: 14px;
+  background: #ff9f2e;
+  color: #4a311c;
+  font: 900 1rem/1 ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+  box-shadow: 0 4px 0 rgba(58, 38, 22, 0.4);
+}
+
+.primary {
+  padding: 12px 22px;
+}
+
+.primary:active,
+.debug:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(58, 38, 22, 0.4);
+}
+
+.primary:focus-visible,
+.debug:focus-visible {
+  outline: 3px solid #1b6ef3;
+  outline-offset: 3px;
+}
+
+/* Botão só de teste (some no build de produção). */
+.debug {
+  position: fixed;
+  bottom: 14px;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: max-content;
+  z-index: 6;
+  padding: 8px 14px;
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+
+@media (max-width: 640px) {
+  .strip {
+    top: 56px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .tickets {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .ticket {
+    width: 132px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step[data-state='next'],
+  .clock[data-urgent] {
+    animation: none;
+  }
+}
