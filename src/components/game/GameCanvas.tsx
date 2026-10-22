@@ -109,7 +109,7 @@ export default function GameCanvas() {
       {status === 'playing' && !error && <>
         {isAnalystTablet && <OrlaTablet onAction={() => game.current?.interact()} />}
         <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{!isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
-        {isOriginalOrla && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} />}
+        {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} />}
         {!isLaboratory && interactionPrompt && <div className="interaction-prompt" role="status"><kbd>E</kbd> {interactionPrompt}</div>}
 
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
@@ -126,7 +126,7 @@ export default function GameCanvas() {
         </div>
         {isOriginalOrla && !repairPuzzleOpen && <div className="orla-actions" role="group" aria-label="Ações da equipe">
           <button onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
-          {selectedPlayer === 2 && ['Liberar', 'Bloquear', 'Inverter', 'Escape', 'Desviar'].map((label, index) =>
+          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Via de escape'].map((label, index) =>
             <button key={label} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}><kbd>{index + 1}</kbd> {label}</button>)}
         </div>}
         {(isOriginalOrla && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}`} aria-label="Controles de movimento">

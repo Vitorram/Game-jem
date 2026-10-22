@@ -1,6 +1,7 @@
 import {
-  BoxGeometry, BufferGeometry, ConeGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry, TorusGeometry,
+  BoxGeometry, BufferGeometry, CircleGeometry, ConeGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, RingGeometry, SphereGeometry, TorusGeometry,
 } from 'three';
+import { WORK_ZONE_CLEARANCE } from '../traffic/TrafficSystem';
 
 /** Marco visual do poste quebrado; não bloqueia movimento nem pode ser reparado. */
 export class BrokenPoleMarker {
@@ -20,6 +21,7 @@ export class BrokenPoleMarker {
     new TorusGeometry(0.42, 0.045, 6, 20),
     new BoxGeometry(0.28, 0.08, 0.1),
     new BoxGeometry(0.48, 0.08, 0.1),
+    new SphereGeometry(0.34, 12, 8),
   ];
   private readonly materials = [
     new MeshStandardMaterial({ color: '#ff9f35', emissive: '#6b2c00', roughness: 0.7 }),
@@ -31,6 +33,16 @@ export class BrokenPoleMarker {
     new MeshStandardMaterial({ color: '#62dc9b', emissive: '#1d7046', emissiveIntensity: 1.15, roughness: 0.62 }),
   ];
   private readonly lamp = new Mesh(this.geometries[7], this.materials[5]);
+  private readonly glowMaterial = new MeshBasicMaterial({ color: '#ffe58a', transparent: true, opacity: 0.2, depthWrite: false });
+  private readonly lampGlow = new Mesh(this.geometries[11], this.glowMaterial);
+  private readonly lampLight = new PointLight('#ffe58a', 2.6, 8, 2);
+  private readonly workZoneDiskGeometry = new CircleGeometry(WORK_ZONE_CLEARANCE, 48);
+  private readonly workZoneRingGeometry = new RingGeometry(WORK_ZONE_CLEARANCE - 0.09, WORK_ZONE_CLEARANCE, 48);
+  private readonly workZoneDiskMaterial = new MeshBasicMaterial({ color: '#f07562', transparent: true, opacity: 0.1, depthWrite: false, toneMapped: false });
+  private readonly workZoneRingMaterial = new MeshBasicMaterial({ color: '#ff886c', transparent: true, opacity: 0.9, depthWrite: false, toneMapped: false });
+  private readonly workZoneDisk = new Mesh(this.workZoneDiskGeometry, this.workZoneDiskMaterial);
+  private readonly workZoneRing = new Mesh(this.workZoneRingGeometry, this.workZoneRingMaterial);
+  private elapsed = 0;
 
   constructor(position: { x: number; z: number }) {
     this.group.name = 'broken-light-pole-problem';
@@ -59,6 +71,12 @@ export class BrokenPoleMarker {
     this.lamp.position.set(0.19, 1.48, 0);
     this.lamp.visible = false;
     this.group.add(this.lamp);
+    this.lampGlow.position.copy(this.lamp.position);
+    this.lampGlow.visible = false;
+    this.group.add(this.lampGlow);
+    this.lampLight.position.copy(this.lamp.position);
+    this.lampLight.visible = false;
+    this.group.add(this.lampLight);
     for (const [x, z] of [[-0.8, -0.55], [0.8, -0.55], [-0.8, 0.55], [0.8, 0.55]]) {
       const cone = new Mesh(this.geometries[6], this.materials[4]);
       cone.position.set(x, 0.275, z);
@@ -67,6 +85,13 @@ export class BrokenPoleMarker {
     }
     this.cones.visible = false;
     this.group.add(this.cones);
+    for (const mesh of [this.workZoneDisk, this.workZoneRing]) {
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.025;
+      mesh.visible = false;
+      mesh.renderOrder = 2;
+      this.group.add(mesh);
+    }
   }
 
   setState(status: 'ACTIVE' | 'MAINTENANCE' | 'RESOLVED', showAlert: boolean, selected = false): void {
@@ -78,11 +103,38 @@ export class BrokenPoleMarker {
     this.group.children[2].position.set(status === 'RESOLVED' ? 0 : 0.18, status === 'RESOLVED' ? 1.16 : 0.98, 0);
     this.group.children[2].rotation.z = status === 'RESOLVED' ? 0 : -0.75;
     this.lamp.visible = status === 'RESOLVED';
+    this.lampGlow.visible = status === 'RESOLVED';
+    this.lampLight.visible = status === 'RESOLVED';
+    this.materials[5].emissiveIntensity = status === 'RESOLVED' ? 3.1 : 0;
     this.materials[1].color.set(status === 'RESOLVED' ? '#435b56' : '#394147');
     this.materials[1].emissive?.set(status === 'RESOLVED' ? '#65d5a0' : '#000000');
     this.materials[1].emissiveIntensity = status === 'RESOLVED' ? 0.9 : 0;
     this.materials[0].color.set(selected ? '#ffe46f' : '#ff9f35');
     this.materials[0].emissive.set(selected ? '#8a6814' : '#6b2c00');
+  }
+
+  setWorkZoneState(state: 'hidden' | 'clear' | 'busy' | 'unprotected'): void {
+    const visible = state !== 'hidden';
+    this.workZoneDisk.visible = visible;
+    this.workZoneRing.visible = visible;
+    const color = state === 'clear' ? '#6de5aa' : state === 'unprotected' ? '#f3c762' : '#ff8068';
+    this.workZoneDiskMaterial.color.set(color);
+    this.workZoneRingMaterial.color.set(color);
+    this.workZoneDiskMaterial.opacity = state === 'clear' ? 0.08 : 0.12;
+  }
+
+  update(delta: number): void {
+    if (!Number.isFinite(delta) || delta <= 0) return;
+    this.elapsed += Math.min(delta, 0.05);
+    if (this.workZoneRing.visible) {
+      const pulse = 0.985 + Math.sin(this.elapsed * 2.8) * 0.015;
+      this.workZoneRing.scale.setScalar(pulse);
+      this.workZoneRingMaterial.opacity = 0.78 + Math.sin(this.elapsed * 2.8) * 0.12;
+    }
+    if (!this.lamp.visible) return;
+    const pulse = 0.94 + Math.sin(this.elapsed * 3.2) * 0.06;
+    this.lampGlow.scale.setScalar(pulse);
+    this.lampLight.intensity = 2.6 + Math.sin(this.elapsed * 3.2) * 0.28;
   }
 
   private add(
@@ -105,6 +157,11 @@ export class BrokenPoleMarker {
   dispose(): void {
     this.geometries.forEach(geometry => geometry.dispose());
     this.materials.forEach(material => material.dispose());
+    this.glowMaterial.dispose();
+    this.workZoneDiskMaterial.dispose();
+    this.workZoneRingMaterial.dispose();
+    this.workZoneDiskGeometry.dispose();
+    this.workZoneRingGeometry.dispose();
     this.group.clear();
   }
 }

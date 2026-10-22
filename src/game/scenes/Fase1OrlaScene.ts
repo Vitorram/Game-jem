@@ -36,6 +36,7 @@ export class Fase1OrlaScene implements GameScene {
   readonly brokenPoleMarker: BrokenPoleMarker;
   private readonly objectiveMarker = new TeamObjectiveMarker();
   private readonly analystCabin: AnalystCabin;
+  private readonly spawnPositions = new Map<PlayerId, { x: number; z: number }>();
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   readonly risks = new RiskWorkflow(
@@ -70,6 +71,8 @@ export class Fase1OrlaScene implements GameScene {
   private lastObjectiveDistance: number | null = null;
   private missionStep = 0;
   private returningConeToCrate = false;
+  private collisionRecovery: { player: Player; elapsed: number; from: { x: number; z: number }; spawn: { x: number; z: number }; push: { x: number; z: number }; respawned: boolean } | null = null;
+  private collisionInvulnerability = 0;
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
@@ -101,6 +104,7 @@ export class Fase1OrlaScene implements GameScene {
     this.players.forEach((player, index) => {
       const spawn = index === 2 ? analystSpawn : this.map.spawns[index];
       player.setPosition(spawn.x, spawn.z - (index === 2 ? 0.3 : 0));
+      this.spawnPositions.set(player.id, { x: player.position.x, z: player.position.z });
       player.setSeated(index === 2);
       this.scene.add(player.mesh);
     });
@@ -178,7 +182,7 @@ export class Fase1OrlaScene implements GameScene {
       const dx = this.player.mesh.position.x - pole.position.x;
       const dz = this.player.mesh.position.z - pole.position.z;
       if (dx * dx + dz * dz <= 2.25) {
-        const workZone = this.traffic.getWorkZoneReadiness(pole.position);
+        const workZone = this.getWorkZoneReadiness(pole.position);
         if (workZone.prepared) {
           if (pole.status === 'ACTIVE') suburbanGameState.setProblemStatus(pole.id, 'MAINTENANCE');
           this.onRepairPuzzleStart?.();
@@ -189,6 +193,8 @@ export class Fase1OrlaScene implements GameScene {
     }
     this.items.face(suburbanGameState.activeCharacter, this.input.getAxis());
     const cell = this.items.tileInFront(suburbanGameState.activeCharacter, this.player.mesh.position);
+    const source = cell && this.map.itemSources.find(item => item.column === cell.column && item.row === cell.row);
+    if (source?.item === 'cone') return;
     if (cell && this.risks.interact(suburbanGameState.activeCharacter, cell)) {
       this.syncRisks();
       return;
@@ -213,8 +219,7 @@ export class Fase1OrlaScene implements GameScene {
     const roadId = this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z);
     if (!roadId) return false;
     const actions: Record<string, MobilityRoadAction> = {
-      Digit1: 'release', Digit2: 'block', Digit3: 'reverse', Digit4: 'escape',
-      Digit5: 'redirect',
+      Digit1: 'release', Digit2: 'block', Digit3: 'blockAll', Digit4: 'escape',
     };
     const action = actions[key];
     if (!action) return false;
@@ -231,7 +236,7 @@ export class Fase1OrlaScene implements GameScene {
     const pole = suburbanGameState.snapshot().problems[0];
     if (!pole || pole.status !== 'MAINTENANCE' || !pole.dispatchedTeams.includes('infraestrutura')
       || Math.hypot(this.player.mesh.position.x - pole.position.x, this.player.mesh.position.z - pole.position.z) > 1.5
-      || !this.traffic.getWorkZoneReadiness(pole.position).prepared) return;
+      || !this.getWorkZoneReadiness(pole.position).prepared) return;
     suburbanGameState.setProblemStatus('broken-light-pole-1', 'RESOLVED');
     this.reportMissionStep(3);
     this.updateProblemPresentation();
@@ -246,6 +251,10 @@ export class Fase1OrlaScene implements GameScene {
   private syncRisks(): void {
     const state = this.risks.snapshot();
     this.onRisks?.(state);
+  }
+
+  private getWorkZoneReadiness(position: { x: number; z: number }) {
+    return this.traffic.getWorkZoneReadiness(position, this.activeMobility.countCyclistsInWorkZone(position));
   }
 
   configureCamera(camera: PerspectiveCamera, aspect: number, closeView = true): void {
@@ -296,10 +305,16 @@ export class Fase1OrlaScene implements GameScene {
 
   update(dt: number): void {
     if (this.disposed) return;
-    const axis = this.player.role === 'analista'
+    this.updateCollisionRecovery(dt);
+    const recovering = !!this.collisionRecovery && !this.collisionRecovery.respawned;
+    const axis = this.player.role === 'analista' || (recovering && this.collisionRecovery?.player === this.player)
       ? this.idle : this.input.getAxis();
     if (dt > 0) this.items.face(suburbanGameState.activeCharacter, axis);
     this.mapView.update(dt);
+    this.brokenPoleMarker.update(dt);
+    const pedestrianPosition = this.player.role === 'analista' ? null : this.player.mesh.position;
+    this.traffic.setPlayerPosition(pedestrianPosition);
+    this.activeMobility.setPlayerPosition(pedestrianPosition);
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.updateProblemPresentation();
@@ -309,12 +324,65 @@ export class Fase1OrlaScene implements GameScene {
       if (!player.active) player.stopMovement();
       player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
     }
+    if (!recovering && this.collisionInvulnerability <= 0 && this.player.role !== 'analista') this.checkPlayerCollision();
+  }
+
+  private checkPlayerCollision(): void {
+    const hitPlayer = this.player;
+    const position = hitPlayer.mesh.position;
+    const push = this.traffic.getPlayerCollision(position) ?? this.activeMobility.getPlayerCollision(position);
+    if (!push) return;
+    const spawn = this.spawnPositions.get(hitPlayer.id);
+    if (!spawn) return;
+    hitPlayer.stopMovement();
+    this.collisionRecovery = {
+      player: hitPlayer,
+      elapsed: 0,
+      from: { x: position.x, z: position.z },
+      spawn: { ...spawn },
+      push,
+      respawned: false,
+    };
+  }
+
+  private updateCollisionRecovery(dt: number): void {
+    this.collisionInvulnerability = Math.max(0, this.collisionInvulnerability - dt);
+    const recovery = this.collisionRecovery;
+    if (!recovery) return;
+    const player = recovery.player;
+    recovery.elapsed += dt;
+    const knockbackDuration = 0.28;
+    if (recovery.elapsed < knockbackDuration) {
+      const progress = recovery.elapsed / knockbackDuration;
+      const eased = 1 - (1 - progress) ** 2;
+      player.setPosition(recovery.from.x + recovery.push.x * 0.9 * eased, recovery.from.z + recovery.push.z * 0.9 * eased);
+      player.mesh.position.y = Math.sin(progress * Math.PI) * 0.2;
+      player.mesh.rotation.z = recovery.push.z * 0.42 * Math.sin(progress * Math.PI);
+      return;
+    }
+    if (!recovery.respawned) {
+      player.setPosition(recovery.spawn.x, recovery.spawn.z);
+      recovery.respawned = true;
+      this.collisionInvulnerability = 1.45;
+    }
+    const blinkTime = recovery.elapsed - knockbackDuration;
+    player.mesh.visible = Math.floor(blinkTime * 14) % 2 === 0;
+    if (blinkTime >= 1.45) {
+      player.mesh.visible = true;
+      player.mesh.rotation.z = 0;
+      this.collisionRecovery = null;
+    }
   }
 
   private updateProblemPresentation(): void {
     const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
     const state = suburbanGameState.snapshot();
     if (pole) this.brokenPoleMarker.setState(pole.status, this.player.role === 'analista', state.selectedProblemId === pole.id);
+    const workZone = pole ? this.getWorkZoneReadiness(pole.position) : null;
+    const workZoneVisible = !!pole && pole.status !== 'RESOLVED' && pole.dispatchedTeams.includes('infraestrutura');
+    this.brokenPoleMarker.setWorkZoneState(!workZoneVisible ? 'hidden'
+      : workZone?.prepared ? 'clear'
+        : workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'busy' : 'unprotected');
     const team: ResponseTeam | null = this.player.role === 'infraestrutura' ? 'infraestrutura'
       : this.player.role === 'mobilidade' ? 'mobilidade' : null;
     const intervention = pole ? this.traffic.getActiveInterventionPosition(pole.position) : null;
@@ -348,7 +416,6 @@ export class Fase1OrlaScene implements GameScene {
     const dx = pole ? this.player.mesh.position.x - pole.position.x : Infinity;
     const dz = pole ? this.player.mesh.position.z - pole.position.z : Infinity;
     const nearPole = this.player.role === 'infraestrutura' && dx * dx + dz * dz <= 2.25;
-    const workZone = pole ? this.traffic.getWorkZoneReadiness(pole.position) : null;
     if (pole?.dispatchedTeams.length === 2) {
       this.reportMissionStep(1);
       if (workZone?.prepared) this.reportMissionStep(2);
@@ -357,9 +424,9 @@ export class Fase1OrlaScene implements GameScene {
     const prompt = road?.type === 'PRINCIPAL' ? !mobilityAssigned ? 'AGUARDE O ACIONAMENTO DA ANALISTA' : carryingCone ? this.returningConeToCrate ? 'LEVAR CONE AO BAÚ' : facingConeCrate ? 'GUARDAR CONE NO BAÚ' : 'SOLTAR CONE NA VIA' : nearCone ? 'RECOLHER CONE DA VIA' : 'VÁ AO BAÚ DE CONES'
       : facingConeCrate ? carryingCone ? 'GUARDAR CONE NO BAÚ' : 'PEGAR CONE DO BAÚ'
       : nearPole && pole?.status !== 'RESOLVED' && !pole?.dispatchedTeams.includes('infraestrutura') ? 'AGUARDE O ACIONAMENTO DA ANALISTA'
-        : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'ÁREA PREPARADA · REPARAR POSTE'
-        : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE O TRECHO FICAR LIVRE'
-          : workZone?.reason === 'WAITING_FOR_DIVERSION' ? 'AGUARDE O DESVIO DOS VEÍCULOS'
+        : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'CÍRCULO LIVRE · E REPARAR POSTE'
+        : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE · TRÂNSITO NO CÍRCULO'
+          : workZone?.reason === 'NEEDS_INTERVENTION' ? 'SINALIZE A ÁREA COM MOBILIDADE'
           : workZone?.reason === 'ACCESS_TOO_NARROW' ? 'ACESSO FÍSICO INSUFICIENTE'
             : 'ÁREA INSEGURA · PREPARE COM MOBILIDADE' : null;
     if (prompt !== this.currentInteractionPrompt) {

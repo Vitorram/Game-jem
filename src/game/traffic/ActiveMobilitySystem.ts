@@ -2,7 +2,7 @@ import {
   BoxGeometry, BufferGeometry, Group, MathUtils, Mesh, MeshStandardMaterial,
 } from 'three';
 import type { GridMap } from '../map/GridMap';
-import type { TrafficSystem } from './TrafficSystem';
+import { WORK_ZONE_CLEARANCE, type TrafficSystem } from './TrafficSystem';
 import { ORLA_CROSSING } from '../config';
 import { NpcModels, type NpcVisual } from './NpcModels';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
@@ -12,13 +12,11 @@ type Walker = { slot: number; arrived: number; batchIndex: number; visual: NpcVi
 type Cyclist = { visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1 };
 
 const CROSSING_X = ORLA_CROSSING.centerX;
-const CYCLE_NORTH_Z = 2.58;
-const CYCLE_SOUTH_Z = 3.42;
-const WALK_Z = 4.5;
-const SOUTH_WALK_Z = 10.75;
 const SIDEWALK_Y = 0.02;
 const CYCLIST_SAFE_GAP = 1.55;
 const WALKER_SAFE_GAP = 0.85;
+const CYCLIST_YIELD_LOOKAHEAD = 6;
+const CYCLIST_STOP_DISTANCE = 1.05;
 
 /** Travessias independentes para a ciclovia e a avenida, sem semaforos. */
 export class ActiveMobilitySystem {
@@ -27,6 +25,15 @@ export class ActiveMobilitySystem {
   private readonly walkers: Walker[] = [];
   private readonly minX: number;
   private readonly maxX: number;
+  private readonly cycleCenterZ: number;
+  private readonly cycleNorthZ: number;
+  private readonly cycleSouthZ: number;
+  private readonly northSidewalkZ: number;
+  private readonly roadNorthEdgeZ: number;
+  private readonly roadSouthEdgeZ: number;
+  private readonly roadQueueZ: number;
+  private readonly southWalkZ: number;
+  private readonly beachSpawnZ: number;
   private readonly geometries: BufferGeometry[] = [];
   private readonly boxGeometry = new BoxGeometry(1, 1, 1);
   private readonly npcModels = new NpcModels();
@@ -45,11 +52,26 @@ export class ActiveMobilitySystem {
   private roadCooldown = 0;
   private cycleCooldown = 0;
   private groupSpeed = .85;
+  private playerPosition: { x: number; z: number } | null = null;
 
   constructor(private readonly map: GridMap, private readonly traffic: TrafficSystem) {
     this.group.name = 'cycleway-and-pedestrians';
     this.minX = -map.width / 2 + 1;
     this.maxX = map.width / 2 - 1;
+    const roadRows = Array.from({ length: map.rows }, (_, row) => row)
+      .filter(row => Array.from({ length: map.columns }, (_, column) => map.tileAt(column, row)).includes('road'));
+    if (roadRows.length === 0 || Math.min(...roadRows) < 3) throw new Error('Mapa da Orla sem espaço para as travessias.');
+    const firstRoadRow = Math.min(...roadRows);
+    const lastRoadRow = Math.max(...roadRows);
+    this.roadNorthEdgeZ = map.cellCenter(0, firstRoadRow).z - map.tileSize / 2;
+    this.roadSouthEdgeZ = map.cellCenter(0, lastRoadRow).z + map.tileSize / 2;
+    this.northSidewalkZ = map.cellCenter(0, firstRoadRow - 1).z;
+    this.cycleCenterZ = map.cellCenter(0, firstRoadRow - 2).z;
+    this.cycleNorthZ = this.cycleCenterZ - 0.42;
+    this.cycleSouthZ = this.cycleCenterZ + 0.42;
+    this.roadQueueZ = this.roadNorthEdgeZ - 0.5;
+    this.southWalkZ = this.roadSouthEdgeZ + 0.75;
+    this.beachSpawnZ = map.cellCenter(0, firstRoadRow - 3).z + 0.15;
     this.geometries.push(this.boxGeometry);
 
     this.createCrossingAndRamps();
@@ -88,8 +110,8 @@ export class ActiveMobilitySystem {
   private createCrossingAndRamps(): void {
     // 1. Faixa de pedestres zebrada oficial na avenida (barras paralelas ao fluxo dos carros)
     const stripeCount = 9;
-    const startZ = 6.32;
-    const endZ = 9.68;
+    const startZ = this.roadNorthEdgeZ + 0.32;
+    const endZ = this.roadSouthEdgeZ - 0.32;
     const stepZ = (endZ - startZ) / (stripeCount - 1);
 
     for (let i = 0; i < stripeCount; i++) {
@@ -109,25 +131,27 @@ export class ActiveMobilitySystem {
 
     // 2. Linhas de retenção (Stop Lines) antes da faixa para cada sentido da avenida
     // Sentido Leste (Z = 6.18 a 8.28): para antes de X = CROSSING_X - 1.52
-    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.52, -0.006, 7.23, 0.2, 0.024, 2.1);
+    const eastboundStopZ = this.roadSouthEdgeZ - 2.4;
+    const westboundStopZ = this.roadSouthEdgeZ - 0.8;
+    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.52, -0.006, eastboundStopZ, 0.2, 0.024, 1.8);
     // Sentido Oeste (Z = 8.52 a 9.84): para antes de X = CROSSING_X + 1.52
-    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.52, -0.006, 9.18, 0.2, 0.024, 1.32);
+    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.52, -0.006, westboundStopZ, 0.2, 0.024, 1.8);
 
     // 3. Travessia de pedestres demarcada sobre a ciclovia (Z = 2.24 a 3.76)
     for (let i = 0; i < 4; i++) {
-      const z = 2.34 + i * 0.44;
+      const z = this.cycleCenterZ - 0.66 + i * 0.44;
       this.addBox(this.group, `cycleway-crosswalk-stripe-${i + 1}`, this.white, CROSSING_X, -0.001, z, 1.32, 0.014, 0.22);
     }
     // Linhas de parada para bicicletas antes da faixa na ciclovia
-    this.addBox(this.group, 'cycleway-stop-west', this.white, CROSSING_X - 0.95, -0.001, 3.0, 0.1, 0.014, 1.62);
-    this.addBox(this.group, 'cycleway-stop-east', this.white, CROSSING_X + 0.95, -0.001, 3.0, 0.1, 0.014, 1.62);
+    this.addBox(this.group, 'cycleway-stop-west', this.white, CROSSING_X - 0.95, -0.001, this.cycleCenterZ, 0.1, 0.014, 1.62);
+    this.addBox(this.group, 'cycleway-stop-east', this.white, CROSSING_X + 0.95, -0.001, this.cycleCenterZ, 0.1, 0.014, 1.62);
 
     // 4. Rampas de acessibilidade (guias rebaixadas) e piso tátil de alerta (Norte e Sul)
-    this.buildAccessibilityRamp('north', CROSSING_X, 5.9, 5.64, 1);
-    this.buildAccessibilityRamp('south', CROSSING_X, 10.1, 10.36, -1);
+    this.buildAccessibilityRamp('north', CROSSING_X, this.roadNorthEdgeZ - 0.1, this.roadNorthEdgeZ - 0.36, 1);
+    this.buildAccessibilityRamp('south', CROSSING_X, this.roadSouthEdgeZ + 0.1, this.roadSouthEdgeZ + 0.36, -1);
 
     // Piso tátil na chegada da calçada norte junto à ciclovia
-    this.addBox(this.group, 'tactile-cycleway-edge', this.tactileYellow, CROSSING_X, 0.024, 4.16, 1.48, 0.01, 0.22);
+    this.addBox(this.group, 'tactile-cycleway-edge', this.tactileYellow, CROSSING_X, 0.024, this.northSidewalkZ - 0.84, 1.48, 0.01, 0.22);
   }
 
   private buildAccessibilityRamp(side: 'north' | 'south', x: number, curbZ: number, tactileZ: number, dirZ: 1 | -1): void {
@@ -160,7 +184,7 @@ export class ActiveMobilitySystem {
 
   private spawnCyclist(x: number, direction: 1 | -1 = 1): void {
     if (this.cyclists.length >= 6) return;
-    const laneZ = direction === 1 ? CYCLE_SOUTH_Z : CYCLE_NORTH_Z;
+    const laneZ = direction === 1 ? this.cycleSouthZ : this.cycleNorthZ;
     if (this.cyclists.some(c => c.direction === direction && Math.abs(c.x - x) < CYCLIST_SAFE_GAP)) return;
     const visual = this.npcModels.createCyclist(this.cyclistVariant++);
     const mesh = visual.mesh;
@@ -176,7 +200,7 @@ export class ActiveMobilitySystem {
     if (this.walkers.length >= 6) return;
     const slot = [0, 1, 2, 3, 4, 5].find(value => !this.walkers.some(walker => walker.slot === value))!;
     const fromBeach = this.walkerVariant % 2 === 0;
-    const z = fromBeach ? 1.15 : WALK_Z;
+    const z = fromBeach ? this.beachSpawnZ : this.northSidewalkZ - 0.5;
     if (this.walkers.some(walker => Math.hypot(walker.x - x, walker.z - z) < WALKER_SAFE_GAP)) return;
     const visual = this.npcModels.createWalker(this.walkerVariant++);
     const mesh = visual.mesh;
@@ -207,6 +231,29 @@ export class ActiveMobilitySystem {
 
     this.moveCyclists(dt);
     this.moveWalkers(dt);
+  }
+
+  setPlayerPosition(position: { x: number; z: number } | null): void {
+    this.playerPosition = position ? { x: position.x, z: position.z } : null;
+  }
+
+  getPlayerCollision(position: { x: number; z: number }, radius = 0.34): { x: number; z: number } | null {
+    const impact = this.cyclists
+      .filter(cyclist => cyclist.speed > 0.8
+        && Math.abs(cyclist.x - position.x) <= 0.52 + radius
+        && Math.abs(cyclist.z - position.z) <= 0.3 + radius)
+      .sort((a, b) => Math.hypot(a.x - position.x, a.z - position.z)
+        - Math.hypot(b.x - position.x, b.z - position.z))[0];
+    if (!impact) return null;
+    return { x: 0, z: position.z >= impact.z ? 1 : -1 };
+  }
+
+  countCyclistsInWorkZone(position: { x: number; z: number }): number {
+    return this.cyclists.filter(cyclist => {
+      const dx = Math.max(0, Math.abs(cyclist.x - position.x) - 0.52);
+      const dz = Math.max(0, Math.abs(cyclist.z - position.z) - 0.3);
+      return Math.hypot(dx, dz) <= WORK_ZONE_CLEARANCE;
+    }).length;
   }
 
   private prepareCrossings(dt: number): void {
@@ -241,6 +288,11 @@ export class ActiveMobilitySystem {
         if (this.cycleBatch && distance >= CROSSING_RULES.cycleStopDistance - .001) {
           room = Math.min(room, Math.max(0, distance - CROSSING_RULES.cycleStopDistance));
         }
+        const playerDistance = this.playerPosition && Math.abs(this.playerPosition.z - cyclist.z) <= 0.82
+          ? (this.playerPosition.x - cyclist.x) * direction : Infinity;
+        if (playerDistance >= 0 && playerDistance <= CYCLIST_YIELD_LOOKAHEAD) {
+          room = Math.min(room, Math.max(0, playerDistance - CYCLIST_STOP_DISTANCE));
+        }
         const motion = advanceWithRoom(cyclist.speed, cyclist.baseSpeed, room, dt, 1.5, 3.5);
         cyclist.speed = motion.speed;
         cyclist.x += direction * motion.distance;
@@ -272,7 +324,7 @@ export class ActiveMobilitySystem {
   private moveWalkers(dt: number): void {
     if (this.cycleBatch?.state === 'wait-cycle' && this.isCycleCrossingClear()) this.cycleBatch.state = 'cross-cycle';
     const ready = this.roadBatch.length === CROSSING_RULES.roadGroupSize && this.roadBatch.every(w =>
-      w.state === 'form-road' && Math.hypot(w.x - (CROSSING_X + (w.batchIndex - 1) * .48), w.z - 5.5) < .001);
+      w.state === 'form-road' && Math.hypot(w.x - (CROSSING_X + (w.batchIndex - 1) * .48), w.z - this.roadQueueZ) < .001);
     if (ready && this.traffic.isPedestrianCrossingClear()) this.roadBatch.forEach(w => { w.state = 'cross-road'; });
 
     for (const walker of [...this.walkers]) {
@@ -280,27 +332,27 @@ export class ActiveMobilitySystem {
       const queueX = CROSSING_X + (walker.slot % 3 - 1) * .48;
       switch (walker.state) {
         case 'approach-cycle':
-          if (this.moveToward(walker, queueX, 1.5 - Math.floor(walker.slot / 3) * .55, dt)) {
+          if (this.moveToward(walker, queueX, this.cycleCenterZ - 1.5 - Math.floor(walker.slot / 3) * .55, dt)) {
             walker.state = 'wait-cycle'; walker.arrived = this.elapsed;
           }
           break;
         case 'cross-cycle':
           // Ajusta X ainda na calcada antes de entrar na ciclovia.
           if (Math.abs(walker.x - CROSSING_X) > .001 && walker.z < 1.8) this.moveToward(walker, CROSSING_X, walker.z, dt);
-          else if (this.moveToward(walker, CROSSING_X, 4.35, dt)) {
+          else if (this.moveToward(walker, CROSSING_X, this.northSidewalkZ - 0.65, dt)) {
             walker.state = 'approach-road'; this.cycleBatch = null; this.cycleCooldown = CROSSING_RULES.cycleFlowSeconds;
           }
           break;
         case 'approach-road':
-          if (this.moveToward(walker, queueX, 5.5 - Math.floor(walker.slot / 3) * .65, dt)) {
+          if (this.moveToward(walker, queueX, this.roadQueueZ - Math.floor(walker.slot / 3) * .65, dt)) {
             walker.state = 'wait-road'; walker.arrived = this.elapsed;
           }
           break;
         case 'form-road':
-          this.moveToward(walker, CROSSING_X + (walker.batchIndex - 1) * .48, 5.5, dt);
+          this.moveToward(walker, CROSSING_X + (walker.batchIndex - 1) * .48, this.roadQueueZ, dt);
           break;
         case 'cross-road':
-          if (this.moveToward(walker, walker.x, SOUTH_WALK_Z, dt, this.groupSpeed)) walker.state = 'exit';
+          if (this.moveToward(walker, walker.x, this.southWalkZ, dt, this.groupSpeed)) walker.state = 'exit';
           break;
         case 'exit':
           walker.x += walker.exitDirection * walker.speed * dt;
@@ -310,7 +362,7 @@ export class ActiveMobilitySystem {
       const heading = traveled > .000001 ? Math.atan2(dx, dz) : 0;
       const turn = Math.atan2(Math.sin(heading - walker.mesh.rotation.y), Math.cos(heading - walker.mesh.rotation.y)) * (1 - Math.exp(-12 * dt));
       walker.mesh.rotation.y += turn;
-      const onRoad = walker.z > 5.95 && walker.z < 10.05;
+      const onRoad = walker.z > this.roadNorthEdgeZ && walker.z < this.roadSouthEdgeZ;
       walker.mesh.position.set(walker.x, onRoad ? 0 : SIDEWALK_Y, walker.z);
       walker.visual.animate(dt, traveled, dt > 0 ? turn / dt : 0);
       if (walker.state === 'exit' && (walker.x < this.minX || walker.x > this.maxX)) {

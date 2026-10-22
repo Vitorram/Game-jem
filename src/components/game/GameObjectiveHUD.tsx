@@ -47,7 +47,7 @@ export default function GameObjectiveHUD({ player, distance }: { player: PlayerI
 
   const team = player === 1 ? 'infraestrutura' : 'mobilidade';
   const interventionsRemain = roads.some(road => road.conesActive
-    || (road.type === 'PRINCIPAL' && (road.status === 'blocked' || road.direction === 'REVERSE'))
+    || (road.type === 'PRINCIPAL' && road.status === 'blocked')
     || (road.type === 'ESCAPE' && road.redirected));
   if (problem.status === 'RESOLVED'
     && !(player === 2 && problem.dispatchedTeams.includes('mobilidade') && interventionsRemain)) return null;

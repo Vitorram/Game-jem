@@ -1,131 +1,127 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { gsap } from 'gsap';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-type Zone = { left: number; width: number };
-type Feedback = 'ACERTO' | 'ERRO' | 'POSTE REPARADO' | null;
+type Direction = 0 | 1 | 2 | 3;
+type WireTile = { id: string; row: number; column: number; kind: 'straight' | 'corner'; rotation: number };
+type Point = { row: number; column: number };
 
-const zoneWidths = [30, 25, 21];
-const speeds = [2.8, 2.35, 1.95];
-const makeZones = (): Zone[] => zoneWidths.map(width => ({
-  left: 7 + Math.random() * (86 - width),
-  width,
-}));
+const SOURCE: Point = { row: 2, column: 0 };
+const LAMP: Point = { row: 0, column: 3 };
+const DELTAS: Record<Direction, Point> = {
+  0: { row: -1, column: 0 },
+  1: { row: 0, column: 1 },
+  2: { row: 1, column: 0 },
+  3: { row: 0, column: -1 },
+};
+const BASE_PORTS: Record<WireTile['kind'], Direction[]> = {
+  straight: [0, 2],
+  corner: [0, 1],
+};
+const INITIAL_TILES: WireTile[] = [
+  { id: 'wire-a', row: 2, column: 1, kind: 'straight', rotation: 0 },
+  { id: 'wire-b', row: 2, column: 2, kind: 'corner', rotation: 1 },
+  { id: 'wire-c', row: 1, column: 2, kind: 'corner', rotation: 3 },
+  { id: 'wire-d', row: 1, column: 3, kind: 'corner', rotation: 0 },
+];
+const rotateDirection = (direction: Direction, rotation: number): Direction => ((direction + rotation) % 4) as Direction;
+const opposite = (direction: Direction): Direction => ((direction + 2) % 4) as Direction;
+const pointKey = (point: Point) => `${point.row},${point.column}`;
 
-export default function RepairPuzzle({ onComplete, paused = false }: { onComplete: () => void; paused?: boolean }) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const barRefs = useRef<Array<HTMLDivElement | null>>([]);
-  const pinRefs = useRef<Array<HTMLSpanElement | null>>([]);
-  const answerRef = useRef<() => void>(() => undefined);
-  const locked = useRef(false);
-  const pending = useRef<gsap.core.Tween | null>(null);
-  const pins = useRef<gsap.core.Tween[]>([]);
-  useEffect(() => () => { pending.current?.kill(); }, []);
-  useEffect(() => {
-    pending.current?.paused(paused);
-    pins.current.forEach(tween => tween.paused(paused));
-  }, [paused]);
-  const [step, setStep] = useState(0);
-  const [zones, setZones] = useState<Zone[]>(makeZones);
-  const [feedback, setFeedback] = useState<Feedback>(null);
-
-  useEffect(() => {
-    const context = gsap.context(() => {
-      gsap.fromTo(cardRef.current, { opacity: 0, y: 18, scale: 0.98 }, { opacity: 1, y: 0, scale: 1, duration: 0.32, ease: 'power2.out' });
-    }, cardRef);
-    return () => context.revert();
-  }, []);
-
-  useEffect(() => {
-    if (feedback) return;
-    const tweens = pinRefs.current.map((pin, index) => {
-      if (!pin) return undefined;
-      gsap.set(pin, { left: '0%' });
-      return gsap.to(pin, { left: '100%', duration: speeds[index], repeat: -1, yoyo: true, ease: 'none' });
-    });
-    pins.current = tweens.filter((tween): tween is gsap.core.Tween => !!tween);
-    return () => tweens.forEach(tween => tween?.kill());
-  }, [feedback, step]);
-
-  const resolveAttempt = useCallback(() => {
-    if (paused || locked.current || feedback) return;
-    const bar = barRefs.current[step];
-    const pin = pinRefs.current[step];
-    if (!bar || !pin) return;
-    const barRect = bar.getBoundingClientRect();
-    const pinRect = pin.getBoundingClientRect();
-    const position = ((pinRect.left + pinRect.width / 2 - barRect.left) / barRect.width) * 100;
-    const zone = zones[step];
-    locked.current = true;
-
-    if (position >= zone.left && position <= zone.left + zone.width) {
-      if (step === 2) {
-        setFeedback('POSTE REPARADO');
-        pending.current = gsap.delayedCall(0.9, onComplete);
-      } else {
-        setFeedback('ACERTO');
-        pending.current = gsap.delayedCall(0.48, () => {
-          setStep(current => current + 1);
-          setFeedback(null);
-          locked.current = false;
-        });
-      }
-      return;
-    }
-
-    setFeedback('ERRO');
-    pending.current = gsap.delayedCall(0.65, () => {
-      setStep(0);
-      setZones(makeZones());
-      setFeedback(null);
-      locked.current = false;
-    });
-  }, [feedback, onComplete, paused, step, zones]);
-
-  useEffect(() => { answerRef.current = resolveAttempt; }, [resolveAttempt]);
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code !== 'Space' || event.repeat) return;
-      event.preventDefault();
-      answerRef.current();
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  return (
-    <div style={paused ? { display: 'none' } : undefined} className="repair-puzzle-overlay" role="dialog" aria-modal="true" aria-labelledby="repair-puzzle-title" onPointerDown={() => answerRef.current()}>
-      <div ref={cardRef} className="repair-puzzle-card">
-        <span className="repair-puzzle-kicker">MANUTENÇÃO ELÉTRICA</span>
-        <h2 id="repair-puzzle-title">LIGUE A ENERGIA!</h2>
-        <p className="repair-puzzle-stage">ETAPA {step + 1}/3</p>
-        <div className="repair-pole-preview" aria-hidden="true">
-          <span className="repair-wire repair-wire-left" /><span className="repair-wire repair-wire-right" />
-          <span className="repair-pole-cap" /><span className="repair-pole-segment repair-segment-top" />
-          <span className="repair-pole-joint" /><span className="repair-pole-segment repair-segment-bottom" />
-          <span className="repair-pole-base" /><span className="repair-pole-bolt bolt-left" /><span className="repair-pole-bolt bolt-right" />
-          <b>POSTE EM REPARO</b>
-        </div>
-        <div className="repair-progress" aria-label={`Etapa ${step + 1} de 3`}>
-          {[0, 1, 2].map(index => <span key={index} className={index < step ? 'is-done' : index === step ? 'is-current' : ''}>{index < step ? '✓' : `0${index + 1}`}</span>)}
-        </div>
-        <div className="repair-rows">
-          {[0, 1, 2].map(index => (
-            <div key={index} className={`repair-row${index === step ? ' is-active' : ''}${index < step ? ' is-done' : ''}`}>
-              <div className="repair-row-label"><span>ETAPA 0{index + 1}</span><b>{index < step ? '✓' : index === step ? 'ALINHE O PINO' : 'AGUARDANDO'}</b></div>
-              <div className="repair-timing-bar" ref={element => { barRefs.current[index] = element; }}>
-                <span className="repair-green-zone" style={{ left: `${zones[index].left}%`, width: `${zones[index].width}%` }} />
-                <span className="repair-pin" ref={element => { pinRefs.current[index] = element; }} />
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className={`repair-feedback${feedback ? ' is-visible' : ''}${feedback === 'ERRO' ? ' is-error' : ''}`} aria-live="assertive">{feedback ?? ' '}</div>
-        <p className="repair-instruction">PRESSIONE ESPAÇO OU CLIQUE</p>
-      </div>
-    </div>
-  );
+function ports(tile: WireTile): Direction[] {
+  return BASE_PORTS[tile.kind].map(direction => rotateDirection(direction, tile.rotation));
 }
 
+function tracePower(tiles: WireTile[]): { powered: Set<string>; lampOn: boolean } {
+  const byPosition = new Map(tiles.map(tile => [pointKey(tile), tile]));
+  const powered = new Set<string>();
+  const queue: Array<{ point: Point; incoming: Direction }> = [{ point: { row: 2, column: 1 }, incoming: 3 }];
+  const visited = new Set<string>();
+  let lampOn = false;
+
+  while (queue.length) {
+    const { point, incoming } = queue.shift()!;
+    const tile = byPosition.get(pointKey(point));
+    if (!tile) continue;
+    const visitKey = `${tile.id}:${incoming}`;
+    if (visited.has(visitKey) || !ports(tile).includes(incoming)) continue;
+    visited.add(visitKey);
+    powered.add(tile.id);
+    for (const exit of ports(tile)) {
+      if (exit === incoming) continue;
+      const delta = DELTAS[exit];
+      const next = { row: point.row + delta.row, column: point.column + delta.column };
+      if (pointKey(next) === pointKey(LAMP)) {
+        if (exit === 0) lampOn = true;
+        continue;
+      }
+      if (next.row < 0 || next.row >= 4 || next.column < 0 || next.column >= 4) continue;
+      queue.push({ point: next, incoming: opposite(exit) });
+    }
+  }
+  return { powered, lampOn };
+}
+
+function WireGraphic({ tile, powered }: { tile: WireTile; powered: boolean }) {
+  const path = tile.kind === 'straight' ? 'M32 5V59' : 'M32 5V32H59';
+  return <svg className={`circuit-wire${powered ? ' is-powered' : ''}`} viewBox="0 0 64 64" aria-hidden="true">
+    <g transform={`rotate(${tile.rotation * 90} 32 32)`}>
+      <path className="wire-shadow" d={path} />
+      <path className="wire-track" d={path} />
+      <path className="wire-core" d={path} />
+      <circle className="wire-joint" cx="32" cy="32" r="5" />
+    </g>
+  </svg>;
+}
+
+export default function RepairPuzzle({ onComplete, paused = false }: { onComplete: () => void; paused?: boolean }) {
+  const [tiles, setTiles] = useState(INITIAL_TILES);
+  const [solved, setSolved] = useState(false);
+  const [hint, setHint] = useState('A energia não chega à luminária. Gire os conectores para fechar o circuito.');
+  const completion = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { powered, lampOn } = useMemo(() => tracePower(tiles), [tiles]);
+
+  useEffect(() => () => { if (completion.current) clearTimeout(completion.current); }, []);
+  useEffect(() => {
+    if (lampOn && !solved) {
+      setSolved(true);
+      setHint('CIRCUITO RESTABELECIDO · LUMINÁRIA ACESA');
+      completion.current = setTimeout(onComplete, 1100);
+    }
+  }, [lampOn, onComplete, solved]);
+
+  const rotate = (id: string) => {
+    if (paused || solved) return;
+    setTiles(current => current.map(tile => tile.id === id ? { ...tile, rotation: (tile.rotation + 1) % 4 } : tile));
+    setHint('Conexão ajustada. Siga o caminho da energia até a lâmpada.');
+  };
+
+  return <div style={paused ? { display: 'none' } : undefined} className="repair-puzzle-overlay" role="dialog" aria-modal="true" aria-labelledby="repair-puzzle-title">
+    <section className={`repair-puzzle-card${solved ? ' is-solved' : ''}`}>
+      <header className="repair-puzzle-header">
+        <span className="repair-puzzle-kicker">OFICINA DE CAMPO · ELÉTRICA</span>
+        <span className="repair-puzzle-chip">POSTE 01</span>
+        <h2 id="repair-puzzle-title">RESTABELEÇA A ENERGIA</h2>
+        <p>Gire os conectores e leve a corrente até a luminária.</p>
+      </header>
+
+      <div className={`circuit-board${lampOn ? ' lamp-is-on' : ''}`} aria-label="Tabuleiro de conexões elétricas">
+        {Array.from({ length: 16 }, (_, index) => {
+          const row = Math.floor(index / 4), column = index % 4;
+          const tile = tiles.find(candidate => candidate.row === row && candidate.column === column);
+          const isSource = row === SOURCE.row && column === SOURCE.column;
+          const isLamp = row === LAMP.row && column === LAMP.column;
+          if (isSource) return <div key={index} className="circuit-cell circuit-source" aria-label="Fonte de energia"><span>⚡</span><small>FONTE</small></div>;
+          if (isLamp) return <div key={index} className={`circuit-cell circuit-lamp${lampOn ? ' is-on' : ''}`} aria-label={lampOn ? 'Luminária acesa' : 'Luminária apagada'}><span>✦</span><small>{lampOn ? 'ACESO' : 'LÂMPADA'}</small></div>;
+          if (tile) return <button key={index} type="button" className={`circuit-cell circuit-tile${powered.has(tile.id) ? ' is-powered' : ''}`} onClick={() => rotate(tile.id)} aria-label={`Girar conexão ${tile.kind === 'corner' ? 'curva' : 'reta'}`} aria-pressed={powered.has(tile.id)} disabled={paused || solved}>
+            <WireGraphic tile={tile} powered={powered.has(tile.id)} /><small>GIRAR</small>
+          </button>;
+          return <div key={index} className="circuit-cell circuit-empty" aria-hidden="true"><span>·</span></div>;
+        })}
+      </div>
+
+      <div className="repair-puzzle-status" role="status"><i className={lampOn ? 'is-on' : ''} />{hint}</div>
+      <footer className="repair-puzzle-footer"><span>{powered.size}/4 CONEXÕES ENERGIZADAS</span><button type="button" onClick={() => { if (!solved && !paused) { setTiles(INITIAL_TILES); setHint('Circuito reiniciado. Gire as peças para levar energia à luminária.'); } }} disabled={solved || paused}>REINICIAR CIRCUITO</button></footer>
+    </section>
+  </div>;
+}

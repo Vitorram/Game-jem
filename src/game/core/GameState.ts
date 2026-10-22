@@ -3,9 +3,9 @@ import type { PlayerId } from '../entities/Player';
 export type ProblemStatus = 'ACTIVE' | 'MAINTENANCE' | 'RESOLVED';
 export type ResponseTeam = 'infraestrutura' | 'mobilidade';
 export type UrbanProblem = {
-  id: 'broken-light-pole-1';
-  type: 'broken-light-pole';
-  label: 'POSTE';
+  id: string;
+  type: string;
+  label: string;
   status: ProblemStatus;
   position: { x: number; z: number };
   dispatchedTeams: ResponseTeam[];
@@ -41,7 +41,7 @@ export class GameState {
     budget: 1000,
     problems: [{
       id: 'broken-light-pole-1', type: 'broken-light-pole', label: 'POSTE',
-      status: 'ACTIVE', position: { x: -9, z: 5.7 }, dispatchedTeams: [],
+      status: 'ACTIVE', position: { x: -9, z: 4.7 }, dispatchedTeams: [],
     }],
     roads: [
       { id: 'orla-eastbound', direction: 'NORMAL', status: 'open', type: 'PRINCIPAL', capacity: 100, priority: 1, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },

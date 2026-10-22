@@ -41,10 +41,10 @@ type TrafficConnection = {
   direction: 1 | -1;
   x: number;
 };
-export type MobilityRoadAction = 'release' | 'block' | 'reverse' | 'escape' | 'redirect';
+export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'escape';
 export type WorkZoneReadiness = {
   prepared: boolean;
-  reason: 'NEEDS_INTERVENTION' | 'WAITING_FOR_DIVERSION' | 'CARS_IN_WORK_ZONE' | 'ACCESS_TOO_NARROW' | null;
+  reason: 'NEEDS_INTERVENTION' | 'CARS_IN_WORK_ZONE' | 'ACCESS_TOO_NARROW' | null;
   nearbyVehicles: number;
 };
 
@@ -60,9 +60,11 @@ const ROUTE_DECISION_THRESHOLD = 0.38;
 const ROUTE_LOOKAHEAD = 8;
 const CONNECTION_APPROACH_DISTANCE = 1.8;
 const ESCAPE_CAPACITY = 30;
-const WORK_ZONE_CLEARANCE = 2.9;
+export const WORK_ZONE_CLEARANCE = 2.6;
 const CONE_LOOKAHEAD = 9;
 const CONE_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.3;
+const PLAYER_YIELD_LOOKAHEAD = 9;
+const PLAYER_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.42;
 
 /** Fluxo de tráfego de protótipo em duas vias principais e uma via de escape paralela. */
 export class TrafficSystem {
@@ -103,6 +105,7 @@ export class TrafficSystem {
   private mobilityView = false;
   private waitingPedestrians = 0;
   private pedestrianCrossingOccupied = false;
+  private playerPosition: { x: number; z: number } | null = null;
   private demandClock = 0;
   private demandLevel = 0.5;
   private trafficRandomSeed = 173;
@@ -119,7 +122,7 @@ export class TrafficSystem {
     this.directionGeometry = new ShapeGeometry(arrowShape);
     const mainRoadZ = map.cellCenter(0, map.rows - 1).z;
     const roadLowEdge = mainRoadZ - map.tileSize * 1.5;
-    const escapeRoadZ = roadLowEdge + map.tileSize * 0.2;
+    const escapeRoadZ = roadLowEdge - map.tileSize * 0.4;
     this.lanes = [
       this.createLane('orla-eastbound', 1, roadLowEdge + map.tileSize * 0.6, 'PRINCIPAL', 100, 1),
       this.createLane('orla-eastbound-2', 1, roadLowEdge + map.tileSize, 'PRINCIPAL', 100, 1),
@@ -205,7 +208,7 @@ export class TrafficSystem {
     // A clear asphalt strip makes the escape lane legible even when it is closed.
     const road = new Mesh(this.roadGeometry, this.roadMaterial);
     road.scale.x = this.width;
-    road.scale.z = 0.8 / 1.78;
+    road.scale.z = 1.45 / 1.78;
     road.position.set(0, -0.033, escapeZ);
     this.group.add(road);
   }
@@ -225,6 +228,21 @@ export class TrafficSystem {
   setMobilityView(visible: boolean): void {
     this.mobilityView = visible;
     this.lanes.forEach(lane => this.syncLaneVisual(lane));
+  }
+
+  setPlayerPosition(position: { x: number; z: number } | null): void {
+    this.playerPosition = position ? { x: position.x, z: position.z } : null;
+  }
+
+  getPlayerCollision(position: { x: number; z: number }, radius = 0.34): { x: number; z: number } | null {
+    const impact = this.vehicles
+      .filter(vehicle => vehicle.speed > 0.75
+        && Math.abs(vehicle.mesh.position.x - position.x) <= VEHICLE_LENGTH / 2 + radius
+        && Math.abs(vehicle.mesh.position.z - position.z) <= 0.68 / 2 + radius)
+      .sort((a, b) => Math.hypot(a.mesh.position.x - position.x, a.mesh.position.z - position.z)
+        - Math.hypot(b.mesh.position.x - position.x, b.mesh.position.z - position.z))[0];
+    if (!impact) return null;
+    return { x: 0, z: position.z >= impact.mesh.position.z ? 1 : -1 };
   }
 
   getNearbyLane(x: number, z: number): string | null {
@@ -319,26 +337,22 @@ export class TrafficSystem {
     });
   }
 
-  getWorkZoneReadiness(position: { x: number; z: number }): WorkZoneReadiness {
+  getWorkZoneReadiness(position: { x: number; z: number }, additionalTrafficInZone = 0): WorkZoneReadiness {
     const principalLanes = this.lanes.filter(lane => lane.type === 'PRINCIPAL');
     const workLane = principalLanes.reduce((nearest, lane) => Math.abs(lane.z - position.z) < Math.abs(nearest.z - position.z) ? lane : nearest);
     const approachSpace = Math.abs(workLane.z - position.z) - this.bodyGeometry.parameters.depth / 2;
-    const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
-    const escapeOpen = escape.status === 'open';
     const workCones = this.cones.filter(cone => cone.lane === workLane && Math.abs(cone.x - position.x) <= 3.2);
     const coneIntervention = workCones.length > 0;
-    const escapeIntervention = escape.status === 'open'
-      && this.vehicles.some(vehicle => vehicle.lane === escape && vehicle.homeLane.direction === workLane.direction);
-    const nearbyVehicles = this.vehicles.filter(vehicle =>
-      Math.hypot(vehicle.mesh.position.x - position.x, vehicle.mesh.position.z - position.z) <= WORK_ZONE_CLEARANCE).length;
-    const vehiclesRespectingCones = !coneIntervention || !this.vehicles.some(vehicle => workCones.some(cone =>
-      Math.abs(vehicle.mesh.position.x - cone.x) < VEHICLE_LENGTH && Math.abs(vehicle.mesh.position.z - cone.lane.z) < 0.72));
+    const nearbyVehicles = additionalTrafficInZone + this.vehicles.filter(vehicle => {
+      const dx = Math.max(0, Math.abs(vehicle.mesh.position.x - position.x) - VEHICLE_LENGTH / 2);
+      const dz = Math.max(0, Math.abs(vehicle.mesh.position.z - position.z) - 0.68 / 2);
+      return Math.hypot(dx, dz) <= WORK_ZONE_CLEARANCE;
+    }).length;
     const spaceAvailable = approachSpace >= 0.9;
-    const prepared = (coneIntervention || escapeIntervention) && vehiclesRespectingCones && nearbyVehicles === 0 && spaceAvailable;
+    const prepared = coneIntervention && nearbyVehicles === 0 && spaceAvailable;
     const reason: WorkZoneReadiness['reason'] = prepared ? null
       : !spaceAvailable ? 'ACCESS_TOO_NARROW'
-        : !(coneIntervention || escapeIntervention) && escapeOpen ? 'WAITING_FOR_DIVERSION'
-          : !(coneIntervention || escapeIntervention) ? 'NEEDS_INTERVENTION'
+        : !coneIntervention ? 'NEEDS_INTERVENTION'
           : 'CARS_IN_WORK_ZONE';
     return { prepared, reason, nearbyVehicles };
   }
@@ -374,23 +388,23 @@ export class TrafficSystem {
 
   applyMobilityAction(roadId: string, action: MobilityRoadAction): void {
     const lane = this.lanes.find(candidate => candidate.id === roadId);
-    if (!lane) return;
+    if (!lane || lane.type !== 'PRINCIPAL') return;
     const escape = this.lanes.find(candidate => candidate.type === 'ESCAPE')!;
-    if (lane.type === 'PRINCIPAL' && (action === 'block' || action === 'redirect' || action === 'escape')) this.escapeSourceId = lane.id;
-    if (action === 'release') lane.status = 'open';
-    if (action === 'block') lane.status = 'blocked';
-    if (action === 'reverse') {
-      const directionLane = lane.type === 'ESCAPE' ? this.lanes.find(candidate => candidate.id === this.escapeSourceId)! : lane;
-      directionLane.direction = directionLane.direction === directionLane.normalDirection ? -directionLane.normalDirection as 1 | -1 : directionLane.normalDirection;
-      directionLane.arrows.children.forEach(marker => { (marker as Mesh).rotation.z = directionLane.direction === 1 ? 0 : Math.PI; });
-      this.vehicles.filter(vehicle => vehicle.lane === directionLane).forEach(vehicle => { vehicle.mesh.rotation.y = directionLane.direction === 1 ? 0 : Math.PI; });
+    if (action === 'release') {
+      this.lanes.filter(candidate => candidate.type === 'PRINCIPAL').forEach(candidate => { candidate.status = 'open'; });
+      escape.status = 'blocked';
+      this.redirecting = false;
     }
+    if (action === 'block') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL'
+      && candidate.normalDirection === lane.normalDirection).forEach(candidate => { candidate.status = 'blocked'; });
+    if (action === 'blockAll') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
+      .forEach(candidate => { candidate.status = 'blocked'; });
     if (action === 'escape') {
+      this.escapeSourceId = lane.id;
       const opening = escape.status !== 'open';
       escape.status = opening ? 'open' : 'blocked';
       this.redirecting = opening;
     }
-    if (action === 'redirect') this.redirecting = !this.redirecting;
     this.lanes.forEach(candidate => this.syncLaneVisual(candidate));
     this.publishRoadState();
   }
@@ -498,7 +512,11 @@ export class TrafficSystem {
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
       const coneRoom = Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity;
-      const room = Math.min(crossingRoom, coneRoom, Math.max(0, gap - MIN_BUMPER_GAP));
+      const playerDistance = this.playerPosition && Math.abs(this.playerPosition.z - vehicle.mesh.position.z) <= 1.15
+        ? (this.playerPosition.x - vehicle.mesh.position.x) * vehicle.lane.direction : Infinity;
+      const playerRoom = playerDistance >= 0 && playerDistance <= PLAYER_YIELD_LOOKAHEAD
+        ? Math.max(0, playerDistance - PLAYER_STOP_DISTANCE) : Infinity;
+      const room = Math.min(crossingRoom, coneRoom, playerRoom, Math.max(0, gap - MIN_BUMPER_GAP));
       const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
