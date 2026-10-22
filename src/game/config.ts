@@ -8,7 +8,7 @@ export const GAME_CONFIG = {
   // Recuo em relação à altura: vista superior inclinada (~53° do chão).
   cameraTilt: 0.75,
   worldLimit: 9,
-  maxPixelRatio: 2,
+  maxPixelRatio: 1.5,
   maxDelta: 0.05,
 } as const;
 
@@ -33,8 +33,8 @@ export const ORLA_CAMERA = {
   fov: GAME_CONFIG.cameraFov,
   near: GAME_CONFIG.cameraNear,
   far: GAME_CONFIG.cameraFar,
-  closeHeight: 9,
-  wideHeight: 18,
+  closeHeight: GAME_CONFIG.cameraCloseHeight,
+  wideHeight: GAME_CONFIG.cameraHeight,
   tilt: GAME_CONFIG.cameraTilt,
   followSmoothing: 4,
   portraitAspect: 0.85,
@@ -48,6 +48,13 @@ export const GRID_CONFIG = {
   playerRadius: 0.3,
   floorThickness: 0.2,
   roughness: 0.9,
+} as const;
+
+/** Geometria comum da travessia entre o mapa e os agentes de mobilidade. */
+export const ORLA_CROSSING = {
+  centerX: 1,
+  rampHalfWidth: 0.85,
+  roadClearHalfWidth: 1.1,
 } as const;
 
 export const ITEM_VIEW_CONFIG = {

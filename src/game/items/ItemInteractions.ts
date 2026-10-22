@@ -20,6 +20,20 @@ export class ItemInteractions {
   }
 
   heldBy(playerId: number): ItemId | null { return this.characters.get(playerId)?.held ?? null; }
+  /** Coloca no inventário um item recuperado do cenário. */
+  give(playerId: number, item: ItemId): boolean {
+    const character = this.characters.get(playerId);
+    if (!character || character.held !== null) return false;
+    character.held = item;
+    return true;
+  }
+  /** Consome o item carregado depois que ele foi instalado no mundo. */
+  consume(playerId: number, item: ItemId): boolean {
+    const character = this.characters.get(playerId);
+    if (!character || character.held !== item) return false;
+    character.held = null;
+    return true;
+  }
   onCounter(cell: TileCell): ItemId | null { return this.counters.get(cellKey(cell)) ?? null; }
   facingOf(playerId: number): Facing | undefined { return this.characters.get(playerId)?.facing; }
 

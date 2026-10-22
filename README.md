@@ -13,6 +13,22 @@ npm run dev
 
 Abra http://localhost:3000. Clique em **Entrar no cenário**. Mova com WASD, setas ou os botões de direção. Esc pausa/retoma. Ao sair da janela, o jogo pausa e aguarda sua confirmação para continuar.
 
+## Orla ampliada
+
+O botão **Jogar na Orla** abre a mesma fase original, ampliada de 32 para 40 unidades de largura e mantendo 20 de profundidade. Não existe uma fase adicional de rotatória. A missão, o poste, os itens e os personagens preservam suas posições no mundo.
+
+O cenário mantém mar, areia, calçadão, ciclovia e avenida com duas faixas por sentido, além da faixa operacional de desvio usada pela Mobilidade. O paisagismo toma como referência a Avenida Arthur Costa Filho, na orla central de Caraguatatuba. A frota inclui hatch, sedã, SUV, picape, ônibus e moto, dimensionados para as faixas da Orla.
+
+### Pedestres e ciclistas da Orla
+
+Os pedestres usam a mesma modelagem articulada e caminhada das personagens, com quatro aparências (coral, verde, boné e lilás). A animação acompanha a distância percorrida, suaviza as mudanças de direção e volta ao repouso quando o NPC espera na faixa.
+
+Há três variações de ciclistas: passeio com cestinha, esportivo e entregador com bag amarela **99Food**. Todos têm capacete, mãos apoiadas no guidão, pernas pedalando e rodas que giram conforme o deslocamento. A bag acompanha o tronco do entregador. Os modelos ficam em `src/game/traffic/NpcModels.ts`; rotas e travessias ficam no `ActiveMobilitySystem.ts` da fase original.
+
+As travessias funcionam sem semáforos e têm filas independentes. Um pedestre esperando na ciclovia solicita a parada das bicicletas; a fila da avenida não interfere nessa decisão. Na avenida, três pedestres formam um grupo e solicitam a parada dos carros. Quem já passou do ponto de parada termina de liberar a faixa antes da entrada dos pedestres. O trio atravessa junto, e os carros retomam quando todos saem. Há um intervalo mínimo de circulação de três segundos entre grupos na avenida e de 0,6 segundo entre travessias na ciclovia.
+
+As distâncias de parada e liberação ficam em `src/game/traffic/crossingRules.ts`. `node --test tests/crossings.cjs` simula as filas separadas, a travessia em grupo e 180 segundos de circulação em dois ritmos de atualização.
+
 ## Personagens jogáveis
 
 ### Teste livre de habilidades
@@ -31,7 +47,7 @@ Valide movimento, contato dos pés, seleção e liberação de recursos com `npm
 
 Abra **Fase 1 · Orla** em `/jogo`. WASD/setas ou o direcional de toque movem a personagem. **E** ou **Ação · E** interage com a célula adjacente na última direção de movimento (eixo dominante nas diagonais). **T** troca a personagem; os botões de seleção continuam disponíveis.
 
-Há três caixas infinitas na linha de bancadas: Sensor (azul), Placa (amarela) e Barreira (laranja). Cada personagem carrega uma caixa acima da cabeça. Mãos vazias pegam da caixa ou de uma bancada ocupada; mãos ocupadas depositam em uma bancada vazia. Ações incompatíveis não alteram nada. Trocar de personagem preserva os três inventários; sair da fase descarta a sessão. Não há pedidos nem pontuação.
+Na Orla, a Mobilidade usa o baú laranja de cones, junto à estação. Depois de ser acionada pela Analista, aproxime-se do baú, vire-se para ele e aperte **E**: um cone aparece sobre a personagem. Leve-o até uma faixa da avenida e aperte **E** para posicioná-lo; veículos reduzem a velocidade e desviam. **E** perto de um cone já colocado recolhe-o. O inventário acompanha a personagem ao trocar de equipe; reiniciar a fase limpa os cones.
 
 O catálogo fica em `src/game/items/itemData.ts`; as regras e direções em `ItemInteractions.ts`, sem Three.js. `orlaMap.ts` define as caixas e seus tipos; `ItemVisuals.ts` mantém os meshes e libera seus recursos no descarte da cena. Altura e tamanho dos itens ficam em `ITEM_VIEW_CONFIG`.
 
@@ -151,9 +167,10 @@ concluída e até 300 de bônus pelo tempo restante.
 
 1. Com a Analista, use **E** três vezes: selecionar a ocorrência, acionar
    Infraestrutura e acionar Mobilidade.
-2. Escolha Mobilidade, siga a seta e coloque um cone com **E**. O alvo fica antes
-   do poste, para os veículos pararem fora da área de trabalho. Espere o trecho
-   ficar livre.
+2. Escolha Mobilidade, siga a seta até o baú laranja, vire-se para ele e aperte
+   **E** para pegar um cone. Leve-o até o ponto indicado na avenida e aperte **E**
+   para colocá-lo. Os veículos param/desviam antes da área de trabalho; espere o
+   trecho ficar livre.
 3. Escolha Infraestrutura, aproxime-se do poste e use **E**. Acerte os três pinos
    com **Espaço** ou toque. O resumo permite reiniciar a fase inteira ou voltar.
 
@@ -162,9 +179,8 @@ E para interagir e Esc para pausar. A Analista permanece na cabine, como antes.
 No celular há botões de direção, corrida e ações das vias. Usar os botões de personagens
 seleciona a equipe; o anel no chão identifica quem está sob controle.
 
-O movimento da Orla usa aceleração, frenagem e deslizamento nas colisões;
-`ORLA_MOVEMENT` em `src/game/config.ts` concentra seu ajuste. O laboratório e
-`/teste-personagem` mantêm o comportamento anterior. O relógio conta tempo real
+O movimento da Orla usa a mesma velocidade direta do laboratório: 1,8 unidades/s,
+com Shift a 1,45×, além das colisões com deslizamento do mapa. O relógio conta tempo real
 (inclusive durante o reparo), mas congela ao pausar ou sair da janela. O puzzle
 preserva a etapa e pausa suas animações e callbacks.
 

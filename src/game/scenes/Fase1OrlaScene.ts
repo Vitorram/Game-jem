@@ -14,20 +14,19 @@ import { ItemInteractions } from '../items/ItemInteractions';
 import { ItemVisuals } from '../items/ItemVisuals';
 import { RiskWorkflow, type RiskSnapshot } from '../risks/RiskWorkflow';
 import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
-import { RiskMarkers } from '../risks/RiskMarkers';
-import { AbilityVisuals } from './AbilityVisuals';
 import { ORLA_MAP } from '../map/orlaMap';
 import { TrafficSystem } from '../traffic/TrafficSystem';
 import type { MobilityRoadAction } from '../traffic/TrafficSystem';
 import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
 import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
-import { PlayerFeedback } from './PlayerFeedback';
+import { AnalystCabin } from './AnalystCabin';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
   readonly scene = new Scene();
-  readonly players = [new Player(1, true), new Player(2, true), new Player(3, true)];
+  // Mantém a mesma velocidade direta e resposta de movimento do laboratório.
+  readonly players = [new Player(1), new Player(2), new Player(3)];
   private readonly input: Pick<Input, 'getAxis' | 'isSprinting'>;
   private readonly idle = { x: 0, z: 0 };
   readonly map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
@@ -36,7 +35,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly activeMobility = new ActiveMobilitySystem(this.map, this.traffic);
   readonly brokenPoleMarker: BrokenPoleMarker;
   private readonly objectiveMarker = new TeamObjectiveMarker();
-  private readonly playerFeedback = new PlayerFeedback();
+  private readonly analystCabin: AnalystCabin;
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   readonly risks = new RiskWorkflow(
@@ -44,17 +43,33 @@ export class Fase1OrlaScene implements GameScene {
     { stops: ORLA_ROUTE.stops.map(cell => this.map.cellCenter(cell.column, cell.row)), movedIndex: ORLA_ROUTE.movedIndex,
       destination: this.map.cellCenter(ORLA_ROUTE.destination.column, ORLA_ROUTE.destination.row) },
   );
-  private readonly riskMarkers = new RiskMarkers(this.risks.snapshot());
-  private readonly abilityVisuals = new AbilityVisuals();
   private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
+  private readonly resolveOrlaMovement = (from: { x: number; z: number }, to: { x: number; z: number }) => {
+    const resolved = this.map.resolveMovement(from, to);
+    const crate = this.map.cellCenter(10, 4);
+    const radius = GRID_CONFIG.playerRadius;
+    const left = crate.x - 0.95 - radius, right = crate.x + 0.95 + radius;
+    const near = crate.z - 0.78 - radius, far = crate.z + 0.78 + radius;
+    let { x, z } = resolved;
+    if (from.z > near && from.z < far) {
+      if (from.x <= left && x > left) x = left;
+      if (from.x >= right && x < right) x = right;
+    }
+    if (x > left && x < right) {
+      if (from.z <= near && z > near) z = near;
+      if (from.z >= far && z < far) z = far;
+    }
+    return { x, z };
+  };
   private readonly resolveInfrastructureMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
-    this.traffic.resolveWorkerMovement(from, this.map.resolveMovement(from, to), GRID_CONFIG.playerRadius);
+    this.traffic.resolveWorkerMovement(from, this.resolveOrlaMovement(from, to), GRID_CONFIG.playerRadius);
   private readonly sun: DirectionalLight;
   private disposed = false;
   private readonly cameraTarget = new Vector3();
   private cameraHeight: number = ORLA_CAMERA.closeHeight;
   private lastObjectiveDistance: number | null = null;
   private missionStep = 0;
+  private returningConeToCrate = false;
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
@@ -80,11 +95,13 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.add(this.sun);
     const brokenPole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')!;
     this.brokenPoleMarker = new BrokenPoleMarker(brokenPole.position);
-    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.playerFeedback.group, this.riskMarkers.group, this.abilityVisuals.group);
+    const analystSpawn = this.map.cellCenter(12, 5);
+    this.analystCabin = new AnalystCabin(analystSpawn.x, analystSpawn.z);
+    this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
     this.players.forEach((player, index) => {
-      // A Analista começa no acesso da estação que funciona como sua cabine de observação.
-      const spawn = index === 2 ? this.map.cellCenter(10, 5) : this.map.spawns[index];
-      player.setPosition(spawn.x, spawn.z);
+      const spawn = index === 2 ? analystSpawn : this.map.spawns[index];
+      player.setPosition(spawn.x, spawn.z - (index === 2 ? 0.3 : 0));
+      player.setSeated(index === 2);
       this.scene.add(player.mesh);
     });
     this.syncRisks();
@@ -103,7 +120,6 @@ export class Fase1OrlaScene implements GameScene {
       const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
       if (pole && pole.status !== 'RESOLVED') {
         if (suburbanGameState.snapshot().selectedProblemId !== pole.id) {
-          this.playerFeedback.action();
           suburbanGameState.selectProblem(pole.id);
           this.updateProblemPresentation();
           return;
@@ -117,13 +133,42 @@ export class Fase1OrlaScene implements GameScene {
     if (this.player.role === 'mobilidade') {
       const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
       if (!pole?.dispatchedTeams.includes('mobilidade')) return;
+      const playerId = suburbanGameState.activeCharacter;
+      const position = this.player.mesh.position;
+      const held = this.items.heldBy(playerId);
       const roadId = this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z);
-      if (roadId) {
+      const source = this.items.tileInFront(playerId, position);
+      const facingCrate = !!source && this.map.tileAt(source.column, source.row) === 'itemBox';
+      if (held === 'cone' && facingCrate && this.items.consume(playerId, 'cone')) {
+        this.returningConeToCrate = false;
+        this.itemVisuals.sync(this.items);
+        return;
+      }
+      const polePosition = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1')?.position;
+      const placementPoint = polePosition ? this.traffic.getWorkZoneApproachPosition(polePosition) : null;
+      const atWorkZone = !!placementPoint
+        && Math.hypot(position.x - placementPoint.x, position.z - placementPoint.z) <= 1.6;
+      if (held === 'cone' && roadId && atWorkZone) {
         const road = suburbanGameState.snapshot().roads.find(candidate => candidate.id === roadId);
-        if (road?.type !== 'PRINCIPAL') return;
-        const position = this.player.mesh.position;
-        const changed = this.traffic.removeNearestCone(position.x, position.z) || this.traffic.placeConeAt(roadId, position.x);
-        if (changed) this.playerFeedback.action();
+        if (road?.type === 'PRINCIPAL' && this.traffic.placeConeAt(roadId, position.x)) {
+          this.items.consume(playerId, 'cone');
+          this.returningConeToCrate = false;
+          this.itemVisuals.sync(this.items);
+        }
+        return;
+      }
+      if (held === null && roadId && this.traffic.removeNearestCone(position.x, position.z)) {
+        this.items.give(playerId, 'cone');
+        this.returningConeToCrate = true;
+        this.itemVisuals.sync(this.items);
+        return;
+      }
+      this.items.face(playerId, this.input.getAxis());
+      const frontSource = this.items.tileInFront(playerId, position);
+      if (frontSource && this.map.tileAt(frontSource.column, frontSource.row) === 'itemBox'
+        && this.items.interact(playerId, position)) {
+        this.returningConeToCrate = false;
+        this.itemVisuals.sync(this.items);
       }
       return;
     }
@@ -157,7 +202,6 @@ export class Fase1OrlaScene implements GameScene {
     if (!pole || pole.status === 'RESOLVED' || suburbanGameState.snapshot().selectedProblemId !== pole.id) return false;
     if (pole.dispatchedTeams.includes(team)) return false;
     suburbanGameState.dispatchTeam(pole.id, team);
-    this.playerFeedback.action();
     this.updateProblemPresentation();
     return true;
   }
@@ -175,7 +219,6 @@ export class Fase1OrlaScene implements GameScene {
     const action = actions[key];
     if (!action) return false;
     this.traffic.applyMobilityAction(roadId, action);
-    this.playerFeedback.action();
     return true;
   }
 
@@ -190,7 +233,6 @@ export class Fase1OrlaScene implements GameScene {
       || Math.hypot(this.player.mesh.position.x - pole.position.x, this.player.mesh.position.z - pole.position.z) > 1.5
       || !this.traffic.getWorkZoneReadiness(pole.position).prepared) return;
     suburbanGameState.setProblemStatus('broken-light-pole-1', 'RESOLVED');
-    this.playerFeedback.action();
     this.reportMissionStep(3);
     this.updateProblemPresentation();
   }
@@ -203,13 +245,6 @@ export class Fase1OrlaScene implements GameScene {
 
   private syncRisks(): void {
     const state = this.risks.snapshot();
-    this.riskMarkers.sync(state);
-    // Reutiliza os sensores, iluminação e desenho de rota do laboratório.
-    this.abilityVisuals.sync({
-      role: 2, tool: 'sensor', sensors: state.sensors, light: state.light,
-      stops: state.stops, draft: state.draft ?? state.stops, editing: state.draft !== null,
-      selectedStop: ORLA_ROUTE.movedIndex, issues: [], selectedIssue: null, message: state.message,
-    });
     this.onRisks?.(state);
   }
 
@@ -269,11 +304,11 @@ export class Fase1OrlaScene implements GameScene {
     this.activeMobility.update(dt);
     this.updateProblemPresentation();
     for (const player of this.players) {
-      const movementResolver = player.active && player.role === 'infraestrutura' ? this.resolveInfrastructureMovement : this.resolveMovement;
+      const movementResolver = player.active && player.role === 'infraestrutura'
+        ? this.resolveInfrastructureMovement : this.resolveOrlaMovement;
       if (!player.active) player.stopMovement();
       player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
     }
-    this.playerFeedback.update(dt, this.player.mesh.position);
   }
 
   private updateProblemPresentation(): void {
@@ -287,8 +322,10 @@ export class Fase1OrlaScene implements GameScene {
       && (pole.status !== 'RESOLVED' || (team === 'mobilidade' && intervention !== null));
     this.objectiveMarker.setVisible(objectiveVisible);
     if (objectiveVisible && pole) {
+      const carryingCone = this.items.heldBy(2) === 'cone';
       const target = team === 'mobilidade'
-        ? intervention ?? this.traffic.getWorkZoneApproachPosition(pole.position) : pole.position;
+        ? intervention ?? (carryingCone && !this.returningConeToCrate
+          ? this.traffic.getWorkZoneApproachPosition(pole.position) : this.map.cellCenter(10, 4)) : pole.position;
       const distance = Math.round(this.objectiveMarker.update(this.player.mesh.position, target));
       if (distance !== this.lastObjectiveDistance) {
         this.lastObjectiveDistance = distance;
@@ -303,6 +340,11 @@ export class Fase1OrlaScene implements GameScene {
     const road = laneId ? suburbanGameState.snapshot().roads.find(item => item.id === laneId) : undefined;
     const nearCone = this.player.role === 'mobilidade'
       && this.traffic.getNearbyCone(this.player.mesh.position.x, this.player.mesh.position.z);
+    const mobilityAssigned = !!pole?.dispatchedTeams.includes('mobilidade');
+    const frontCell = this.items.tileInFront(suburbanGameState.activeCharacter, this.player.mesh.position);
+    const facingConeCrate = this.player.role === 'mobilidade' && mobilityAssigned
+      && !!frontCell && this.map.tileAt(frontCell.column, frontCell.row) === 'itemBox';
+    const carryingCone = this.items.heldBy(suburbanGameState.activeCharacter) === 'cone';
     const dx = pole ? this.player.mesh.position.x - pole.position.x : Infinity;
     const dz = pole ? this.player.mesh.position.z - pole.position.z : Infinity;
     const nearPole = this.player.role === 'infraestrutura' && dx * dx + dz * dz <= 2.25;
@@ -312,7 +354,8 @@ export class Fase1OrlaScene implements GameScene {
       if (workZone?.prepared) this.reportMissionStep(2);
     }
     this.traffic.setMobilityView(this.player.role === 'mobilidade');
-    const prompt = road?.type === 'PRINCIPAL' ? nearCone ? 'REMOVER CONE' : 'COLOCAR CONE'
+    const prompt = road?.type === 'PRINCIPAL' ? !mobilityAssigned ? 'AGUARDE O ACIONAMENTO DA ANALISTA' : carryingCone ? this.returningConeToCrate ? 'LEVAR CONE AO BAÚ' : facingConeCrate ? 'GUARDAR CONE NO BAÚ' : 'SOLTAR CONE NA VIA' : nearCone ? 'RECOLHER CONE DA VIA' : 'VÁ AO BAÚ DE CONES'
+      : facingConeCrate ? carryingCone ? 'GUARDAR CONE NO BAÚ' : 'PEGAR CONE DO BAÚ'
       : nearPole && pole?.status !== 'RESOLVED' && !pole?.dispatchedTeams.includes('infraestrutura') ? 'AGUARDE O ACIONAMENTO DA ANALISTA'
         : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'ÁREA PREPARADA · REPARAR POSTE'
         : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE O TRECHO FICAR LIVRE'
@@ -328,14 +371,12 @@ export class Fase1OrlaScene implements GameScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.riskMarkers.dispose();
-    this.abilityVisuals.dispose();
     this.itemVisuals.dispose();
     this.activeMobility.dispose();
     this.traffic.dispose();
     this.brokenPoleMarker.dispose();
     this.objectiveMarker.dispose();
-    this.playerFeedback.dispose();
+    this.analystCabin.dispose();
     this.players.forEach(player => player.dispose());
     this.mapView.dispose();
     this.sun.shadow.dispose();

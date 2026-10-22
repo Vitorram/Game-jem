@@ -1,6 +1,6 @@
-import { BoxGeometry, Color, Group, Mesh, MeshStandardMaterial } from 'three';
+import { BoxGeometry, Color, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { GRID_CONFIG, ORLA_CAMERA } from '../config';
+import { GRID_CONFIG, ORLA_CAMERA, ORLA_CROSSING } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
@@ -13,8 +13,9 @@ const TOP_ACCENT: Partial<Record<TileKind, string>> = {
 const MARK_COLORS = { dash: '#f7e9b0', edge: '#f4f1ea', bike: '#fbe6da' } as const;
 type MarkKind = keyof typeof MARK_COLORS;
 
-const SEA_LOW = new Color('#22a3bf');
-const SEA_HIGH = new Color('#55d0e2');
+const SEA_LOW = new Color('#68cbd7');
+const SEA_HIGH = new Color('#84dfe2');
+const { centerX: CROSSING_X, rampHalfWidth: RAMP_HALF_X, roadClearHalfWidth: CROSSING_CLEAR_HALF_X } = ORLA_CROSSING;
 /** O mar fica mais baixo que a areia, o que desenha a borda da praia. */
 const SEA_DROP = 0.12;
 /** Quanto o chão se estende além do mapa, para não aparecer o vazio do fundo. */
@@ -26,6 +27,8 @@ const OBJECT_FILL = 0.94;
 export class GridMapView {
   readonly group = new Group();
   private readonly flat = new BoxGeometry(1, 1, 1);
+  private readonly cylinderGeometry = new CylinderGeometry(1, 1, 1, 12);
+  private readonly foliageGeometry = new SphereGeometry(1, 12, 8);
   private readonly roundedBoxes = new Map<string, RoundedBoxGeometry>();
   private readonly materials = new Map<string, MeshStandardMaterial>();
   private readonly seaWaves: [MeshStandardMaterial, MeshStandardMaterial];
@@ -36,6 +39,10 @@ export class GridMapView {
   constructor(private readonly map: GridMap) {
     this.group.name = 'orla-ground';
     this.group.receiveShadow = true;
+    this.seaWaves = [
+      this.getMaterial('sea-low', SEA_LOW.getStyle(), 0.35),
+      this.getMaterial('sea-high', SEA_HIGH.getStyle(), 0.35),
+    ];
 
     const roadRows = Array.from({ length: map.rows }, (_, row) => row)
       .filter(row => Array.from({ length: map.columns }, (_, column) => map.tileAt(column, row)).includes('road'));
@@ -46,18 +53,20 @@ export class GridMapView {
       for (let column = 0; column < map.columns; column++) {
         const kind = map.tileAt(column, row)!;
         const isNorthSidewalk = row === northSidewalkRow && kind === 'cycleway';
-        const surfaceOffset = this.getSurfaceOffset(kind, isNorthSidewalk);
         const type = TILE_TYPES[kind];
-        const height = Math.max(0.05, GRID_CONFIG.floorThickness + type.height + surfaceOffset);
-        const matKey = isNorthSidewalk ? 'north-sidewalk' : kind;
-        const color = isNorthSidewalk ? '#d7d3c8' : type.color;
+        const surfaceHeight = kind === 'sea' ? -SEA_DROP : type.height;
+        const height = Math.max(0.05, GRID_CONFIG.floorThickness + surfaceHeight);
+        const seaShade = row % 2;
+        const matKey = kind === 'sea' ? `sea-${seaShade}` : isNorthSidewalk ? 'north-sidewalk' : kind;
+        const color = kind === 'sea' ? (seaShade ? SEA_LOW.getStyle() : SEA_HIGH.getStyle())
+          : isNorthSidewalk ? '#d7d3c8' : type.color;
         const roughness = kind === 'sea' ? 0.35 : kind === 'road' ? 0.92 : GRID_CONFIG.roughness;
 
-        const tile = new Mesh(this.geometry, this.getMaterial(matKey, color, roughness));
+        const tile = new Mesh(this.flat, this.getMaterial(matKey, color, roughness));
         const center = map.cellCenter(column, row);
         tile.name = `tile-${column}-${row}-${kind}`;
         tile.scale.set(map.tileSize, height, map.tileSize);
-        tile.position.set(center.x, height / 2 - GRID_CONFIG.floorThickness, center.z);
+        tile.position.set(center.x, surfaceHeight - height / 2, center.z);
         tile.castShadow = type.height > 0;
         tile.receiveShadow = true;
         this.group.add(tile);
@@ -66,23 +75,13 @@ export class GridMapView {
 
     if (roadRows.length) {
       this.buildSeaAndBeachDetails(map);
+      this.buildWaterRipples(map);
       this.buildPromenadeDetails(map);
       this.buildCyclewayDetails(map, northSidewalkRow - 1);
       this.buildNorthSidewalk(map, northSidewalkRow);
       this.buildRoadMarkings(map, roadRows);
       this.buildSouthSidewalk(map, Math.max(...roadRows));
-    }
-  }
-
-  private getSurfaceOffset(kind: TileKind, isNorthSidewalk: boolean): number {
-    if (isNorthSidewalk) return 0.02;
-    switch (kind) {
-      case 'sea': return -0.12;
-      case 'ground': return -0.05;
-      case 'promenade': return 0;
-      case 'cycleway': return -0.012;
-      case 'road': return -0.03;
-      default: return 0;
+      this.buildCoastalGarden(map);
     }
   }
 
@@ -99,6 +98,14 @@ export class GridMapView {
     return material;
   }
 
+  update(dt: number): void {
+    if (this.disposed || !Number.isFinite(dt) || dt <= 0) return;
+    this.time += dt;
+    for (const foam of this.foam) {
+      foam.mesh.position.z = foam.baseZ + Math.sin(this.time * 1.4 + foam.phase) * 0.045;
+    }
+  }
+
   private addBox(
     name: string,
     material: MeshStandardMaterial,
@@ -110,7 +117,7 @@ export class GridMapView {
     sz: number,
     castShadow = false,
   ): Mesh {
-    const mesh = new Mesh(this.geometry, material);
+    const mesh = new Mesh(this.flat, material);
     mesh.name = name;
     mesh.position.set(x, y, z);
     mesh.scale.set(sx, sy, sz);
@@ -122,68 +129,56 @@ export class GridMapView {
 
   private buildSeaAndBeachDetails(map: GridMap): void {
     const foamMat = this.getMaterial('sea-foam', '#e8f6f8', 0.45);
-    const wetSandMat = this.getMaterial('wet-sand', '#cfa15a', 0.65);
+    const wetSandMat = this.getMaterial('wet-sand', '#e5c590', 0.8);
+    const firstSandRow = Array.from({ length: map.rows }, (_, row) => row).find(row => map.tileAt(0, row) === 'ground') ?? 2;
+    const shoreZ = map.cellCenter(0, firstSandRow).z - map.tileSize / 2;
 
-    // Faixa de areia úmida na transição entre o mar (Z = -6) e a areia seca
-    this.addBox('beach-wet-sand', wetSandMat, 0, -0.075, -5.85, map.width, 0.02, 0.48);
+    // A borda acompanha a faixa de areia ampliada, sem alterar a avenida.
+    this.addBox('beach-wet-sand', wetSandMat, 0, .002, shoreZ + .32, map.width, .008, .64);
 
     // Linhas de espuma das ondas quebrando na costa
     for (let i = 0; i < 8; i++) {
       const segWidth = map.width / 8 - 0.35;
       const x = -map.width / 2 + (i + 0.5) * (map.width / 8);
       const zOffset = (i % 2 === 0 ? -0.06 : 0.05);
-      this.addBox(`sea-foam-primary-${i}`, foamMat, x, -0.108, -6.12 + zOffset, segWidth, 0.016, 0.14);
-      this.addBox(`sea-foam-secondary-${i}`, foamMat, x + 0.25, -0.112, -6.65 - zOffset, segWidth * 0.72, 0.012, 0.08);
+      const primary = this.addBox(`sea-foam-primary-${i}`, foamMat, x, -0.108, shoreZ - .12 + zOffset, segWidth, 0.016, 0.14);
+      const secondary = this.addBox(`sea-foam-secondary-${i}`, foamMat, x + 0.25, -0.112, shoreZ - .65 - zOffset, segWidth * 0.72, 0.012, 0.08);
+      this.foam.push({ mesh: primary, baseZ: primary.position.z, phase: i * 0.7 });
+      this.foam.push({ mesh: secondary, baseZ: secondary.position.z, phase: i * 0.7 + 1.2 });
+    }
+  }
+
+  /** Ondas pequenas e suaves, com brilho pastel e movimento lento. */
+  private buildWaterRipples(map: GridMap): void {
+    const rippleMaterial = this.getMaterial('water-ripple', '#c3f4ed', 0.45, '#8cdee0', 0.12);
+    for (let row = 0; row < map.rows; row++) {
+      for (let column = 0; column < map.columns; column += 2) {
+        if (map.tileAt(column, row) !== 'sea') continue;
+        const center = map.cellCenter(column, row);
+        const length = 0.65 + (column % 3) * 0.12;
+        const mesh = new Mesh(this.roundedBox(length, 0.018, 0.09, 0.035), rippleMaterial);
+        mesh.name = `water-ripple-${column}-${row}`;
+        mesh.position.set(center.x, -SEA_DROP + 0.025, center.z + ((column / 2) % 2 ? 0.28 : -0.28));
+        mesh.rotation.y = (column % 3 - 1) * 0.12;
+        mesh.receiveShadow = true;
+        this.group.add(mesh);
+        this.foam.push({ mesh, baseZ: mesh.position.z, phase: column * 0.48 + row });
+      }
     }
   }
 
   private buildPromenadeDetails(map: GridMap): void {
-    const wallMat = this.getMaterial('promenade-low-wall', '#d2ccc0', 0.82);
-    const capMat = this.getMaterial('promenade-wall-cap', '#e8e3d8', 0.75);
-    const darkStoneMat = this.getMaterial('promenade-mosaic-dark', '#454950', 0.88);
-    const lightStoneMat = this.getMaterial('promenade-mosaic-light', '#ebe6dc', 0.85);
-    const curbMat = this.getMaterial('granite-curb', '#9ea4aa', 0.8);
-
-    // Mureta costeira entre a areia (Z = -2) e o calçadão, com aberturas de acesso à praia
-    const wallZ = -2.0;
-    for (let col = 0; col < map.columns; col++) {
-      // Aberturas de escadaria/rampa nas colunas 4 e 12
-      if (col === 4 || col === 12) {
-        const cx = map.cellCenter(col, 3).x;
-        this.addBox(`beach-step-1-${col}`, capMat, cx, -0.015, wallZ - 0.12, map.tileSize * 0.9, 0.03, 0.22);
-        this.addBox(`beach-step-2-${col}`, lightStoneMat, cx, -0.035, wallZ - 0.32, map.tileSize * 0.9, 0.03, 0.22);
-        continue;
-      }
-      const cx = map.cellCenter(col, 4).x;
-      this.addBox(`seawall-body-${col}`, wallMat, cx, 0.055, wallZ, map.tileSize, 0.11, 0.16, true);
-      this.addBox(`seawall-cap-${col}`, capMat, cx, 0.12, wallZ, map.tileSize + 0.02, 0.025, 0.2, true);
-
-      if (col % 2 === 0) {
-        const post = new Mesh(this.cylinderGeometry, capMat);
-        post.name = `seawall-post-${col}`;
-        post.scale.set(1, 0.24, 1);
-        post.position.set(cx - map.tileSize / 2 + 0.08, 0.12, wallZ);
-        post.castShadow = true;
-        post.receiveShadow = true;
-        this.group.add(post);
-      }
+    const paving = this.getMaterial('promenade-paving', '#eee5d2', .94);
+    const joint = this.getMaterial('promenade-fine-joint', '#d9d2c0', .95);
+    const edge = this.getMaterial('promenade-beach-edge', '#e3d5b7', .92);
+    this.addBox('promenade-continuous-paving', paving, 0, .002, 0, map.width, .006, 4);
+    for (let i = 1; i < map.columns; i++) {
+      const x = -map.width / 2 + i * map.tileSize;
+      this.addBox('promenade-paving-joint', joint, x, .006, 0, .012, .003, 3.8);
     }
-
-    // Paginação de mosaico português nos tiles de calçadão (rows 4 e 5)
-    for (const row of [4, 5]) {
-      for (let col = 0; col < map.columns; col++) {
-        if (map.tileAt(col, row) !== 'promenade') continue;
-        const center = map.cellCenter(col, row);
-        // Faixas de onda/geométricas inspiradas em calçadão de orla
-        this.addBox(`promenade-band-a-${col}-${row}`, darkStoneMat, center.x, 0.004, center.z - 0.55, map.tileSize * 0.92, 0.008, 0.14);
-        this.addBox(`promenade-band-b-${col}-${row}`, darkStoneMat, center.x, 0.004, center.z + 0.55, map.tileSize * 0.92, 0.008, 0.14);
-        const diamondMat = (col + row) % 2 === 0 ? darkStoneMat : lightStoneMat;
-        this.addBox(`promenade-center-tile-${col}-${row}`, diamondMat, center.x, 0.005, center.z, 0.58, 0.009, 0.58);
-      }
-    }
-
-    // Meio-fio sul do calçadão na divisa com a ciclovia (Z = +1.96)
-    this.addBox('promenade-south-curb', curbMat, 0, 0.018, 1.96, map.width, 0.045, 0.09);
+    this.addBox('promenade-paving-center-joint', joint, 0, .006, 0, map.width, .003, .012);
+    this.addBox('beach-flush-border', edge, 0, .012, -2, map.width, .025, .12);
+    this.addBox('promenade-south-curb', edge, 0, .018, 1.96, map.width, .045, .09);
   }
 
   private buildCyclewayDetails(map: GridMap, cycleRow: number): void {
@@ -214,27 +209,32 @@ export class GridMapView {
       this.addBox(`cycleway-stud-s-${i}`, studBodyMat, x, 0.012, southEdgeZ - 0.04, 0.14, 0.028, 0.08);
     }
 
-    // Pictogramas de bicicleta pintados no piso vermelho a cada trecho
-    for (const bx of [-11.5, -5.0, 5.5, 11.5]) {
-      this.buildBikePictogram(bx, cycleZ - 0.44, 1, borderWhiteMat);
-      this.buildBikePictogram(bx, cycleZ + 0.44, -1, borderWhiteMat);
-    }
   }
 
-  private buildBikePictogram(x: number, z: number, dir: 1 | -1, material: MeshStandardMaterial): void {
-    const y = -0.001;
-    for (const wx of [-0.22, 0.22]) {
-      const wheel = new Mesh(this.bikeWheelGeometry, material);
-      wheel.name = `cycleway-pictogram-wheel-${x}-${z}-${wx}`;
-      wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(x + wx, y, z);
-      wheel.scale.set(0.85, 0.85, 0.4);
-      wheel.receiveShadow = true;
-      this.group.add(wheel);
+  /** Coqueiros espaçados e bancos junto ao calçadão, com a areia aberta ao fundo. */
+  private buildCoastalGarden(map: GridMap): void {
+    const trunkMaterial = this.getMaterial('palm-trunk', '#bd936e');
+    const leavesMaterial = this.getMaterial('palm-leaves', '#85ad7b');
+    const wood = this.getMaterial('beach-bench', '#d8ac7d');
+    const frame = this.getMaterial('bench-frame', '#7c9089');
+    for (const x of [-17, -8, 6, 17]) {
+      const trunk = new Mesh(this.cylinderGeometry, trunkMaterial);
+      trunk.name = 'beach-palm-trunk'; trunk.position.set(x, .95, -3.4);
+      trunk.scale.set(.09, 1.9, .09); trunk.castShadow = true; this.group.add(trunk);
+      for (let leaf = 0; leaf < 6; leaf++) {
+        const angle = leaf * Math.PI / 3;
+        const mesh = new Mesh(this.foliageGeometry, leavesMaterial);
+        mesh.name = 'beach-palm-leaf';
+        mesh.position.set(x + Math.cos(angle) * .45, 1.95, -3.4 + Math.sin(angle) * .45);
+        mesh.scale.set(.85, .09, .23); mesh.rotation.y = -angle;
+        mesh.castShadow = true; this.group.add(mesh);
+      }
+      this.addBox('beach-bench-seat', wood, x, .33, -1.65, 1.25, .09, .36, true);
+      this.addBox('beach-bench-back', wood, x, .56, -1.83, 1.25, .36, .065, true);
+      for (const side of [-1, 1]) this.addBox('beach-bench-leg', frame, x + side * .46, .15, -1.65, .06, .3, .28, true);
     }
-    // Quadro e guidão estilizados no chão
-    this.addBox(`cycleway-pictogram-frame-${x}-${z}`, material, x, y, z, 0.34, 0.008, 0.045);
-    this.addBox(`cycleway-pictogram-handle-${x}-${z}`, material, x + dir * 0.16, y, z, 0.045, 0.008, 0.24);
+    // Fundo marítimo apenas visual; a área jogável continua com a mesma profundidade.
+    this.addBox('ocean-horizon', this.getMaterial('ocean-horizon', '#68cbd7', .4), 0, -.22, -25, map.width + 40, .2, 30);
   }
 
   private buildNorthSidewalk(map: GridMap, row: number): void {
@@ -367,6 +367,8 @@ export class GridMapView {
     if (this.disposed) return;
     this.disposed = true;
     this.flat.dispose();
+    this.cylinderGeometry.dispose();
+    this.foliageGeometry.dispose();
     this.roundedBoxes.forEach(geometry => geometry.dispose());
     this.roundedBoxes.clear();
     this.materials.forEach(material => material.dispose());

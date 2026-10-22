@@ -1,4 +1,6 @@
-import { ORLA_INTERACTION } from '../config';
+import { ORLA_INTERACTION, ORLA_CROSSING } from '../config';
+import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
+import { VehicleModels, VEHICLE_KINDS } from './VehicleModels';
 import {
   BoxGeometry, BufferGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry,
 } from 'three';
@@ -18,7 +20,7 @@ type Lane = {
   barriers: Group;
   coneGroup: Group;
 };
-type ConeObstacle = { lane: Lane; mesh: Mesh; x: number };
+type ConeObstacle = { lane: Lane; mesh: Group; x: number };
 type Vehicle = {
   mesh: Group;
   lane: Lane;
@@ -48,7 +50,8 @@ export type WorkZoneReadiness = {
 
 const INITIAL_VEHICLES_PER_LANE = 1;
 const MAX_VEHICLES_PER_LANE = 7;
-const VEHICLE_LENGTH = 1.35;
+// Envelope do maior modelo (ônibus), usado também na segurança das filas.
+const VEHICLE_LENGTH = 2.2;
 const SAFE_GAP = 4.2;
 const MIN_BUMPER_GAP = 0.16;
 const LANE_CHANGE_DURATION = 0.7;
@@ -60,27 +63,29 @@ const ESCAPE_CAPACITY = 30;
 const WORK_ZONE_CLEARANCE = 2.9;
 const CONE_LOOKAHEAD = 9;
 const CONE_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.3;
-const CROSSING_STOP_DISTANCE = 2.45;
-const CROSSING_BRAKE_DISTANCE = 7;
-const CROSSING_SAFE_DISTANCE = 2.35;
-const CROSSING_CLEARING_DISTANCE = 1.8;
 
 /** Fluxo de tráfego de protótipo em duas vias principais e uma via de escape paralela. */
 export class TrafficSystem {
   readonly group = new Group();
-  private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, 0.56);
-  private readonly cabinGeometry = new BoxGeometry(0.62, 0.3, 0.46);
-  private readonly wheelGeometry = new CylinderGeometry(0.1, 0.1, 0.08, 10);
+  private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, 0.68);
+  private readonly vehicleModels = new VehicleModels();
+  private modelIndex = 0;
   private readonly roadGeometry = new BoxGeometry(1, 0.035, 1.78);
   private readonly connectorGeometry = new BoxGeometry(0.72, 0.045, 2.05);
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.12, 1.5);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
+  private readonly coneBaseGeometry = new BoxGeometry(0.42, 0.06, 0.42);
+  private readonly coneBandGeometry = new CylinderGeometry(0.125, 0.16, 0.09, 8, 1, true);
+  private readonly coneTopBandGeometry = new CylinderGeometry(0.05, 0.08, 0.09, 8, 1, true);
   private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
     .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
   private readonly dark = new MeshStandardMaterial({ color: '#20272c', roughness: 0.9 });
   private readonly roadMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
   private readonly connectorMaterial = new MeshStandardMaterial({ color: '#3b4248', roughness: 0.92 });
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
+  private readonly coneMaterial = new MeshStandardMaterial({ color: '#f26b32', roughness: 0.72 });
+  private readonly coneStripeMaterial = new MeshStandardMaterial({ color: '#fff1cf', roughness: 0.45, emissive: '#554322', emissiveIntensity: 0.12 });
+  private readonly coneBaseMaterial = new MeshStandardMaterial({ color: '#c94f30', roughness: 0.82 });
   private readonly directionGeometry: ShapeGeometry;
   private readonly directionMaterial = new MeshStandardMaterial({ color: '#d8e3dc', emissive: '#253a35', side: 2, roughness: 0.8 });
   private readonly escapeDirectionMaterial = new MeshStandardMaterial({ color: '#8ee0b4', emissive: '#1d5038', side: 2, roughness: 0.8 });
@@ -96,14 +101,12 @@ export class TrafficSystem {
   private redirecting = false;
   private escapeSourceId = 'orla-eastbound';
   private mobilityView = false;
-  private pedestrianCrossingRequested = false;
+  private waitingPedestrians = 0;
   private pedestrianCrossingOccupied = false;
-  private crossingSignalPhase: 'green' | 'yellow' | 'red' = 'green';
-  private crossingSignalTimer = 0;
   private demandClock = 0;
   private demandLevel = 0.5;
   private trafficRandomSeed = 173;
-  private readonly pedestrianCrossingX = 1;
+  private readonly pedestrianCrossingX = ORLA_CROSSING.centerX;
   private disposed = false;
 
   constructor(map: GridMap) {
@@ -254,9 +257,21 @@ export class TrafficSystem {
     if (!lane || this.cones.length >= 18) return false;
     const coneX = MathUtils.clamp(x, this.minX + 1, this.minX + this.width - 1);
     if (this.cones.some(cone => cone.lane === lane && Math.abs(cone.x - coneX) < 1.5)) return false;
-    const cone = new Mesh(this.coneGeometry, this.barrierMaterial);
-    cone.position.set(coneX, 0.31, lane.z);
-    cone.castShadow = true;
+    const cone = new Group();
+    cone.name = 'placed-traffic-cone';
+    cone.position.set(coneX, 0, lane.z);
+    const body = new Mesh(this.coneGeometry, this.coneMaterial);
+    body.position.y = 0.31;
+    body.castShadow = true;
+    const base = new Mesh(this.coneBaseGeometry, this.coneBaseMaterial);
+    base.position.y = 0.03;
+    base.castShadow = true;
+    const lowStripe = new Mesh(this.coneBandGeometry, this.coneStripeMaterial);
+    lowStripe.position.y = 0.2;
+    const highStripe = new Mesh(this.coneTopBandGeometry, this.coneStripeMaterial);
+    highStripe.position.y = 0.42;
+    cone.add(body, base, lowStripe, highStripe);
+    cone.traverse(object => { if (object instanceof Mesh) object.receiveShadow = true; });
     lane.coneGroup.add(cone);
     this.cones.push({ lane, mesh: cone, x: coneX });
     this.publishRoadState();
@@ -394,38 +409,19 @@ export class TrafficSystem {
     return this.running;
   }
 
-  setPedestrianCrossingState(requested: boolean, occupied: boolean): void {
-    this.pedestrianCrossingRequested = requested;
+  setPedestrianCrossingState(waiting: number, occupied: boolean): void {
+    this.waitingPedestrians = Math.max(0, Math.floor(waiting));
     this.pedestrianCrossingOccupied = occupied;
   }
 
-  getPedestrianSignalPhase(): 'green' | 'yellow' | 'red' { return this.crossingSignalPhase; }
-
   isPedestrianCrossingClear(): boolean {
-    if (this.crossingSignalPhase !== 'red') return false;
+    if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize) return false;
     return this.vehicles.every(vehicle => {
-      const distance = this.distanceToPoint(vehicle.mesh.position.x, this.pedestrianCrossingX, vehicle.lane.direction);
-      if (distance > CROSSING_SAFE_DISTANCE) return true;
-      return vehicle.speed <= 0.12 && distance >= CROSSING_STOP_DISTANCE - 0.15;
+      const distance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
+      // Também verifica a traseira de quem acabou de passar, sem distância circular.
+      if (Math.abs(vehicle.mesh.position.x - this.pedestrianCrossingX) < CROSSING_RULES.roadConflictHalfWidth) return false;
+      return distance < 0 || distance > CROSSING_RULES.roadApproachDistance || vehicle.speed <= CROSSING_RULES.stoppedSpeed;
     });
-  }
-
-  private updateCrossingSignal(dt: number): void {
-    if (this.pedestrianCrossingRequested || this.pedestrianCrossingOccupied) {
-      if (this.crossingSignalPhase === 'green') {
-        this.crossingSignalPhase = 'yellow';
-        this.crossingSignalTimer = 1.25;
-      } else if (this.crossingSignalPhase === 'yellow') {
-        this.crossingSignalTimer -= dt;
-        if (this.crossingSignalTimer <= 0) this.crossingSignalPhase = 'red';
-      }
-    } else if (this.crossingSignalPhase === 'red') {
-      this.crossingSignalPhase = 'yellow';
-      this.crossingSignalTimer = 0.65;
-    } else if (this.crossingSignalPhase === 'yellow') {
-      this.crossingSignalTimer -= dt;
-      if (this.crossingSignalTimer <= 0) this.crossingSignalPhase = 'green';
-    }
   }
 
   private updateTrafficGeneration(dt: number): void {
@@ -477,7 +473,6 @@ export class TrafficSystem {
   update(delta: number): void {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, 0.05);
-    this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
     for (const vehicle of [...this.vehicles]) {
       const connectionDistance = this.updateRouteDecision(vehicle);
@@ -490,22 +485,23 @@ export class TrafficSystem {
       else this.tryReturnToPreferredLane(vehicle);
       const coneBrake = Number.isFinite(obstructionDistance)
         ? MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1) : 1;
-      const crossingDistance = this.distanceToPoint(vehicle.mesh.position.x, this.pedestrianCrossingX, vehicle.lane.direction);
-      const clearingCrosswalk = crossingDistance <= CROSSING_CLEARING_DISTANCE;
-      const crossingBrake = this.crossingSignalPhase !== 'green' && !clearingCrosswalk
-        ? this.getCrossingBrake(vehicle) : 1;
-      const atCrossingStopLine = this.crossingSignalPhase !== 'green' && !clearingCrosswalk
-        && crossingDistance <= CROSSING_STOP_DISTANCE;
+      const crossingDistance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
+      const carsYield = this.waitingPedestrians >= CROSSING_RULES.roadGroupSize || this.pedestrianCrossingOccupied;
+      const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
+        ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
       const approachingConnection = connectionDistance !== null && connectionDistance <= CONNECTION_APPROACH_DISTANCE;
       const connectionBrake = approachingConnection && vehicle.laneChangeElapsed >= LANE_CHANGE_DURATION ? 0 : 1;
       const mayLeaveBlockedLane = vehicle.plannedConnectionId !== null;
       const mayExitClosedEscape = vehicle.lane.type === 'ESCAPE' && vehicle.homeLane !== vehicle.lane;
       const laneAvailable = vehicle.lane.status === 'open' || mayLeaveBlockedLane || mayExitClosedEscape;
-      let targetSpeed = this.running && laneAvailable ? vehicle.maxSpeed * following * coneBrake * connectionBrake * crossingBrake : 0;
+      let targetSpeed = this.running && laneAvailable ? vehicle.maxSpeed * following * coneBrake * connectionBrake : 0;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
-      vehicle.speed = atCrossingStopLine || gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : MathUtils.damp(vehicle.speed, targetSpeed, 3.5, dt);
-      const travel = Math.min(vehicle.speed * dt, Math.max(0, gap - MIN_BUMPER_GAP));
+      const coneRoom = Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity;
+      const room = Math.min(crossingRoom, coneRoom, Math.max(0, gap - MIN_BUMPER_GAP));
+      const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
+      vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
+      const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
       vehicle.mesh.position.x += vehicle.lane.direction * travel;
       if (vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) {
         vehicle.laneChangeElapsed = Math.min(LANE_CHANGE_DURATION, vehicle.laneChangeElapsed + dt);
@@ -521,12 +517,6 @@ export class TrafficSystem {
       }
     }
     this.publishRoadState();
-  }
-
-  private getCrossingBrake(vehicle: Vehicle): number {
-    const distance = this.distanceToPoint(vehicle.mesh.position.x, this.pedestrianCrossingX, vehicle.lane.direction);
-    if (distance >= CROSSING_BRAKE_DISTANCE) return 1;
-    return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
   }
 
   private updateRouteDecision(vehicle: Vehicle): number | null {
@@ -683,14 +673,12 @@ export class TrafficSystem {
   private makeVehicle(bodyMaterial: MeshStandardMaterial): Group {
     const vehicle = new Group();
     vehicle.name = 'traffic-vehicle';
-    const body = new Mesh(this.bodyGeometry, bodyMaterial);
-    body.castShadow = true; body.receiveShadow = true; vehicle.add(body);
-    const cabin = new Mesh(this.cabinGeometry, bodyMaterial);
-    cabin.position.set(-0.08, 0.29, 0); cabin.castShadow = true; vehicle.add(cabin);
-    for (const x of [-0.42, 0.42]) for (const z of [-0.26, 0.26]) {
-      const wheel = new Mesh(this.wheelGeometry, this.dark);
-      wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.13, z); vehicle.add(wheel);
-    }
+    const kind = VEHICLE_KINDS[this.modelIndex++ % VEHICLE_KINDS.length];
+    const model = this.vehicleModels.create(kind, `#${bodyMaterial.color.getHexString()}`);
+    model.group.scale.setScalar(.58);
+    model.group.rotation.y = Math.PI / 2;
+    model.group.position.y = -.27;
+    vehicle.add(model.group);
     return vehicle;
   }
 
@@ -699,8 +687,9 @@ export class TrafficSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
-    [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
+    this.vehicleModels.dispose();
+    [this.bodyGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.coneBaseGeometry, this.coneBandGeometry, this.coneTopBandGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
+    [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.coneMaterial, this.coneStripeMaterial, this.coneBaseMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
     this.group.clear();
     suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
   }

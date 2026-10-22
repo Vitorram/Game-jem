@@ -57,7 +57,7 @@ export default function GameObjectiveHUD({ player, distance }: { player: PlayerI
   if (!problem.dispatchedTeams.includes(team)) return null;
   return <div className={`game-objective-hud ${player === 1 ? 'for-infrastructure' : 'for-mobility'}`} role="status">
     <b>{problem.status === 'RESOLVED' ? 'OBJETIVO · NORMALIZAR FLUXO' : player === 1 ? 'OBJETIVO · POSTE' : 'OBJETIVO · FLUXO'} · SETOR 02 {distance === null ? '' : `· ~${distance} m`}</b>
-    {player === 2 ? <span>Siga a seta e coloque um cone antes do poste (E). Quando o trecho ficar livre, escolha Infraestrutura.</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
+    {player === 2 ? <span>Pegue um cone no baú com E e leve até a seta para proteger a via. Depois, recolha os cones com E e devolva ao baú. Quando o trecho ficar livre, escolha Infraestrutura.</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
   </div>;
 }
 

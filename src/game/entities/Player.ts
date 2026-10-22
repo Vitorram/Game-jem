@@ -9,9 +9,9 @@ import type { GameState } from '../core/GameState';
 
 export type PlayerId = 1 | 2 | 3;
 export type PlayerRole = 'infraestrutura' | 'mobilidade' | 'analista';
-type PlayerAppearance = {
+export type PlayerAppearance = {
   name: string; role: PlayerRole; skin: string; hair: string; shirt: string; pants: string;
-  backpack: string; hairstyle: 'curly' | 'long' | 'blue'; hasCap?: boolean;
+  backpack: string; hairstyle: 'curly' | 'long' | 'blue'; hasCap?: boolean; hideBackpack?: boolean; lowDetail?: boolean;
 };
 export const PLAYER_APPEARANCES: Record<PlayerId, PlayerAppearance> = {
   1: { name: 'Infraestrutura', role: 'infraestrutura', skin: '#A96F4E', hair: '#241711', shirt: '#174E3C', pants: '#263A59', backpack: '#182A49', hairstyle: 'curly' },
@@ -48,15 +48,17 @@ export class Player {
   private readonly eyes: Group[] = [];
   private readonly materials = new Map<string, MeshStandardMaterial>();
   private readonly geometries = new Set<BufferGeometry>();
-  private readonly sphere = new SphereGeometry(1, 16, 12);
+  private readonly sphere: SphereGeometry;
   private elapsed = 0;
   private gait = 0;
   private movement = 0;
   private sprint = 0;
   private readonly motor?: CharacterMotor;
   private disposed = false;
+  private seated = false;
 
-  constructor(id: PlayerId = 1, responsiveMovement = false) {
+  constructor(id: PlayerId = 1, responsiveMovement = false, appearance: PlayerAppearance = PLAYER_APPEARANCES[id]) {
+    this.sphere = new SphereGeometry(1, appearance.lowDetail ? 8 : 16, appearance.lowDetail ? 6 : 12);
     if (responsiveMovement) this.motor = new CharacterMotor(ORLA_MOVEMENT);
     this.id = id;
     this.name = PLAYER_APPEARANCES[id].name;
@@ -74,7 +76,7 @@ export class Player {
     this.torso.add(this.head, this.bag);
     this.head.position.y = 0.51;
     this.bag.position.set(0, 0.04, -0.24);
-    this.build(PLAYER_APPEARANCES[id]);
+    this.build(appearance);
     this.mesh.scale.setScalar(PLAYER_VISUAL_SCALE);
     this.animate(0, 0, 0);
   }
@@ -117,6 +119,7 @@ export class Player {
   }
 
   private build(a: PlayerAppearance) {
+    if (a.lowDetail) { this.buildSimple(a); return; }
     const trim = `#${new Color(a.shirt).multiplyScalar(0.65).getHexString()}`;
     const highlight = `#${new Color(a.hair).lerp(new Color('#b1a5b1'), a.hairstyle === 'blue' ? 0.11 : 0.06).getHexString()}`;
     const badge = ['#62d7a7', '#cdb1ff', '#8bcaff'][this.id - 1];
@@ -149,6 +152,7 @@ export class Player {
     this.tube(this.head, '#854c45', [[-0.041, -0.015, 0.207], [0, -0.025, 0.218], [0.041, -0.015, 0.207]], 0.007);
 
     // Mochila arredondada com bolso, alças e pingente articulado.
+    if (!a.hideBackpack) {
     this.oval(this.bag, a.backpack, [0, 0, -0.035], [0.225, 0.275, 0.135]);
     this.oval(this.bag, '#34445b', [0, -0.10, -0.15], [0.175, 0.115, 0.045]);
     this.tube(this.bag, '#94a1ac', [[-0.15, -0.03, -0.174], [0, -0.01, -0.195], [0.15, -0.03, -0.174]], 0.005);
@@ -161,6 +165,7 @@ export class Player {
     this.charm.position.set(0.17, 0.08, -0.14);
     this.tube(this.charm, '#e2ba62', [[0, 0, 0], [0.012, -0.045, -0.01], [0, -0.075, 0]], 0.006);
     this.oval(this.charm, badge, [0, -0.105, 0], [0.026, 0.037, 0.013]);
+    }
 
     for (const side of [-1, 1]) {
       const shoulder = this.pivot(this.torso, `shoulder-${side}`, [side * 0.27, 0.15, 0]);
@@ -224,6 +229,48 @@ export class Player {
     }
   }
 
+  /** Silhueta e articulações completas, sem cordões, cadarços ou cachos individuais. */
+  private buildSimple(a: PlayerAppearance) {
+    this.oval(this.torso, a.shirt, [0, 0, 0], [.25, .3, .19]);
+    this.oval(this.body, a.pants, [0, .015, 0], [.21, .14, .15]);
+    this.oval(this.head, a.skin, [0, .12, .025], [.225, .265, .205]);
+    this.oval(this.head, a.skin, [0, .065, .222], [.035, .04, .035]);
+    for (const side of [-1, 1]) {
+      const eye = this.pivot(this.head, `eye-${side}`, [side * .085, .14, .21]);
+      this.oval(eye, '#28353c', [0, 0, 0], [.025, .035, .015]);
+      this.eyes.push(eye);
+      const shoulder = this.pivot(this.torso, `shoulder-${side}`, [side * .27, .15, 0]);
+      this.oval(shoulder, a.shirt, [0, -.125, 0], [.078, .16, .078]);
+      const elbow = this.pivot(shoulder, `elbow-${side}`, [0, -.25, 0]);
+      this.oval(elbow, a.shirt, [0, -.115, 0], [.066, .145, .066]);
+      const hand = this.pivot(elbow, `hand-${side}`, [0, -.25, 0]);
+      this.oval(hand, a.skin, [0, -.015, 0], [.062, .076, .046]);
+      this.arms.push({ root: shoulder, joint: elbow, end: hand, side });
+      const hip = this.pivot(this.body, `hip-${side}`, [side * .125, 0, 0]);
+      this.oval(hip, a.pants, [0, -.2, 0], [.09, .22, .09]);
+      const knee = this.pivot(hip, `knee-${side}`, [0, -LEG_LENGTH, 0]);
+      this.oval(knee, a.pants, [0, -.19, 0], [.075, .22, .075]);
+      const foot = this.pivot(knee, `foot-${side}`, [0, -LEG_LENGTH, 0]);
+      this.oval(foot, '#e4e3d7', [0, -.025, .055], [.1, .065, .17]);
+      this.legs.push({ root: hip, joint: knee, end: foot, side });
+    }
+    this.oval(this.head, a.hair, [0, .3, -.025], [.24, .15, .22]);
+    if (a.hairstyle === 'curly') {
+      for (const side of [-1, 0, 1]) this.oval(this.head, a.hair, [side * .12, .37, -.13], [.13, .14, .12]);
+    } else if (a.hairstyle === 'long') {
+      for (const side of [-1, 1]) this.oval(this.head, a.hair, [side * .17, .02, -.12], [.09, .31, .1]);
+    } else this.oval(this.head, a.hair, [.09, .27, .15], [.14, .1, .07]);
+    if (a.hasCap) {
+      this.oval(this.head, '#d8c3a1', [0, .34, -.005], [.25, .14, .23]);
+      this.oval(this.head, '#bda883', [0, .29, -.245], [.19, .022, .13]);
+    }
+    if (!a.hideBackpack) this.oval(this.bag, a.backpack, [0, 0, -.04], [.225, .275, .14]);
+    // Só os volumes principais precisam projetar sombras na câmera ampla.
+    for (const joint of [...this.arms, ...this.legs]) joint.end.traverse(object => {
+      if (object instanceof Mesh) object.castShadow = false;
+    });
+  }
+
   private addHair(position: [number, number, number], length: number, rest: number, phase: number) {
     const root = this.pivot(this.head, `hair-${phase}`, position);
     const tip = this.pivot(root, `hair-tip-${phase}`, [0, -length * 0.46, 0]);
@@ -270,11 +317,71 @@ export class Player {
     this.animate(dt, turn / dt, traveled);
   }
 
+  /** Anima um NPC pela distância real percorrida, sem ler input ou mudar a personagem ativa. */
+  animateWalking(delta: number, traveled: number, turning = 0): void {
+    if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
+    const dt = Math.min(delta, GAME_CONFIG.maxDelta);
+    this.movement = MathUtils.damp(this.movement, traveled > .00001 ? 1 : 0, 12, dt);
+    this.gait = (this.gait + traveled * Math.PI / STRIDE) % TAU;
+    this.elapsed += dt;
+    this.animate(dt, turning, traveled);
+  }
+
+  /** Pose sentada: pés acompanham o pedivela e braços ficam apoiados no guidão. */
+  animateCycling(delta: number, traveled: number): void {
+    if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
+    this.animateWalking(delta, traveled);
+    const phase = this.cyclingPhase;
+    this.body.position.y = HIP_HEIGHT;
+    this.body.position.x = 0;
+    this.torso.rotation.set(.26, 0, Math.sin(phase) * .015 * this.movement);
+    this.head.rotation.x = -.18;
+    for (const arm of this.arms) {
+      arm.root.rotation.set(-1.05, 0, arm.side * -.12);
+      arm.joint.rotation.x = -.35;
+      arm.end.rotation.set(.2, 0, 0);
+    }
+    for (const leg of this.legs) {
+      const pedalPhase = phase + (leg.side === 1 ? Math.PI : 0);
+      const footZ = .08 + Math.cos(pedalPhase) * .17;
+      const footY = .23 + Math.sin(pedalPhase) * .17 - HIP_HEIGHT;
+      const distance = Math.min(Math.hypot(footY, footZ), LEG_LENGTH * 2 - .001);
+      const knee = Math.acos(MathUtils.clamp((distance * distance - 2 * LEG_LENGTH ** 2) / (2 * LEG_LENGTH ** 2), -1, 1));
+      leg.root.rotation.x = Math.atan2(-footZ, -footY) - knee / 2;
+      leg.joint.rotation.x = knee;
+      leg.end.rotation.x = -leg.root.rotation.x - knee;
+    }
+  }
+
+  get cyclingPhase(): number { return this.gait * .65; }
+
+  /** Mantém a Analista sentada na estação de observação da Orla. */
+  setSeated(seated: boolean): void { this.seated = seated; }
+
   private animate(dt: number, turning: number, traveled: number) {
     const time = this.elapsed + this.id * 1.7;
     const move = this.movement;
     const sprint = this.sprint;
     const breath = Math.sin(time * 2.2);
+    if (this.seated) {
+      this.body.position.set(0, 0.54 + breath * 0.003, 0);
+      this.torso.scale.y = 1 + breath * 0.006;
+      this.torso.rotation.set(-0.04, 0, 0);
+      this.head.rotation.set(-0.08, Math.sin(time * 0.65) * 0.045, 0);
+      for (const arm of this.arms) {
+        arm.root.rotation.set(-0.72, 0, arm.side * 0.16);
+        arm.joint.rotation.set(-0.62, 0, 0);
+        arm.end.rotation.set(0, 0, 0);
+      }
+      for (const leg of this.legs) {
+        leg.root.rotation.set(-1.05, 0, 0);
+        leg.joint.rotation.set(1.2, 0, 0);
+        leg.end.rotation.set(-0.15, 0, 0);
+      }
+      this.bag.rotation.set(0, 0, 0);
+      this.charm.rotation.z = Math.sin(time * 2.8) * 0.025;
+      return;
+    }
     this.body.position.y = HIP_HEIGHT + breath * 0.004 + Math.cos(this.gait * 2) * (0.014 + sprint * 0.009) * move;
     this.torso.scale.y = 1 + breath * 0.009;
     this.torso.rotation.x = move * (0.045 + sprint * 0.075);

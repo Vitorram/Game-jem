@@ -185,7 +185,7 @@ function gameHarness(t, animation) {
   }
   const replacements = {
     window: Object.assign(new TrackedTarget(), { devicePixelRatio: 1, matchMedia: () => ({ matches: false }) }),
-    document: Object.assign(new TrackedTarget(), { hidden: false }),
+    document: Object.assign(new TrackedTarget(), { hidden: false, createElement: () => ({ getContext: () => null }) }),
     HTMLElement: Element,
     ResizeObserver: class {
       constructor(callback) { this.callback = callback; observers.push(this); }
@@ -463,7 +463,7 @@ test('Game segue seleção na Orla, reenquadra no resize pausado e restaura labo
   const game = new Game(host, () => {});
   game.start('fase1-orla');
   const renderer = created[0];
-  assert.equal(renderer.shadowMap.type, three.PCFSoftShadowMap);
+  assert.equal(renderer.shadowMap.type, three.PCFShadowMap);
   renderer.loop(100);
   const camera = renderer.lastCamera;
   const fixed = camera.position.clone();
@@ -512,7 +512,7 @@ test('Orla preserva item e direção ao selecionar outra personagem; meshes segu
   let axis = { x: 0, z: -1 };
   const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => axis });
   orla.selectPlayer(1);
-  const sourcePosition = orla.map.cellCenter(6, 5);
+  const sourcePosition = orla.map.cellCenter(8, 5);
   orla.player.setPosition(sourcePosition.x, sourcePosition.z);
   orla.interact();
   assert.equal(orla.items.heldBy(1), 'sign');
@@ -529,12 +529,12 @@ test('Orla preserva item e direção ao selecionar outra personagem; meshes segu
   orla.selectPlayer(1);
   assert.equal(orla.items.heldBy(1), 'sign');
   assert.deepEqual(orla.items.facingOf(1), { x: 0, z: -1 });
-  const counter = orla.map.cellCenter(5, 5);
+  const counter = orla.map.cellCenter(7, 5);
   orla.player.setPosition(counter.x, counter.z);
   orla.interact();
   assert.equal(orla.items.heldBy(1), null);
   assert.equal(carried.visible, false);
-  const onCounter = orla.scene.getObjectByName('item-counter-5-4');
+  const onCounter = orla.scene.getObjectByName('item-counter-7-4');
   assert.equal(onCounter.visible, true);
   assert.equal(onCounter.material.color.getHexString(), carried.material.color.getHexString());
   axis = { x: 1, z: 0 };
@@ -548,10 +548,10 @@ test('GPU dos itens é compartilhada e descartada uma vez, inclusive carregados 
   const counts = watchResources(orla.scene);
   const geometry = orla.scene.getObjectByName('item-carried-1').geometry;
   orla.selectPlayer(1);
-  const source = orla.map.cellCenter(6, 5);
+  const source = orla.map.cellCenter(8, 5);
   orla.player.setPosition(source.x, source.z);
   orla.interact();
-  const counter = orla.map.cellCenter(5, 5);
+  const counter = orla.map.cellCenter(7, 5);
   orla.player.setPosition(counter.x, counter.z);
   orla.interact();
   orla.selectPlayer(2);
@@ -571,7 +571,7 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
   game.start('fase1-orla');
   const phase = game.scenes.current;
   game.selectPlayer(1);
-  const source = phase.map.cellCenter(6, 5);
+  const source = phase.map.cellCenter(8, 5);
   phase.player.setPosition(source.x, source.z);
   game.input.setTouch(1, 'KeyW');
   const key = (code, extra = {}) => {
@@ -593,7 +593,7 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
   key('KeyT'); key('KeyT');
   assert.equal(phase.player.id, 1);
   assert.deepEqual(selected, [3, 1, 2, 3, 1]);
-  const counter = phase.map.cellCenter(5, 5);
+  const counter = phase.map.cellCenter(7, 5);
   phase.player.setPosition(counter.x, counter.z);
   game.togglePause();
   key('KeyE'); key('KeyT'); game.interact();
@@ -602,13 +602,13 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
   game.togglePause();
   game.interact();
   assert.equal(phase.items.heldBy(1), null);
-  assert.equal(phase.items.onCounter({ column: 5, row: 4 }), 'sign');
+  assert.equal(phase.items.onCounter({ column: 7, row: 4 }), 'sign');
   const callbacks = selected.length;
   created[0].loop(100); created[0].loop(116);
   assert.equal(selected.length, callbacks, 'sem callbacks de seleção por frame');
   game.returnToMenu();
   game.start('fase1-orla');
-  assert.equal(game.scenes.current.items.onCounter({ column: 5, row: 4 }), null);
+  assert.equal(game.scenes.current.items.onCounter({ column: 7, row: 4 }), null);
   assert.equal(game.scenes.current.items.heldBy(1), null);
   game.dispose();
 });

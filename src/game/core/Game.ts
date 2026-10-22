@@ -1,7 +1,7 @@
 import {
   WebGLRenderer,
   PerspectiveCamera,
-  PCFSoftShadowMap,
+  PCFShadowMap,
   Vector3,
 } from 'three';
 
@@ -63,7 +63,7 @@ export class Game {
     });
 
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = PCFSoftShadowMap;
+    this.renderer.shadowMap.type = PCFShadowMap;
 
     this.renderer.domElement.setAttribute(
       'aria-label',
@@ -138,7 +138,7 @@ export class Game {
       this.session = new GameSession(ORLA_SESSION_CONFIG);
       sessionStore.bind(this.session, () => this.restartPhase());
       sessionStore.start();
-      this.closeView = true;
+      this.closeView = false;
       this.onPlayerSelected?.(orla.player.id);
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
       this.changeStatus('playing');
@@ -215,7 +215,7 @@ export class Game {
   useMobilityHotkey(key: string): boolean {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    return scene instanceof Fase1OrlaScene && scene.useMobilityHotkey(key);
+    return (scene instanceof Fase1OrlaScene) && scene.useMobilityHotkey(key);
   }
 
   private restartPhase(): void {

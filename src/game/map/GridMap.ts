@@ -1,15 +1,15 @@
 import { ITEM_TYPES, type ItemId } from '../items/itemData';
 
 export const TILE_TYPES = {
-  ground: { color: '#ecc078', height: 0, solid: false },
+  ground: { color: '#efd39a', height: 0, solid: false },
   promenade: { color: '#dfd9ce', height: 0, solid: false },
-  cycleway: { color: '#b83b32', height: 0, solid: false },
-  road: { color: '#33393e', height: 0, solid: false },
-  sea: { color: '#2b879e', height: 0, solid: true },
+  cycleway: { color: '#ce7060', height: 0, solid: false },
+  road: { color: '#4b555b', height: 0, solid: false },
+  sea: { color: '#74d5df', height: 0, solid: true },
   wall: { color: '#657184', height: 1.8, solid: true },
-  counter: { color: '#b77b48', height: 0.9, solid: true },
-  itemBox: { color: '#536b80', height: 0.9, solid: true },
-  station: { color: '#66b890', height: 1.2, solid: true },
+  counter: { color: '#dfd9ce', height: 0, solid: false },
+  itemBox: { color: '#dfd9ce', height: 0, solid: false },
+  station: { color: '#dfd9ce', height: 0, solid: false },
 } as const;
 export type TileKind = keyof typeof TILE_TYPES;
 export type Point = { x: number; z: number };

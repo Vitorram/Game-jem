@@ -99,8 +99,15 @@ export default function RepairPuzzle({ onComplete, paused = false }: { onComplet
     <div style={paused ? { display: 'none' } : undefined} className="repair-puzzle-overlay" role="dialog" aria-modal="true" aria-labelledby="repair-puzzle-title" onPointerDown={() => answerRef.current()}>
       <div ref={cardRef} className="repair-puzzle-card">
         <span className="repair-puzzle-kicker">MANUTENÇÃO ELÉTRICA</span>
-        <h2 id="repair-puzzle-title">REPARO DE INFRAESTRUTURA</h2>
+        <h2 id="repair-puzzle-title">LIGUE A ENERGIA!</h2>
         <p className="repair-puzzle-stage">ETAPA {step + 1}/3</p>
+        <div className="repair-pole-preview" aria-hidden="true">
+          <span className="repair-wire repair-wire-left" /><span className="repair-wire repair-wire-right" />
+          <span className="repair-pole-cap" /><span className="repair-pole-segment repair-segment-top" />
+          <span className="repair-pole-joint" /><span className="repair-pole-segment repair-segment-bottom" />
+          <span className="repair-pole-base" /><span className="repair-pole-bolt bolt-left" /><span className="repair-pole-bolt bolt-right" />
+          <b>POSTE EM REPARO</b>
+        </div>
         <div className="repair-progress" aria-label={`Etapa ${step + 1} de 3`}>
           {[0, 1, 2].map(index => <span key={index} className={index < step ? 'is-done' : index === step ? 'is-current' : ''}>{index < step ? '✓' : `0${index + 1}`}</span>)}
         </div>

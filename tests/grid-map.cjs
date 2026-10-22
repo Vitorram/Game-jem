@@ -20,11 +20,11 @@ const { GRID_CONFIG } = require('../src/game/config.ts');
 const definition = (rows = ['.....', '..#..', '.....', '.....', '.....']) => ({ rows, legend: { '.': 'ground', '#': 'wall' }, spawns: [{ column: 0, row: 0 }] });
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
-test('lê 16x10, oito tipos, spawns livres e conversão entre grade e mundo', () => {
+test('lê 20x10, oito tipos, spawns livres e conversão entre grade e mundo', () => {
   const map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
-  assert.equal(map.columns, 16);
+  assert.equal(map.columns, 20);
   assert.equal(map.rows, 10);
-  assert.equal(map.width, 32);
+  assert.equal(map.width, 40);
   assert.equal(map.depth, 20);
   assert.deepEqual(new Set(map.tiles), new Set(['sea', 'ground', 'promenade', 'itemBox', 'counter', 'station', 'cycleway', 'road']));
   assert.equal(map.spawns.length, 3);
@@ -36,7 +36,7 @@ test('lê 16x10, oito tipos, spawns livres e conversão entre grade e mundo', ()
     assert.equal(map.isSolid(cell.column, cell.row), false);
   });
   assert.equal(map.tileAt(-1, 0), undefined);
-  assert.equal(map.isSolid(16, 0), true);
+  assert.equal(map.isSolid(map.columns, 0), true);
 });
 
 test('rejeita mapas vazios, irregulares, símbolos e spawns inválidos', () => {
@@ -80,7 +80,7 @@ test('construtor cria um bloco por tile, topo correto, sombras e dispose único'
   const map = new GridMap(ORLA_MAP, 2, 0.3);
   const view = new GridMapView(map);
   const tiles = view.group.children.filter(child => child.name.startsWith('tile-'));
-  assert.equal(tiles.length, 160);
+  assert.equal(tiles.length, map.columns * map.rows);
   const resources = new Map();
   view.group.traverse(object => {
     for (const resource of [object.geometry, object.material].filter(Boolean)) {
