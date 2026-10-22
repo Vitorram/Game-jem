@@ -19,7 +19,13 @@ function problemCategory(problem: UrbanProblem): string {
   return problem.type === 'broken-light-pole' ? 'ILUMINAÇÃO' : 'SERVIÇO URBANO';
 }
 
-export default function OrlaTablet({ onAction }: { onAction: () => void }) {
+export type AnalystTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
+
+export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress }: {
+  onAction: (problemId?: string) => void;
+  tutorialStep?: AnalystTutorialStep | null;
+  onTutorialProgress?: (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => void;
+}) {
   const [, refresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   useEffect(() => {
@@ -35,10 +41,19 @@ export default function OrlaTablet({ onAction }: { onAction: () => void }) {
     ?? problems.find(problem => problem.status !== 'RESOLVED')
     ?? problems[0];
   const selectedInGame = issue?.id === state.selectedProblemId;
-  const nextTeam = teams.find(team => !issue?.dispatchedTeams.includes(team.id));
+  const requiredTeams = teams.filter(team => !issue?.requiredTeams || issue.requiredTeams.includes(team.id));
+  const nextTeam = requiredTeams.find(team => !issue?.dispatchedTeams.includes(team.id));
   const resolved = !issue || issue.status === 'RESOLVED';
   const activeCount = problems.filter(problem => problem.status !== 'RESOLVED').length;
-  const actionLabel = resolved ? 'OCORRÊNCIA RESOLVIDA' : !selected ? 'SELECIONE UMA OCORRÊNCIA' : !selectedInGame ? 'CONFIRMAR OCORRÊNCIA' : nextTeam ? `ACIONAR ${nextTeam.label.toLocaleUpperCase('pt-BR')}` : 'EQUIPES ACIONADAS';
+  const actionLabel = resolved ? 'OCORRÊNCIA RESOLVIDA' : !selected ? 'SELECIONE UMA OCORRÊNCIA' : state.phase ? 'MARCAR OBJETIVO DA EQUIPE' : !selectedInGame ? 'CONFIRMAR OCORRÊNCIA' : nextTeam ? `ACIONAR ${nextTeam.label.toLocaleUpperCase('pt-BR')}` : 'EQUIPES ACIONADAS';
+  const infrastructureDispatched = issue?.dispatchedTeams.includes('infraestrutura') ?? false;
+  const mobilityDispatched = issue?.dispatchedTeams.includes('mobilidade') ?? false;
+
+  useEffect(() => {
+    if (tutorialStep === 2 && selectedInGame) onTutorialProgress?.('confirmed');
+    if (tutorialStep === 3 && infrastructureDispatched) onTutorialProgress?.('infrastructure');
+    if (tutorialStep === 4 && mobilityDispatched) onTutorialProgress?.('mobility');
+  }, [tutorialStep, selectedInGame, infrastructureDispatched, mobilityDispatched, onTutorialProgress]);
 
   const issueByTile = useMemo(() => {
     const columns = ORLA_MAP.rows[0].length;
@@ -72,7 +87,7 @@ export default function OrlaTablet({ onAction }: { onAction: () => void }) {
                 const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
                 const tileClass = kind === '-' && rowIndex === 7 ? 'sidewalk' : tiles[kind] ?? 'sand';
                 return <div key={`${rowIndex}-${column}`} role="gridcell" className={`map-tile map-row-${rowIndex} map-col-${column} ${tileClass}${issues.length ? ' has-incident' : ''}`}>
-                  {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={() => setSelectedId(issues[0].id)}>
+                  {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { setSelectedId(issues[0].id); onTutorialProgress?.('selected'); event.currentTarget.blur(); }}>
                     <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>
                   </button>}
                   {!issues.length && ['B', 'C', 'E'].includes(kind) && <span className={`map-object object-${kind.toLowerCase()}`}>{kind === 'B' ? '▰' : kind === 'C' ? '□' : '⌂'}</span>}
@@ -93,31 +108,31 @@ export default function OrlaTablet({ onAction }: { onAction: () => void }) {
         <div className="tablet-incident-column">
           <div className="tablet-section-title"><span>02 / CENTRAL DE OCORRÊNCIAS</span><b className="active-tag"><i /> {activeCount} ATIVA{activeCount === 1 ? '' : 'S'}</b></div>
           <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
-            {problems.map(problem => <button key={problem.id} role="listitem" className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}`} onClick={() => setSelectedId(problem.id)}>
+            {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { setSelectedId(problem.id); onTutorialProgress?.('selected'); event.currentTarget.blur(); }}>
               <span className="incident-icon">{problem.type === 'broken-light-pole' ? 'ϟ' : '!'}</span>
-              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : 'Setor Orla'} · {problem.dispatchedTeams.length}/2 equipes</em></span>
+              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : 'Setor Orla'} · {problem.dispatchedTeams.length}/{problem.requiredTeams?.length ?? 2} equipes</em></span>
               <span className="incident-chevron">›</span>
             </button>)}
             {!problems.length && <div className="tablet-empty-list">Nenhuma ocorrência registrada.</div>}
           </div>
           <div className={`tablet-detail-card${!selected || !issue ? ' is-unselected' : ''}`}>
             <div className="tablet-detail-heading"><span className="detail-alert">!</span><div><small>RELATÓRIO DE CAMPO</small><b>{selected && issue ? problemTitle(issue) : 'Selecione uma ocorrência'}</b></div></div>
-            <p>{selected && issue ? issue.type === 'broken-light-pole'
+            <p>{selected && issue ? issue.instruction ?? (issue.type === 'broken-light-pole'
               ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
-              : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.'
+              : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
               : 'Escolha um alerta na lista ou no mapa para abrir os detalhes e preparar o atendimento.'}</p>
-            {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : 'RISCO EM ANÁLISE'}</span><span>{issue.dispatchedTeams.length}/2 EQUIPES ACIONADAS</span></div>}
+            {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : 'RISCO EM ANÁLISE'}</span><span>{issue.dispatchedTeams.length}/{requiredTeams.length} EQUIPES ACIONADAS</span></div>}
           </div>
-          <div className="tablet-team-title"><span>PLANO DE RESPOSTA</span><small>{issue?.dispatchedTeams.length ?? 0}/2 EQUIPES</small></div>
+          <div className="tablet-team-title"><span>PLANO DE RESPOSTA</span><small>{issue?.dispatchedTeams.length ?? 0}/{requiredTeams.length} EQUIPES</small></div>
           <div className="tablet-teams">
-            {teams.map(team => {
+            {requiredTeams.map(team => {
               const dispatched = issue?.dispatchedTeams.includes(team.id) ?? false;
               return <div className={`tablet-team ${team.color}${dispatched ? ' is-dispatched' : ''}`} key={team.id}>
                 <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : team.short}</small></span>
               </div>;
             })}
           </div>
-          <button className={`tablet-action${resolved ? ' is-complete' : ''}`} disabled={resolved || !selected || (!nextTeam && selectedInGame)} onClick={onAction}>
+          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={resolved || !selected || (!state.phase && !nextTeam && selectedInGame)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}>
             <span>{resolved ? '✦' : !selectedInGame ? '◉' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'OK' : 'E'}</kbd>
           </button>
           <small className="tablet-action-hint">{resolved ? 'Ocorrência encerrada.' : !selected ? 'Selecione um alerta para iniciar o atendimento.' : !selectedInGame ? 'Confirme a ocorrência para liberar o atendimento.' : 'Acione a próxima equipe para continuar o plano.'}</small>

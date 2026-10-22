@@ -17,6 +17,8 @@ export type SessionConfig = {
   firstOrderDelayMs: number;
   /** Catálogo percorrido ciclicamente, sem aleatoriedade implícita. */
   orders: readonly OrderDefinition[];
+  /** Agenda finita, na mesma ordem do catálogo. Sem repetição nem vitória antecipada. */
+  scheduledAtMs?: readonly number[];
 };
 
 export type ActiveOrder = {
@@ -87,7 +89,7 @@ export class GameSession {
     this.reset();
     this.status = 'playing';
     const events: SessionEvent[] = [{ type: 'status', status: this.status }];
-    if (this.config.firstOrderDelayMs === 0) this.issueOrder(events);
+    if (this.nextArrival() === 0) this.issueOrder(events);
     return events;
   }
 
@@ -105,6 +107,7 @@ export class GameSession {
 
   /** Vitória antecipada somente após concluir todos os pedidos emitidos. */
   finish(): SessionEvent[] {
+    if (this.config.scheduledAtMs) return [];
     if (this.status !== 'playing' || this.orders.length || this.completedOrders === 0) return [];
     this.status = 'finished';
     return [{ type: 'status', status: this.status }];
@@ -128,7 +131,7 @@ export class GameSession {
     const target = Math.min(this.config.phaseDurationMs, this.elapsedMs + deltaMs);
     const events: SessionEvent[] = [];
     while (this.elapsedMs < target) {
-      const nextArrival = this.config.firstOrderDelayMs + this.issuedOrders * this.config.orderIntervalMs;
+      const nextArrival = this.nextArrival();
       let nextDeadline = Infinity;
       for (const order of this.orders) nextDeadline = Math.min(nextDeadline, order.expiresAtMs);
       this.elapsedMs = Math.min(target, nextArrival, nextDeadline);
@@ -151,7 +154,8 @@ export class GameSession {
    * O ID da instância impede que uma ação repetida conclua outro pedido.
    */
   resolveRisk(orderId: number, riskId: number): SessionEvent[] {
-    const order = this.orders[0];
+    const order = this.config.scheduledAtMs
+      ? this.orders.find(item => item.id === orderId) : this.orders[0];
     if (this.status !== 'playing' || !order || order.id !== orderId
       || order.riskIds[order.completedSteps] !== riskId) return [];
     order.completedSteps++;
@@ -162,10 +166,16 @@ export class GameSession {
       const points = order.basePoints + speedBonus;
       this.score += points;
       this.completedOrders++;
-      this.orders.shift();
+      this.orders.splice(this.orders.indexOf(order), 1);
       events.push({ type: 'order-completed', orderId, basePoints: order.basePoints, speedBonus, points });
     }
     return events;
+  }
+
+  private nextArrival(): number {
+    return this.config.scheduledAtMs
+      ? this.config.scheduledAtMs[this.issuedOrders] ?? Infinity
+      : this.config.firstOrderDelayMs + this.issuedOrders * this.config.orderIntervalMs;
   }
 
   private issueOrder(events: SessionEvent[]): void {
@@ -204,6 +214,11 @@ export class GameSession {
 
   private validate(config: SessionConfig): void {
     const integer = (value: number, minimum: number) => Number.isSafeInteger(value) && value >= minimum;
+    if (config.scheduledAtMs && (config.scheduledAtMs.length !== config.orders.length
+      || config.scheduledAtMs.some((at, index, all) => !integer(at, 0)
+        || at >= config.phaseDurationMs || (index > 0 && at <= all[index - 1])))) {
+      throw new Error('Agenda de eventos inválida.');
+    }
     if (!integer(config.phaseDurationMs, 1) || !integer(config.orderIntervalMs, 1)
       || !integer(config.firstOrderDelayMs, 0) || config.firstOrderDelayMs >= config.phaseDurationMs
       || !config.orders.length) throw new Error('Configuração de partida inválida.');

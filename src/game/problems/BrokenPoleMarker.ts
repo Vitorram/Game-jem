@@ -123,6 +123,18 @@ export class BrokenPoleMarker {
     this.workZoneDiskMaterial.opacity = state === 'clear' ? 0.08 : 0.12;
   }
 
+  setPhaseState(state: 'healthy' | 'warning' | 'broken' | 'repairing' | 'resolved', elapsedMs: number): void {
+    const healthy = state === 'healthy' || state === 'resolved';
+    this.setState(healthy ? 'RESOLVED' : state === 'repairing' ? 'MAINTENANCE' : 'ACTIVE', !healthy);
+    this.setWorkZoneState('hidden');
+    this.resolvedBadge.visible = state === 'resolved';
+    const on = healthy || (state === 'warning' && Math.floor(elapsedMs / 170) % 3 !== 0);
+    this.lamp.visible = on;
+    this.lampGlow.visible = on;
+    this.lampLight.visible = on;
+    this.materials[5].emissiveIntensity = on ? 3.1 : 0;
+  }
+
   update(delta: number): void {
     if (!Number.isFinite(delta) || delta <= 0) return;
     this.elapsed += Math.min(delta, 0.05);

@@ -1,15 +1,18 @@
 'use client';
 
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { gsap } from 'gsap';
 import type { SessionEvent, SessionSnapshot } from '@/game/session/GameSession';
 import { sessionStore, starsFor, type SessionView } from '@/game/session/sessionStore';
 import styles from './OrdersHud.module.css';
+import { ORLA_EVENTS, ORLA_EVENT_STEPS, ORLA_RECOVERY_MS } from '@/game/session/orlaEvents';
+import { suburbanGameState, type UrbanProblem } from '@/game/core/GameState';
 
 type HudOrder = SessionSnapshot['orders'][number];
 
 /** Marcos confirmados pela cena, e não por cliques no HUD. */
 const RISK_STEPS: Record<number, { icon: string; label: string }> = {
+  ...ORLA_EVENT_STEPS,
   1: { icon: '📡', label: 'Acionar as duas equipes' },
   2: { icon: '🚧', label: 'Preparar uma área segura' },
   3: { icon: '💡', label: 'Reparar o poste' },
@@ -23,7 +26,7 @@ const formatTime = (ms: number) => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
-function Ticket({ order, queued, frozen }: { order: HudOrder; queued: boolean; frozen: boolean }) {
+function Ticket({ order, frozen, problem }: { order: HudOrder; frozen: boolean; problem?: UrbanProblem }) {
   const root = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
@@ -34,12 +37,13 @@ function Ticket({ order, queued, frozen }: { order: HudOrder; queued: boolean; f
 
   const next = RISK_STEPS[order.riskIds[order.completedSteps]];
   return (
-    <li ref={root} className={styles.ticket} data-queued={queued || undefined}>
+    <li ref={root} className={styles.ticket}>
       <span className={styles.title}>{order.title}</span>
+      <span className={styles.hint}>{problem?.requiredTeams?.map(team => team === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura').join(' + ')}</span>
       <span className={styles.steps}>
         {order.riskIds.map((id, index) => {
           const step = RISK_STEPS[id] ?? { icon: '❓', label: `Risco ${id}` };
-          const state = index < order.completedSteps ? 'done' : index === order.completedSteps && !queued ? 'next' : 'todo';
+          const state = index < order.completedSteps ? 'done' : index === order.completedSteps ? 'next' : 'todo';
           return (
             <span key={id} className={styles.step} data-state={state} title={step.label}>
               {state === 'done' ? '✓' : step.icon}
@@ -47,7 +51,8 @@ function Ticket({ order, queued, frozen }: { order: HudOrder; queued: boolean; f
           );
         })}
       </span>
-      <span className={styles.hint}>{queued ? 'Na fila' : next ? `Agora: ${next.label}` : ''}</span>
+      <span className={styles.hint}>{problem?.stage === 'warning' ? problem.instruction : next ? `Agora: ${next.label}` : ''}</span>
+      <button className={styles.focus} onClick={event => { suburbanGameState.selectProblem(order.definitionId); event.currentTarget.blur(); }}>Marcar objetivo →</button>
       <span className={styles.bar} aria-hidden="true">
         <i
           className={styles.fill}
@@ -86,7 +91,7 @@ function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | '
     case 'order-expired':
       return { tone: 'bad', text: `Prazo encerrado −${event.penalty}` };
     case 'order-arrived':
-      return { tone: 'info', text: 'Acione as equipes com a Analista' };
+      return { tone: 'info', text: ORLA_EVENTS.find(item => item.id === event.order.definitionId)?.warning ?? event.order.title };
     default:
       return null;
   }
@@ -141,7 +146,7 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
   return (
     <div ref={root} className={styles.summary} role="dialog" aria-modal="true" aria-label="Fim de fase">
       <div className={styles.card}>
-        <h2>{snapshot.completedOrders ? 'Orla recuperada!' : 'Tempo esgotado!'}</h2>
+        <h2>{snapshot.completedOrders === ORLA_EVENTS.length ? 'Orla recuperada!' : 'Fim dos seis minutos'}</h2>
         <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
           {[1, 2, 3].map(n => <span key={n} className={styles.star} data-on={n <= stars}>★</span>)}
         </div>
@@ -164,6 +169,11 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
  */
 export default function OrdersHud({ paused, showDebug = false, onMenu }: { paused: boolean; showDebug?: boolean; onMenu?: () => void }) {
   const { snapshot, feedback } = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
+  const [world, setWorld] = useState(() => suburbanGameState.snapshot());
+  useEffect(() => {
+    const timer = window.setInterval(() => setWorld(suburbanGameState.snapshot()), 300);
+    return () => window.clearInterval(timer);
+  }, []);
   if (!snapshot) return null;
 
   const frozen = paused || snapshot.status !== 'playing';
@@ -173,12 +183,19 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
       <div className={styles.strip} aria-label="Pedidos da fase">
         <Coin score={snapshot.score} />
         <ol className={styles.tickets}>
-          {snapshot.orders.map((order, index) => (
-            <Ticket key={order.id} order={order} queued={index > 0} frozen={frozen} />
+          {snapshot.orders.map(order => (
+            <Ticket key={order.id} order={order} frozen={frozen} problem={world.problems.find(problem => problem.id === order.definitionId)} />
           ))}
         </ol>
         <div className={styles.clock} data-urgent={urgent || undefined} role="timer" aria-label="Tempo restante da fase">
           <span aria-hidden="true">⏱</span> {formatTime(snapshot.remainingMs)}
+        </div>
+        <div className={styles.phaseStatus} role="status">
+          {snapshot.elapsedMs >= ORLA_RECOVERY_MS
+            ? 'RECUPERAÇÃO · resolva pendências, recolha cones e use 1 para normalizar'
+            : snapshot.elapsedMs < 30_000 ? 'ORLA TRANQUILA · primeiro aviso em 0:30'
+              : `${snapshot.completedOrders}/5 ocorrências resolvidas`}
+          {world.phase && <span>{world.phase.waitingPedestrians} pedestres esperando · {world.phase.queuedVehicles} carros na fila</span>}
         </div>
       </div>
       <Toast feedback={feedback} />

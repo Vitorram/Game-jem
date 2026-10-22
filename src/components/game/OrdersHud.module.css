@@ -21,8 +21,11 @@
 
 .tickets {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  max-width: min(780px, calc(100vw - 220px));
+  overflow-x: auto;
+  pointer-events: auto;
   align-items: flex-start;
   gap: 10px;
   margin: 0;
@@ -32,6 +35,7 @@
 
 .ticket {
   display: grid;
+  flex-shrink: 0;
   gap: 6px;
   width: 150px;
   padding: 8px 10px 10px;
@@ -40,6 +44,11 @@
   border-radius: 14px;
   box-shadow: var(--shadow);
 }
+
+.focus { padding: 4px 6px; background: #213e35; color: #fff4d6; border-radius: 5px; font-size: 10px; }
+.phaseStatus { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); padding: 6px 12px; border-radius: 8px; background: #10211de8; color: #e4f7e8; text-align: center; font: 11px/1.5 system-ui, sans-serif; }
+.phaseStatus span { display: block; color: #ffd884; }
+@media (max-width: 600px) { .strip { gap: 5px; } .tickets { max-width: calc(100vw - 165px); } .ticket { width: 135px; } .coin, .clock { padding: 5px 7px; font-size: 14px; } .coinFace { display: none; } .phaseStatus { font-size: 10px; } }
 
 .ticket[data-queued] {
   opacity: 0.8;
@@ -317,16 +326,26 @@
 }
 
 
-.strip { top: max(12px, env(safe-area-inset-top)); left: 16px; transform: none; justify-content: flex-start; max-width: calc(100vw - 130px); gap: 8px; }
-.ticket { width: 184px; }
+.strip { top: max(12px, env(safe-area-inset-top)); left: 16px; transform: none; display: grid; grid-template-columns: auto minmax(0,1fr) auto; width: min(900px, calc(100vw - 140px)); max-width: none; gap: 8px; }
+.tickets { min-width: 0; max-width: none; padding-bottom: 4px; }
+.ticket { position: relative; width: 184px; gap: 3px; padding: 6px 8px; }
+.ticket .title { font-size: 12px; }
+.ticket .hint { font-size: 10px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ticket .step { width: 20px; height: 20px; font-size: 11px; }
+.ticket .bar { height: 5px; }
+.phaseStatus { position: static; grid-column: 1 / -1; transform: none; width: auto; max-width: none; }
 @media (max-width: 700px) {
-  .strip { top: 12px; left: 10px; gap: 6px; flex-wrap: nowrap; }
+  .strip { top: 12px; left: 10px; width: calc(100vw - 20px); gap: 5px; grid-template-columns: auto auto 1fr; }
   .coin, .clock { font-size: 0.85rem; padding: 5px 8px; }
+  .clock { grid-column: 2; grid-row: 1; }
   .coinFace { width: 22px; height: 22px; font-size: 0.7rem; }
-  .tickets { position: absolute; top: 44px; left: 0; order: initial; }
-  .ticket { width: 210px; padding: 6px 8px; gap: 3px; }
-  .steps { position: absolute; right: 8px; top: 6px; gap: 3px; }
-  .step { width: 20px; height: 20px; font-size: .65rem; }
-  .title { max-width: 120px; font-size: .7rem; }
-  .hint { font-size: .65rem; }
+  .tickets { position: static; grid-column: 1 / -1; grid-row: 2; order: initial; }
+  .ticket { width: 190px; }
+  .steps { gap: 3px; }
+  .phaseStatus { grid-row: 3; padding: 4px 8px; font-size: 10px; }
+}
+@media (max-height: 500px) {
+  .ticket .steps, .ticket .hint:first-of-type { display: none; }
+  .ticket { width: 170px; }
+  .phaseStatus { font-size: 9px; padding: 3px 6px; }
 }

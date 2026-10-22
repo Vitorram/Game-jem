@@ -53,6 +53,21 @@ export class ActiveMobilitySystem {
   private cycleCooldown = 0;
   private groupSpeed = .85;
   private playerPosition: { x: number; z: number } | null = null;
+  private crossingIncident = false;
+  private crossedPedestrians = 0;
+  private holdRoadBatches = false;
+
+  setRoadBatchHold(hold: boolean): void { this.holdRoadBatches = hold; }
+
+  setCrossingIncident(active: boolean): void {
+    if (active && !this.crossingIncident) this.spawnWalkerTimer = 0;
+    this.crossingIncident = active;
+  }
+
+  getCrossingProgress(): { waiting: number; crossed: number; occupied: boolean } {
+    return { waiting: this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road').length,
+      crossed: this.crossedPedestrians, occupied: this.roadBatch.some(walker => walker.state === 'cross-road') };
+  }
 
   constructor(private readonly map: GridMap, private readonly traffic: TrafficSystem) {
     this.group.name = 'cycleway-and-pedestrians';
@@ -197,9 +212,10 @@ export class ActiveMobilitySystem {
   }
 
   private spawnWalker(x: number): void {
-    if (this.walkers.length >= 6) return;
-    const slot = [0, 1, 2, 3, 4, 5].find(value => !this.walkers.some(walker => walker.slot === value))!;
-    const fromBeach = this.walkerVariant % 2 === 0;
+    const limit = this.crossingIncident ? 12 : 6;
+    if (this.walkers.length >= limit) return;
+    const slot = Array.from({ length: 12 }, (_, index) => index).find(value => !this.walkers.some(walker => walker.slot === value))!;
+    const fromBeach = !this.crossingIncident && this.walkerVariant % 2 === 0;
     const z = fromBeach ? this.beachSpawnZ : this.northSidewalkZ - 0.5;
     if (this.walkers.some(walker => Math.hypot(walker.x - x, walker.z - z) < WALKER_SAFE_GAP)) return;
     const visual = this.npcModels.createWalker(this.walkerVariant++);
@@ -225,8 +241,8 @@ export class ActiveMobilitySystem {
     }
     this.spawnWalkerTimer -= dt;
     if (this.spawnWalkerTimer <= 0) {
-      this.spawnWalker(this.minX + 0.55);
-      this.spawnWalkerTimer = 5.5 + this.random() * 5.5;
+      this.spawnWalker(this.crossingIncident ? CROSSING_X - 3.2 : this.minX + 0.55);
+      this.spawnWalkerTimer = this.crossingIncident ? 2.3 : 5.5 + this.random() * 5.5;
     }
 
     this.moveCyclists(dt);
@@ -262,7 +278,7 @@ export class ActiveMobilitySystem {
     if (!this.cycleBatch && this.cycleCooldown === 0) {
       this.cycleBatch = this.walkers.filter(w => w.state === 'wait-cycle').sort((a, b) => a.arrived - b.arrived)[0] ?? null;
     }
-    if (!this.roadBatch.length && this.roadCooldown === 0) {
+    if (!this.holdRoadBatches && !this.roadBatch.length && this.roadCooldown === 0) {
       const waiting = this.walkers.filter(w => w.state === 'wait-road').sort((a, b) => a.arrived - b.arrived);
       if (waiting.length >= CROSSING_RULES.roadGroupSize) {
         this.roadBatch = waiting.slice(0, CROSSING_RULES.roadGroupSize);
@@ -352,7 +368,10 @@ export class ActiveMobilitySystem {
           this.moveToward(walker, CROSSING_X + (walker.batchIndex - 1) * .48, this.roadQueueZ, dt);
           break;
         case 'cross-road':
-          if (this.moveToward(walker, walker.x, this.southWalkZ, dt, this.groupSpeed)) walker.state = 'exit';
+          if (this.moveToward(walker, walker.x, this.southWalkZ, dt, this.groupSpeed)) {
+            walker.state = 'exit';
+            this.crossedPedestrians++;
+          }
           break;
         case 'exit':
           walker.x += walker.exitDirection * walker.speed * dt;

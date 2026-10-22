@@ -7,7 +7,7 @@ export type SessionView = {
 };
 
 /** Pontuação mínima para 1, 2 e 3 estrelas. Ajuste ao balanceamento da fase. */
-export const STAR_THRESHOLDS = [1, 200, 450] as const;
+export const STAR_THRESHOLDS = [100, 350, 600] as const;
 
 export function starsFor(score: number): number {
   return STAR_THRESHOLDS.filter(minimum => score >= minimum).length;
@@ -84,6 +84,14 @@ class SessionStore {
     if (!events.length) return;
     if (events.some(event => event.type === 'order-completed')) events.push(...session.finish());
     this.publish(session.snapshot(), events);
+  }
+
+  resolveEvent(definitionId: string, step: number): void {
+    const session = this.session;
+    const order = session?.snapshot().orders.find(item => item.definitionId === definitionId);
+    if (!session || !order) return;
+    const events = session.resolveRisk(order.id, step);
+    if (events.length) this.publish(session.snapshot(), events);
   }
 
   /** Chame uma vez por frame com o tempo real decorrido, em ms (sem o teto da física). */

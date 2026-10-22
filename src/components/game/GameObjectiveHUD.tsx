@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react';
 import { suburbanGameState, type RoadState } from '@/game/core/GameState';
 import type { PlayerId } from '@/game/entities/Player';
 
-function useProblem() {
-  const [problem, setProblem] = useState(() => suburbanGameState.snapshot().problems[0]);
+function useWorld() {
+  const [world, setWorld] = useState(() => suburbanGameState.snapshot());
   useEffect(() => {
-    const timer = window.setInterval(() => setProblem(suburbanGameState.snapshot().problems[0]), 300);
+    const timer = window.setInterval(() => setWorld(suburbanGameState.snapshot()), 300);
     return () => window.clearInterval(timer);
   }, []);
-  return problem;
+  return world;
 }
 
 function useRoads() {
@@ -22,9 +22,24 @@ function useRoads() {
   return roads;
 }
 
-export default function GameObjectiveHUD({ player, distance }: { player: PlayerId; distance: number | null }) {
-  const problem = useProblem();
+export default function GameObjectiveHUD({ player, distance, tutorialTarget = false }: { player: PlayerId; distance: number | null; tutorialTarget?: boolean }) {
+  const world = useWorld();
+  const problem = world.problems[0];
   const roads = useRoads();
+  if (world.phase) {
+    const team = player === 1 ? 'infraestrutura' : 'mobilidade';
+    const candidates = world.problems.filter(item => item.status !== 'RESOLVED' && item.requiredTeams?.includes(team));
+    const objective = candidates.find(item => item.id === world.selectedProblemId) ?? candidates[0];
+    return <div className={`game-objective-hud phase-objective ${player === 1 ? 'for-infrastructure' : 'for-mobility'}`} role="status">
+      <b>{objective ? `${objective.stage === 'warning' ? 'AVISO' : 'OBJETIVO'} · ${objective.label.toLocaleUpperCase('pt-BR')}`
+        : world.phase.recovery ? 'RECUPERAÇÃO DA ORLA' : 'ACOMPANHE A ORLA'} {distance === null ? '' : `· ~${distance} m`}</b>
+      <span>{objective?.instruction ?? (player === 2
+        ? world.phase.recovery ? 'Sem novos incidentes. Recolha cones com E, devolva ao baú e use 1 para liberar as vias.'
+          : 'Recolha cones com E, devolva ao baú e use 1 para liberar as vias. Acompanhe os avisos no alto da tela.'
+        : 'Sua equipe está disponível. Acompanhe os avisos e troque para Mobilidade quando necessário.')}</span>
+      {objective && <span>{objective.requiredTeams?.length === 2 ? 'AÇÃO EM EQUIPE · MOBILIDADE + INFRAESTRUTURA' : `RESPONSÁVEL · ${team.toLocaleUpperCase('pt-BR')}`}</span>}
+    </div>;
+  }
   if (!problem) return null;
 
   if (player === 3) {
@@ -55,9 +70,9 @@ export default function GameObjectiveHUD({ player, distance }: { player: PlayerI
     <span>AGUARDANDO ACIONAMENTO DA ANALISTA</span>
   </div>;
   if (!problem.dispatchedTeams.includes(team)) return null;
-  return <div className={`game-objective-hud ${player === 1 ? 'for-infrastructure' : 'for-mobility'}`} role="status">
+  return <div className={`game-objective-hud ${player === 1 ? 'for-infrastructure' : 'for-mobility'}${tutorialTarget ? ' tutorial-focus' : ''}`} data-tutorial-target={tutorialTarget ? 'true' : undefined} role="status">
     <b>{problem.status === 'RESOLVED' ? 'OBJETIVO · NORMALIZAR FLUXO' : player === 1 ? 'OBJETIVO · POSTE' : 'OBJETIVO · FLUXO'} · SETOR 02 {distance === null ? '' : `· ~${distance} m`}</b>
-    {player === 2 ? <span>Pegue um cone no baú com E e leve até a seta para proteger a via. Depois, recolha os cones com E e devolva ao baú. Quando o trecho ficar livre, escolha Infraestrutura.</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
+    {player === 2 ? <span>{problem.status === 'RESOLVED' ? 'O reparo terminou. Recolha os cones com E e devolva-os ao baú para normalizar a via.' : 'Pegue um cone no baú com E e leve até a seta para proteger a via. Mantenha-o no local enquanto Infraestrutura repara o poste.'}</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
   </div>;
 }
 

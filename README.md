@@ -63,12 +63,24 @@ O papel errado ou uma tarefa ainda não liberada não produz intervenção. Aç�
 
 `AbilityActions.ts` compartilha as regras de inspeção, sensores, luz e paradas entre o laboratório e `RiskWorkflow.ts`. Este último contém a máquina de estados sem Three/React. `riskData.ts` define os três riscos e o desvio; a cena reaproveita `AbilityVisuals` para mostrar as intervenções. O React só recebe snapshots em ações, nunca por frame. `npm test` cobre o fluxo puro, papéis, troca de personagem, inventário, pausa e descarte de GPU.
 
+## Progressão dos tutoriais
+
+O início da Fase 1 ensina as mecânicas em blocos curtos antes de liberar a partida:
+
+1. **Analista:** localizar a ocorrência, ler e confirmar o relatório, depois encaminhar Infraestrutura e Mobilidade.
+2. **Mobilidade · sinalização:** mover-se até o baú, pegar um cone e posicioná-lo junto ao poste. A interação e o objetivo indicam cada ação.
+3. **Mobilidade · circulação:** praticar os comandos 1, 2, 3 e 4 e restaurar o fluxo.
+4. **Infraestrutura:** caminhar até o poste quando a área estiver livre e praticar o circuito elétrico. Depois, conhecer sensor e atendimento de colisão. O exercício não conclui a ocorrência.
+5. **Desafio da Orla:** o treino é limpo, a iluminação volta ao normal e começa o relógio de seis minutos.
+
+Assim, o tutorial pratica ações isoladas e a partida usa essas mesmas ações em conjunto. Na partida, os avisos já indicam as equipes responsáveis; a Analista acompanha e marca objetivos no tablet.
+
 ## Módulo de partida e pedidos
 
-`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. `sessionData.ts` fornece um catálogo de teste para a Orla: fase de 180 segundos, primeiro pedido imediato e próximos a cada 30 segundos. Duração, intervalo, atraso inicial, sequência de riscos, prazo, pontos, bônus máximo e penalidade são configuráveis. O catálogo se repete em ordem.
+`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. A Orla usa uma agenda finita em `orlaEvents.ts`: cinco eventos em seis minutos. `sessionData.ts` transforma a agenda em pedidos. O modo genérico de catálogo cíclico continua disponível para outros cenários.
 
 - Estados: `menu` → `playing` ↔ `paused` → `finished`. `start()` inicia ou reinicia após o fim; `returnToMenu()` limpa a partida. A pausa congela fase, chegadas e prazos. Só `playing` aceita resoluções.
-- A fila é FIFO: apenas o primeiro pedido recebe progresso, seguindo seus `riskIds` em ordem. Todos os prazos contam desde a chegada, inclusive para pedidos em espera. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
+- Na agenda da Orla, qualquer ocorrência ativa pode receber progresso, seguindo seus passos em ordem. No modo genérico, a fila permanece FIFO. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
 - Concluir rende `basePoints + floor(maxSpeedBonus × tempoRestante / timeLimitMs)`. Etapas isoladas não pontuam. Expirar desconta `expirationPenalty` uma única vez; o total pode ficar negativo.
 - No prazo exato, o pedido expira. No fim da fase, todas as pendências também expiram com penalidade; nenhuma chegada acontece no instante final. Empates processam expiração antes de chegada.
 - `advance(deltaMs)` recebe milissegundos, inclusive frações, e processa todos os eventos de avanços grandes. Use o tempo real decorrido enquanto jogando, sem o limite de delta usado na física. Avance o relógio antes de registrar uma resolução. Não repasse tempo passado em pausa após retomar.
@@ -82,18 +94,17 @@ import { ORLA_SESSION_CONFIG } from './src/game/session/sessionData';
 
 const session = new GameSession(ORLA_SESSION_CONFIG);
 session.start();
-session.advance(15_000);
+session.advance(37_000);
 const order = session.snapshot().orders[0];
-// Depois de cada intervenção efetivamente concluída pelo RiskWorkflow:
-session.resolveRisk(order.id, 1);
-session.resolveRisk(order.id, 2);
-// Primeiro pedido: 100 pontos + 37 de bônus = 137.
+// Depois de concluir o circuito elétrico no cenário:
+session.resolveRisk(order.id, 101);
+// A fase continua mesmo se todas as ocorrências já emitidas estiverem resolvidas.
 session.pause();
 session.advance(60_000); // Pausado: não altera relógios nem pedidos.
 session.resume();
 ```
 
-O módulo está disponível para integração; a cena e o HUD ainda executam o teste livre de três riscos descrito acima. Ao conectar a partida, a cena deverá permitir a intervenção apenas no `nextRiskId` do primeiro pedido, enviar a conclusão com o ID desse pedido e criar um novo ciclo de riscos para as próximas instâncias. Um risco já resolvido no teste livre não deve concluir automaticamente pedidos futuros. `npm test` cobre expiração, pontuação, ordem, pausa, reinício, tempo acumulado e consumo de conclusões reais do `RiskWorkflow` sem carregar Three.
+`OrlaPhase.ts` integra agenda, avisos, interações e consequências no cenário. `sessionStore.resolveEvent` registra apenas intervenções confirmadas. `npm test` cobre horários, recuperação, pausa, reinício, papéis, filas, cone, desvio, circuito e instalação. Os testes antigos de `RiskWorkflow` continuam cobrindo o módulo independente de riscos.
 
 ## Organização
 
@@ -161,18 +172,22 @@ Definir perspectiva (top-down, terceira pessoa ou outra), controles principais e
 
 ### Rodada jogável da Orla
 
-Em `/jogo`, escolha **Jogar na Orla**. A rodada dura até três minutos e termina ao
-reparar o poste ou esgotar o prazo. A pontuação combina 300 pontos pela missão
-concluída e até 300 de bônus pelo tempo restante.
+Em `/jogo`, conclua o treino guiado. A rodada dura **seis minutos completos**;
+resolver uma ocorrência não encerra a fase. Cada uma vale 100 pontos e até 50 de
+bônus. Pendências só expiram no fim, com desconto de 20 pontos por ocorrência.
 
-1. Com a Analista, use **E** três vezes: selecionar a ocorrência, acionar
-   Infraestrutura e acionar Mobilidade.
-2. Escolha Mobilidade, siga a seta até o baú laranja, vire-se para ele e aperte
-   **E** para pegar um cone. Leve-o até o ponto indicado na avenida e aperte **E**
-   para colocá-lo. Os veículos param/desviam antes da área de trabalho; espere o
-   trecho ficar livre.
-3. Escolha Infraestrutura, aproxime-se do poste e use **E**. Acerte os três pinos
-   com **Espaço** ou toque. O resumo permite reiniciar a fase inteira ou voltar.
+| Horário | Evento e resposta |
+| --- | --- |
+| 0:30 | Poste pisca por 7 s antes de apagar. **Infraestrutura:** E no poste e puzzle de circuito. |
+| 1:25 | Motoristas deixam de ceder; a fila de pedestres cresce durante o aviso de 8 s. **Mobilidade:** 3 junto à faixa, aguardar o trio atravessar e 1 para liberar. |
+| 2:30 | Demanda aumenta gradualmente, com aviso de 10 s. **Mobilidade:** faixas abertas e desvio (1 e 4), mantendo circulação por 8 s. |
+| 3:35 | Sensor pisca por 7 s antes da falha. **Infraestrutura:** E no ponto e permanecer 4 s. Sair pausa o serviço. |
+| 4:40 | Veículo freia com pisca-alerta e para após 5 s. **Mobilidade:** cone na marca e desvio aberto. **Infraestrutura:** E ao lado do carro e permanecer 3 s para liberar a faixa. |
+| 5:25–6:00 | Sem novas ocorrências; menor chegada de carros. Resolver pendências, recolher cones com E e usar 1 para restaurar o fluxo. |
+
+O HUD mostra responsáveis, próximos passos, pedestres esperando e carros parados.
+**Marcar objetivo** escolhe a seta da ocorrência. Avisos mudam de cor com a espera;
+filas e perda de bônus tornam a demora perceptível. As teclas também têm botões de toque.
 
 **Controles:** WASD/setas para mover, Shift para correr, T para trocar de equipe,
 E para interagir e Esc para pausar. A Analista permanece na cabine, como antes.

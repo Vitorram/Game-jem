@@ -20,12 +20,12 @@ const { GRID_CONFIG } = require('../src/game/config.ts');
 const definition = (rows = ['.....', '..#..', '.....', '.....', '.....']) => ({ rows, legend: { '.': 'ground', '#': 'wall' }, spawns: [{ column: 0, row: 0 }] });
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 
-test('lê 20x10, oito tipos, spawns livres e conversão entre grade e mundo', () => {
+test('lê 20x11, oito tipos, spawns livres e conversão entre grade e mundo', () => {
   const map = new GridMap(ORLA_MAP, GRID_CONFIG.tileSize, GRID_CONFIG.playerRadius);
   assert.equal(map.columns, 20);
-  assert.equal(map.rows, 10);
+  assert.equal(map.rows, 11);
   assert.equal(map.width, 40);
-  assert.equal(map.depth, 20);
+  assert.equal(map.depth, 22);
   assert.deepEqual(new Set(map.tiles), new Set(['sea', 'ground', 'promenade', 'itemBox', 'counter', 'station', 'cycleway', 'road']));
   assert.equal(map.spawns.length, 3);
   for (let row = 0; row < map.rows; row++) for (let column = 0; column < map.columns; column++) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { gsap } from 'gsap';
 import { Game, type GameSceneId, type GameStatus } from '@/game/core/Game';
 import { PLAYER_APPEARANCES, type PlayerId } from '@/game/entities/Player';
@@ -10,7 +10,10 @@ import type { RiskSnapshot } from '@/game/risks/RiskWorkflow';
 import RepairPuzzle from './RepairPuzzle';
 import GameObjectiveHUD from './GameObjectiveHUD';
 import OrdersHud from './OrdersHud';
-import OrlaTablet from './OrlaTablet';
+import OrlaTablet, { type AnalystTutorialStep } from './OrlaTablet';
+import AnalystTutorialGuide from './AnalystTutorialGuide';
+import MobilityTutorialGuide, { type MobilityTutorialStep } from './MobilityTutorialGuide';
+import InfrastructureTutorialGuide, { type InfrastructureTutorialStep } from './InfrastructureTutorialGuide';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -33,6 +36,9 @@ export default function GameCanvas() {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
   const isAnalystTablet = isOriginalOrla && selectedPlayer === 3;
   const [closeView, setCloseView] = useState(false);
+  const [analystTutorialStep, setAnalystTutorialStep] = useState<AnalystTutorialStep | null>(null);
+  const [mobilityTutorialStep, setMobilityTutorialStep] = useState<MobilityTutorialStep | null>(null);
+  const [infrastructureTutorialStep, setInfrastructureTutorialStep] = useState<InfrastructureTutorialStep | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [, setRisks] = useState<RiskSnapshot | null>(null);
@@ -74,9 +80,92 @@ export default function GameCanvas() {
     setRisks(null);
     setSelectedPlayer(1);
     setCloseView(false);
+    setAnalystTutorialStep(null);
+    setMobilityTutorialStep(null);
+    setInfrastructureTutorialStep(null);
 
     setObjectiveDistance(null);
   };
+
+  const startAnalystTutorial = (event: MouseEvent<HTMLButtonElement>) => {
+    game.current?.startOrlaWithAnalystTutorial();
+    setSceneId('fase1-orla');
+    setCloseView(false);
+    setSelectedPlayer(3);
+    setAnalystTutorialStep(0);
+    event.currentTarget.blur();
+  };
+
+  const progressAnalystTutorial = (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => {
+    const nextStep = analystTutorialStep === 1 && milestone === 'selected' ? 2
+      : analystTutorialStep === 2 && milestone === 'confirmed' ? 3
+        : analystTutorialStep === 3 && milestone === 'infrastructure' ? 4
+          : analystTutorialStep === 4 && milestone === 'mobility' ? 5 : null;
+    if (nextStep === null) return;
+    game.current?.setAnalystTutorialStep(nextStep);
+    setAnalystTutorialStep(nextStep);
+  };
+
+  const beginAnalystTutorialSteps = () => {
+    game.current?.setAnalystTutorialStep(1);
+    setAnalystTutorialStep(1);
+  };
+
+  const beginMobilityTutorial = () => {
+    game.current?.startMobilityTutorial();
+    setAnalystTutorialStep(null);
+    setMobilityTutorialStep(0);
+  };
+
+  const setMobilityStep = (step: MobilityTutorialStep) => {
+    game.current?.setMobilityTutorialStep(step);
+    setMobilityTutorialStep(step);
+  };
+
+  const finishTeamTutorials = () => {
+    setMobilityTutorialStep(null);
+    game.current?.startInfrastructureTutorial();
+    setInfrastructureTutorialStep(0);
+  };
+
+  const setInfrastructureStep = (step: InfrastructureTutorialStep) => {
+    game.current?.setInfrastructureTutorialStep(step);
+    setInfrastructureTutorialStep(step);
+  };
+
+  const finishInfrastructureTutorial = () => {
+    game.current?.finishTeamTutorials();
+    setInfrastructureTutorialStep(null);
+  };
+
+  useEffect(() => {
+    if (mobilityTutorialStep === null) return;
+    const timer = window.setInterval(() => {
+      const snapshot = game.current?.getMobilityTutorialSnapshot();
+      if (!snapshot) return;
+      if (mobilityTutorialStep === 1 && snapshot.facingConeCrate) setMobilityStep(2);
+      else if (mobilityTutorialStep === 3 && snapshot.holdingCone) setMobilityStep(4);
+      else if (mobilityTutorialStep === 5 && snapshot.atWorkZone) setMobilityStep(6);
+      else if (mobilityTutorialStep === 7 && snapshot.placedCones > 0) setMobilityStep(8);
+      else if ([9, 11, 13, 15, 17].includes(mobilityTutorialStep)) {
+        const advanced = game.current?.getMobilityTutorialStep();
+        if (advanced !== null && advanced !== undefined && advanced > mobilityTutorialStep) setMobilityTutorialStep(advanced as MobilityTutorialStep);
+      }
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [mobilityTutorialStep]);
+
+  useEffect(() => {
+    if (infrastructureTutorialStep === null) return;
+    const timer = window.setInterval(() => {
+      if (infrastructureTutorialStep === 1 && game.current?.getInfrastructureTutorialSnapshot()?.readyToRepair) setInfrastructureStep(2);
+      else if (infrastructureTutorialStep === 3) {
+        const advanced = game.current?.getInfrastructureTutorialStep();
+        if (advanced === 4) setInfrastructureTutorialStep(4);
+      }
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [infrastructureTutorialStep, interactionPrompt]);
 
   return (
     <section className={`game-shell${isLaboratory ? '' : ' is-orla'}`} aria-label="Suburban — jogo de mobilidade urbana">
@@ -90,10 +179,10 @@ export default function GameCanvas() {
           <div ref={panel} className="panel">
             <span className="eyebrow">{error ? 'INICIALIZAÇÃO' : status === 'paused' ? 'UM RESPIRO' : 'O COMEÇO DE UM MUNDO'}</span>
             <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? 'Jogo pausado.' : <>Tudo começa<br />por aqui<span>.</span></>}</h1>
-            <p>{error ?? (status === 'paused' ? 'Sua cena está esperando. Continue quando quiser.' : 'A avenida da praia ganhou mais espaço nas laterais e novos veículos. Acione as equipes, proteja o trecho e recupere a iluminação da Orla.')}</p>
+            <p>{error ?? (status === 'paused' ? 'Sua cena está esperando. Continue quando quiser.' : 'Conheça o trabalho da Analista no tablet antes de começar a responder às ocorrências da Orla.')}</p>
             {error ? <button onClick={() => window.location.reload()}>Tentar novamente ↗</button> :
-              <button disabled={!initialized} onClick={event => { if (status === 'ready') { game.current?.start('fase1-orla'); setSceneId('fase1-orla'); setCloseView(false); } else game.current?.togglePause(); event.currentTarget.blur(); }}>
-                {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Jogar na Orla →'}
+              <button disabled={!initialized} onClick={status === 'ready' ? startAnalystTutorial : event => { game.current?.togglePause(); event.currentTarget.blur(); }}>
+                {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Iniciar fase →'}
               </button>}
             {!error && status === 'ready' && <button className="secondary" disabled={!initialized}
               onClick={event => { game.current?.start(); setSceneId('test'); event.currentTarget.blur(); }}>
@@ -104,16 +193,33 @@ export default function GameCanvas() {
           </div>
         </div>
       )}
-      {isOriginalOrla && !error && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
+      {isOriginalOrla && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {status === 'playing' && !error && <>
-        {isAnalystTablet && <OrlaTablet onAction={() => game.current?.interact()} />}
-        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{!isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
-        {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} />}
-        {!isLaboratory && interactionPrompt && <div className="interaction-prompt" role="status"><kbd>E</kbd> {interactionPrompt}</div>}
+        {isAnalystTablet && <OrlaTablet onAction={id => { if (id && analystTutorialStep === null) game.current?.selectProblem(id); game.current?.interact(); }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
+        {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
+          step={analystTutorialStep}
+          onBegin={beginAnalystTutorialSteps}
+          onComplete={beginMobilityTutorial}
+        />}
+        {isOriginalOrla && mobilityTutorialStep !== null && <MobilityTutorialGuide
+          step={mobilityTutorialStep}
+          onBegin={() => setMobilityStep(1)}
+          onContinue={() => setMobilityStep((mobilityTutorialStep + 1) as MobilityTutorialStep)}
+          onComplete={finishTeamTutorials}
+        />}
+        {isOriginalOrla && infrastructureTutorialStep !== null && <InfrastructureTutorialGuide
+          step={infrastructureTutorialStep}
+          onBegin={() => setInfrastructureStep(1)}
+          onContinue={() => setInfrastructureStep((infrastructureTutorialStep + 1) as InfrastructureTutorialStep)}
+          onComplete={finishInfrastructureTutorial}
+        />}
+        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
+        {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}
+        {!isLaboratory && interactionPrompt && <div className={`interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`} role="status"><kbd>E</kbd> {interactionPrompt}</div>}
 
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
-        <div className="character-selector" role="group" aria-label="Escolher personagem">
+        {analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>
             <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
@@ -123,13 +229,17 @@ export default function GameCanvas() {
             {closeView ? 'Visão ampla' : 'Ver de perto'}
           </button>
 
-        </div>
-        {isOriginalOrla && !repairPuzzleOpen && <div className="orla-actions" role="group" aria-label="Ações da equipe">
-          <button onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
-          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Via de escape'].map((label, index) =>
-            <button key={label} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}><kbd>{index + 1}</kbd> {label}</button>)}
         </div>}
-        {(isOriginalOrla && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}`} aria-label="Controles de movimento">
+        {isOriginalOrla && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
+          <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
+          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Via de escape'].map((label, index) => {
+            const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;
+            const target = activeSkill === index;
+            const locked = mobilityTutorialStep !== null && !target;
+            return <button key={label} disabled={locked} className={target ? 'tutorial-focus' : undefined} data-tutorial-target={target ? 'true' : undefined} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}><kbd>{index + 1}</kbd> {label}</button>;
+          })}
+        </div>}
+        {(isOriginalOrla && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div data-tutorial-target={mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? 'true' : undefined} className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}${mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? ' tutorial-focus' : ''}`} aria-label="Controles de movimento">
           {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}
             onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, code); }}
             onPointerUp={event => game.current?.input.setTouch(event.pointerId)}

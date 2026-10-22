@@ -1,4 +1,4 @@
-import {
+﻿import {
   WebGLRenderer,
   PerspectiveCamera,
   PCFShadowMap,
@@ -44,6 +44,8 @@ export class Game {
 
   private status: GameStatus = 'ready';
   private repairPuzzleOpen = false;
+  private mandatoryTutorialActive = false;
+  private tutorialStage = 0;
   private previousTime: number | null = null;
   private session?: GameSession;
   private disposed = false;
@@ -67,7 +69,7 @@ export class Game {
 
     this.renderer.domElement.setAttribute(
       'aria-label',
-      'Cenário 3D com três personagens jogáveis',
+      'CenÃ¡rio 3D com trÃªs personagens jogÃ¡veis',
     );
 
     this.renderer.domElement.style.display = 'block';
@@ -76,19 +78,19 @@ export class Game {
 
     this.host.appendChild(this.renderer.domElement);
 
-    // O input pertence ao Game e é injetado no laboratório.
+    // O input pertence ao Game e Ã© injetado no laboratÃ³rio.
     this.input = new Input();
     const laboratory = new TestScene(this.onAbilities, this.input);
     this.scenes.setScene(laboratory);
     this.onAbilities?.(laboratory.abilities.snapshot());
 
-    // Vista superior inclinada, com a frente das personagens visível.
+    // Vista superior inclinada, com a frente das personagens visÃ­vel.
     this.camera.up.set(0, 1, 0);
     const introHeight = GAME_CONFIG.cameraHeight + 4;
     this.camera.position.set(0, introHeight, introHeight * GAME_CONFIG.cameraTilt);
     this.camera.lookAt(this.cameraTarget);
 
-    // Ajusta o cenário quando o tamanho da tela muda.
+    // Ajusta o cenÃ¡rio quando o tamanho da tela muda.
     this.resizeObserver = new ResizeObserver(this.resize);
     this.resizeObserver.observe(this.host);
 
@@ -103,7 +105,7 @@ export class Game {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('blur', this.onBlur);
 
-    // Inicia o ciclo de renderização.
+    // Inicia o ciclo de renderizaÃ§Ã£o.
     this.renderer.setAnimationLoop(this.tick);
   }
 
@@ -138,6 +140,8 @@ export class Game {
       this.session = new GameSession(ORLA_SESSION_CONFIG);
       sessionStore.bind(this.session, () => this.restartPhase());
       sessionStore.start();
+      if (this.mandatoryTutorialActive) sessionStore.setPaused(true);
+      else orla.startPhase((id, step) => sessionStore.resolveEvent(id, step));
       this.closeView = false;
       this.onPlayerSelected?.(orla.player.id);
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
@@ -162,9 +166,94 @@ export class Game {
     });
   }
 
+  startOrlaWithAnalystTutorial(): void {
+    if (this.status !== 'ready' || this.disposed) return;
+    this.mandatoryTutorialActive = true;
+    this.tutorialStage = 0;
+    this.start('fase1-orla');
+    this.selectPlayer(3);
+  }
+
+  setAnalystTutorialStep(step: number): void {
+    if (!this.disposed && this.mandatoryTutorialActive) this.tutorialStage = step;
+  }
+
+  startMobilityTutorial(): void {
+    if (this.disposed || !this.mandatoryTutorialActive) return;
+    this.tutorialStage = 10;
+    this.selectPlayer(2);
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) {
+      current.setTutorialCollisionProtection(true);
+      current.setTutorialMovementEnabled(false);
+    }
+  }
+
+  setMobilityTutorialStep(step: number): void {
+    if (this.disposed || !this.mandatoryTutorialActive) return;
+    this.tutorialStage = 10 + step;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1 || step === 5);
+  }
+
+  startInfrastructureTutorial(): void {
+    if (this.disposed || !this.mandatoryTutorialActive) return;
+    this.tutorialStage = 30;
+    this.selectPlayer(1);
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) {
+      current.setTutorialCollisionProtection(true);
+      current.setTutorialMovementEnabled(false);
+    }
+  }
+
+  setInfrastructureTutorialStep(step: number): void {
+    if (this.disposed || !this.mandatoryTutorialActive) return;
+    this.tutorialStage = 30 + step;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1);
+  }
+
+  getInfrastructureTutorialStep(): number | null {
+    return this.mandatoryTutorialActive && this.tutorialStage >= 30 && this.tutorialStage <= 34
+      ? this.tutorialStage - 30
+      : null;
+  }
+
+  getInfrastructureTutorialSnapshot() {
+    const current = this.scenes.current;
+    return current instanceof Fase1OrlaScene ? current.getInfrastructureTutorialSnapshot() : null;
+  }
+
+  finishTeamTutorials(): void {
+    if (this.disposed || !this.mandatoryTutorialActive) return;
+    this.mandatoryTutorialActive = false;
+    this.tutorialStage = 0;
+    const current = this.scenes.current;
+    if (current instanceof Fase1OrlaScene) {
+      current.setTutorialCollisionProtection(false);
+      current.setTutorialMovementEnabled(true);
+      current.startPhase((id, step) => sessionStore.resolveEvent(id, step));
+    }
+    sessionStore.setPaused(this.status === 'paused');
+  }
+
+  getMobilityTutorialSnapshot() {
+    const current = this.scenes.current;
+    return current instanceof Fase1OrlaScene ? current.getMobilityTutorialSnapshot() : null;
+  }
+
+  getMobilityTutorialStep(): number | null {
+    return this.mandatoryTutorialActive && this.tutorialStage >= 10 && this.tutorialStage < 30
+      ? this.tutorialStage - 10
+      : null;
+  }
+
   returnToMenu() {
     if (this.disposed || this.status === 'ready') return;
     this.repairPuzzleOpen = false;
+    this.mandatoryTutorialActive = false;
+    this.tutorialStage = 0;
     this.onRepairPuzzleChange?.(false);
     this.intro?.kill();
     this.intro = undefined;
@@ -198,6 +287,7 @@ export class Game {
 
   selectPlayer(id: PlayerId) {
     if (this.disposed || this.repairPuzzleOpen || this.status !== 'playing') return;
+    if (this.mandatoryTutorialActive && id !== (this.tutorialStage >= 30 ? 1 : this.tutorialStage >= 10 ? 2 : 3)) return;
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
@@ -208,14 +298,30 @@ export class Game {
 
   interact() {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    if (this.mandatoryTutorialActive
+      && !((this.tutorialStage >= 2 && this.tutorialStage <= 4)
+        || this.tutorialStage === 13 || this.tutorialStage === 17
+        || this.tutorialStage === 33)) return;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.interact();
+  }
+
+  selectProblem(id: string): void {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    suburbanGameState.selectProblem(id);
   }
 
   useMobilityHotkey(key: string): boolean {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    return (scene instanceof Fase1OrlaScene) && scene.useMobilityHotkey(key);
+    const mobilityStep = this.tutorialStage - 10;
+    const tutorialKeys: Record<number, string> = { 9: 'Digit1', 11: 'Digit2', 13: 'Digit3', 15: 'Digit4', 17: 'Digit1' };
+    if (this.mandatoryTutorialActive && tutorialKeys[mobilityStep] !== key) return false;
+    const used = (scene instanceof Fase1OrlaScene) && scene.useMobilityHotkey(key);
+    if (used && this.mandatoryTutorialActive && tutorialKeys[mobilityStep] === key) {
+      this.tutorialStage += 1;
+    }
+    return used;
   }
 
   private restartPhase(): void {
@@ -261,7 +367,7 @@ export class Game {
     const player = this.world?.player.mesh.position;
     if (!player) return;
     const height = this.closeView ? GAME_CONFIG.cameraCloseHeight : GAME_CONFIG.cameraHeight;
-    // Altura e recuo variam juntos para preservar a inclinação no zoom.
+    // Altura e recuo variam juntos para preservar a inclinaÃ§Ã£o no zoom.
     const portrait = Math.max(1, 0.85 / this.camera.aspect);
     this.desiredTarget.set(player.x, 0, player.z);
     this.desiredPosition.set(player.x, height * portrait, player.z + height * portrait * GAME_CONFIG.cameraTilt);
@@ -277,7 +383,7 @@ export class Game {
     this.previousTime = null;
     const scene = this.scenes.current;
     if (scene instanceof Fase1OrlaScene) scene.stopMovement();
-    if (this.session) sessionStore.setPaused(status === 'paused');
+    if (this.session) sessionStore.setPaused(status === 'paused' || this.mandatoryTutorialActive);
 
     if (status === 'paused') {
       this.intro?.pause();
@@ -312,15 +418,22 @@ export class Game {
     if (this.status === 'playing' && current instanceof Fase1OrlaScene) {
       if (current.player.role === 'analista' && event.code === 'Digit1') {
         event.preventDefault();
+        if (this.mandatoryTutorialActive && this.tutorialStage !== 3) return;
         current.dispatchTeam('infraestrutura');
         return;
       }
       if (current.player.role === 'analista' && event.code === 'Digit2') {
         event.preventDefault();
+        if (this.mandatoryTutorialActive && this.tutorialStage !== 4) return;
         current.dispatchTeam('mobilidade');
         return;
       }
-      if (current.player.role === 'mobilidade' && current.useMobilityHotkey(event.code)) {
+      if (current.player.role === 'mobilidade' && this.mandatoryTutorialActive && event.code.startsWith('Digit')) {
+        event.preventDefault();
+        this.useMobilityHotkey(event.code);
+        return;
+      }
+      if (current.player.role === 'mobilidade' && this.useMobilityHotkey(event.code)) {
         event.preventDefault();
         return;
       }
@@ -346,7 +459,7 @@ export class Game {
   };
 
   private nextPlayerId(current: PlayerId): PlayerId {
-    const cycle: readonly PlayerId[] = [3, 1, 2]; // Analista → Infraestrutura → Mobilidade
+    const cycle: readonly PlayerId[] = [3, 1, 2]; // Analista â†’ Infraestrutura â†’ Mobilidade
     return cycle[(cycle.indexOf(current) + 1) % cycle.length];
   }
 
@@ -360,11 +473,13 @@ export class Game {
 
     if (document.hidden) return;
 
-    if (this.status === 'playing' && this.session) {
+    if (this.status === 'playing' && this.session && !this.mandatoryTutorialActive) {
       sessionStore.tick(elapsedMs);
+      const scene = this.scenes.current;
+      if (scene instanceof Fase1OrlaScene) scene.advancePhase(this.session.snapshot().elapsedMs);
       this.checkSessionEnd();
     }
-    if (this.status === 'playing' && !this.repairPuzzleOpen) {
+    if (this.status === 'playing') {
       this.scenes.update(delta);
       this.updateCamera(delta);
     }
@@ -378,14 +493,30 @@ export class Game {
     this.repairPuzzleOpen = true;
     this.input.clear();
     const scene = this.scenes.current;
-    if (scene instanceof Fase1OrlaScene) scene.stopMovement();
+    if (scene instanceof Fase1OrlaScene) {
+      scene.stopMovement();
+      scene.setTutorialMovementEnabled(false);
+      scene.setTutorialCollisionProtection(true);
+    }
     this.onRepairPuzzleChange?.(true);
   }
 
   completeRepairPuzzle(): void {
     if (this.disposed || this.status !== 'playing' || !this.repairPuzzleOpen) return;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.completePoleRepair();
+    if (this.mandatoryTutorialActive && this.tutorialStage === 33) {
+      if (current instanceof Fase1OrlaScene) current.resetPoleAfterTutorialRepair();
+      this.repairPuzzleOpen = false;
+      this.input.clear();
+      this.onRepairPuzzleChange?.(false);
+      this.setInfrastructureTutorialStep(4);
+      return;
+    }
+    if (current instanceof Fase1OrlaScene) {
+      current.completePoleRepair();
+      current.setTutorialMovementEnabled(true);
+      current.setTutorialCollisionProtection(false);
+    }
     this.repairPuzzleOpen = false;
     this.input.clear();
     this.onRepairPuzzleChange?.(false);
@@ -401,6 +532,8 @@ export class Game {
 
   dispatchTeam(team: ResponseTeam): boolean {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    if (this.mandatoryTutorialActive && !((this.tutorialStage === 3 && team === 'infraestrutura')
+      || (this.tutorialStage === 4 && team === 'mobilidade'))) return false;
     const current = this.scenes.current;
     return current instanceof Fase1OrlaScene ? current.dispatchTeam(team) : false;
   }

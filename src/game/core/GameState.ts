@@ -9,6 +9,10 @@ export type UrbanProblem = {
   status: ProblemStatus;
   position: { x: number; z: number };
   dispatchedTeams: ResponseTeam[];
+  requiredTeams?: ResponseTeam[];
+  stage?: 'warning' | 'active';
+  instruction?: string;
+  startedAtMs?: number;
 };
 
 export type RoadState = {
@@ -31,6 +35,7 @@ export type GameStateSnapshot = {
   budget: number;
   problems: UrbanProblem[];
   roads: RoadState[];
+  phase?: { elapsedMs: number; recovery: boolean; waitingPedestrians: number; queuedVehicles: number };
 };
 
 /** Estado central compartilhado pelas entidades da partida. */
@@ -73,6 +78,8 @@ export class GameState {
   setProblems(problems: UrbanProblem[]): void {
     this.state.problems = structuredClone(problems);
   }
+
+  setPhase(phase: GameStateSnapshot['phase']): void { this.state.phase = phase; }
 
   setProblemStatus(id: UrbanProblem['id'], status: ProblemStatus): void {
     const problem = this.state.problems.find(item => item.id === id);

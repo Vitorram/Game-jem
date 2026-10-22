@@ -239,22 +239,56 @@ test('rejeita tempos, catálogo e pontuações inválidos; delta fracionário é
   assert.equal(game.snapshot().elapsedMs, 1);
 });
 
-test('missão da Orla tem três marcos e encerra apenas após conclusão, sem duplicar pontos', () => {
+test('Orla emite cinco eventos nos horários exatos e mantém os seis minutos após resoluções', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
   game.start();
-  const order = head(game);
-  assert.deepEqual(order.riskIds, [1, 2, 3]);
-  assert.deepEqual(game.finish(), []);
-  game.advance(60_000);
-  game.resolveRisk(order.id, 1);
-  game.resolveRisk(order.id, 2);
-  assert.deepEqual(game.finish(), []);
-  game.resolveRisk(order.id, 3);
-  assert.equal(game.snapshot().score, 500);
-  game.finish();
+  assert.equal(game.snapshot().remainingMs, 360_000);
+  assert.equal(game.snapshot().orders.length, 0);
+  for (const [index, at] of [30_000, 85_000, 150_000, 215_000, 280_000].entries()) {
+    game.advance(at - game.snapshot().elapsedMs - 1);
+    assert.equal(game.snapshot().orders.length, 0);
+    const arrivals = game.advance(1).filter(event => event.type === 'order-arrived');
+    assert.equal(arrivals.length, 1);
+    const order = head(game);
+    assert.equal(order.definitionId, ORLA_SESSION_CONFIG.orders[index].id);
+    assert.equal(order.createdAtMs, at);
+    for (const step of order.riskIds) game.resolveRisk(order.id, step);
+    const score = game.snapshot().score;
+    assert.deepEqual(game.resolveRisk(order.id, order.riskIds.at(-1)), []);
+    assert.equal(game.snapshot().score, score);
+    assert.deepEqual(game.finish(), []);
+    assert.equal(game.snapshot().status, 'playing');
+  }
+  assert.equal(game.snapshot().completedOrders, 5);
+  assert.deepEqual(game.advance(45_000), []);
+  assert.equal(game.snapshot().elapsedMs, 325_000);
+  assert.deepEqual(game.advance(34_999), []);
+  assert.equal(game.snapshot().status, 'playing');
+  game.advance(1);
   assert.equal(game.snapshot().status, 'finished');
+  assert.equal(game.snapshot().expiredOrders, 0);
+});
+
+test('eventos da Orla podem ser resolvidos fora de ordem e pendências só expiram no fim', () => {
+  const game = new GameSession(ORLA_SESSION_CONFIG);
+  game.start();
+  game.advance(325_000);
+  const orders = game.snapshot().orders;
+  assert.equal(orders.length, 5);
+  assert.equal(game.snapshot().expiredOrders, 0);
+  const sensor = orders.find(order => order.definitionId === 'sensor-failure');
+  assert.equal(game.resolveRisk(sensor.id, 401).at(-1).type, 'order-completed');
+  assert.equal(game.snapshot().orders[0].definitionId, 'broken-light-pole-1');
+  game.pause();
+  const paused = game.snapshot();
+  game.advance(100_000);
+  assert.deepEqual(game.snapshot(), paused);
+  game.resume();
+  game.advance(35_000);
+  assert.equal(game.snapshot().expiredOrders, 4);
   assert.equal(game.snapshot().completedOrders, 1);
-  assert.deepEqual(game.resolveRisk(order.id, 3), []);
   assert.deepEqual(game.finish(), []);
-  assert.equal(game.snapshot().score, 500);
+  game.start();
+  assert.equal(game.snapshot().elapsedMs, 0);
+  assert.equal(game.snapshot().orders.length, 0);
 });
