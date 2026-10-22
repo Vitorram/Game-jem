@@ -19,6 +19,7 @@ import type { RiskSnapshot } from '../risks/RiskWorkflow';
 import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 import type { ResponseTeam } from './GameState';
+import type { RepairPuzzleType } from '../session/repairPuzzleTypes';
 
 export type GameSceneId = 'test' | 'fase1-orla';
 export type GameStatus = 'ready' | 'playing' | 'paused' | 'finished';
@@ -44,6 +45,7 @@ export class Game {
 
   private status: GameStatus = 'ready';
   private repairPuzzleOpen = false;
+  private activeRepairType: RepairPuzzleType = 'pole';
   private mandatoryTutorialActive = false;
   private tutorialStage = 0;
   private previousTime: number | null = null;
@@ -57,7 +59,7 @@ export class Game {
     private onPlayerSelected?: (id: PlayerId) => void,
     private onRisks?: (state: RiskSnapshot) => void,
     private onInteractionPrompt?: (prompt: string | null) => void,
-    private onRepairPuzzleChange?: (open: boolean) => void,
+    private onRepairPuzzleChange?: (open: boolean, type?: RepairPuzzleType) => void,
     private onObjectiveDistance?: (distance: number | null) => void,
   ) {
     this.renderer = new WebGLRenderer({
@@ -135,7 +137,7 @@ export class Game {
 
     if (sceneId === 'fase1-orla') {
       suburbanGameState.reset();
-      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, () => this.openRepairPuzzle(), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
+      const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, type => this.openRepairPuzzle(type), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
       this.scenes.setScene(orla);
       this.session = new GameSession(ORLA_SESSION_CONFIG);
       sessionStore.bind(this.session, () => this.restartPhase());
@@ -488,9 +490,10 @@ export class Game {
     if (current) this.renderer.render(current.scene, this.camera);
   };
 
-  private openRepairPuzzle(): void {
+  private openRepairPuzzle(type: RepairPuzzleType = 'pole'): void {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
     this.repairPuzzleOpen = true;
+    this.activeRepairType = type;
     this.input.clear();
     const scene = this.scenes.current;
     if (scene instanceof Fase1OrlaScene) {
@@ -498,7 +501,7 @@ export class Game {
       scene.setTutorialMovementEnabled(false);
       scene.setTutorialCollisionProtection(true);
     }
-    this.onRepairPuzzleChange?.(true);
+    this.onRepairPuzzleChange?.(true, type);
   }
 
   completeRepairPuzzle(): void {
@@ -513,7 +516,7 @@ export class Game {
       return;
     }
     if (current instanceof Fase1OrlaScene) {
-      current.completePoleRepair();
+      current.completeRepairPuzzle(this.activeRepairType);
       current.setTutorialMovementEnabled(true);
       current.setTutorialCollisionProtection(false);
     }

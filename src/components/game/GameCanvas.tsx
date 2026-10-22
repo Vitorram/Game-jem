@@ -14,6 +14,7 @@ import OrlaTablet, { type AnalystTutorialStep } from './OrlaTablet';
 import AnalystTutorialGuide from './AnalystTutorialGuide';
 import MobilityTutorialGuide, { type MobilityTutorialStep } from './MobilityTutorialGuide';
 import InfrastructureTutorialGuide, { type InfrastructureTutorialStep } from './InfrastructureTutorialGuide';
+import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -44,6 +45,7 @@ export default function GameCanvas() {
   const [, setRisks] = useState<RiskSnapshot | null>(null);
   const [interactionPrompt, setInteractionPrompt] = useState<string | null>(null);
   const [repairPuzzleOpen, setRepairPuzzleOpen] = useState(false);
+  const [repairPuzzleType, setRepairPuzzleType] = useState<RepairPuzzleType>('pole');
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
 
@@ -51,7 +53,7 @@ export default function GameCanvas() {
     if (!host.current) return;
     let instance: Game;
     try {
-      instance = new Game(host.current, value => { setStatus(value); if (value === 'playing') setCloseView(game.current?.isCloseView ?? false); }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, setRepairPuzzleOpen, setObjectiveDistance);
+      instance = new Game(host.current, value => { setStatus(value); if (value === 'playing') setCloseView(game.current?.isCloseView ?? false); }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, (open, type) => { setRepairPuzzleOpen(open); if (type) setRepairPuzzleType(type); }, setObjectiveDistance);
       game.current = instance;
       setInitialized(true);
       setError(null);
@@ -194,7 +196,7 @@ export default function GameCanvas() {
         </div>
       )}
       {isOriginalOrla && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
-      {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
+      {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {status === 'playing' && !error && <>
         {isAnalystTablet && <OrlaTablet onAction={id => { if (id && analystTutorialStep === null) game.current?.selectProblem(id); game.current?.interact(); }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide

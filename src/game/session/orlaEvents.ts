@@ -21,6 +21,10 @@ export const ORLA_EVENTS: readonly {
     teams: ['mobilidade'], position: { x: -16, z: 8.2 }, steps: [301],
     warning: 'O volume de carros está aumentando. Prepare uma rota de escape.',
     instruction: 'Mobilidade: use 1 para abrir as faixas e 4 para abrir o desvio. Mantenha o fluxo por 8 segundos.' },
+  { id: 'traffic-signal-failure', title: 'Semáforo desregulado', atMs: 190_000, warningMs: 7_000,
+    teams: ['infraestrutura'], position: { x: 0, z: 4.7 }, steps: [601],
+    warning: 'O semáforo está alternando fora de sincronia. Prepare o ajuste do controlador.',
+    instruction: 'Infraestrutura: siga a seta e use E para sincronizar as luzes do semáforo.' },
   { id: 'sensor-failure', title: 'Falha de sensor', atMs: 215_000, warningMs: 7_000,
     teams: ['infraestrutura'], position: { x: 9, z: 4.7 }, steps: [401],
     warning: 'O sensor está perdendo sinal. Um trecho pode ficar sem monitoramento.',
@@ -39,4 +43,5 @@ export const ORLA_EVENT_STEPS: Record<number, { icon: string; label: string }> =
   401: { icon: '📡', label: 'Infra: E para instalar sensor' },
   501: { icon: '🚧', label: 'Mob: cone + desvio' },
   502: { icon: '🔧', label: 'Infra: E junto ao veículo' },
+  601: { icon: '🚦', label: 'Infra: sincronizar semáforo' },
 };

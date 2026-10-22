@@ -7,6 +7,7 @@ import type { TrafficSystem, MobilityRoadAction } from '../traffic/TrafficSystem
 import type { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
 import type { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { ORLA_EVENTS, ORLA_RECOVERY_MS } from '../session/orlaEvents';
+import type { RepairPuzzleType } from '../session/repairPuzzleTypes';
 
 type Point = { x: number; z: number };
 const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -22,6 +23,10 @@ export class OrlaPhase {
   private crossingProtected = false;
   private rushFlowSeconds = 0;
   private service: { id: string; elapsed: number } | null = null;
+  isServicing(player: Player): boolean {
+    const problem = this.service ? this.problem(this.service.id) : undefined;
+    return !!problem && player.id === 1 && distance(player.position, this.serviceTarget(problem)) <= 1.6;
+  }
   private readonly ringGeometry = new RingGeometry(0.62, 0.8, 32);
   private readonly boxGeometry = new BoxGeometry(0.45, 0.65, 0.3);
   private readonly antennaGeometry = new CylinderGeometry(0.025, 0.025, 0.6, 6);
@@ -37,7 +42,7 @@ export class OrlaPhase {
     private readonly pedestrians: ActiveMobilitySystem,
     private readonly items: ItemInteractions,
     private readonly pole: BrokenPoleMarker,
-    private readonly openRepair: () => void,
+    private readonly openRepair: (type: RepairPuzzleType) => void,
     private readonly onStep: (id: string, step: number) => void,
   ) {
     suburbanGameState.setProblems([]);
@@ -123,7 +128,7 @@ export class OrlaPhase {
       this.patch(rush.id, { instruction: flowing
         ? `Desvio aberto. Mantenha as faixas livres: ${Math.min(8, Math.floor(this.rushFlowSeconds))}/8 s.`
         : ORLA_EVENTS[2].instruction });
-      if (this.rushFlowSeconds >= 8) this.resolve(rush.id, 301);
+      if (this.rushFlowSeconds >= 8 && !this.completedSteps.has(301)) { this.completedSteps.add(301); this.openRepair('traffic'); }
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status !== 'RESOLVED' && this.traffic.isIncidentProtected()) {
@@ -161,7 +166,7 @@ export class OrlaPhase {
     }
     if (player.id === 2) {
       const position = player.position;
-      const crate = this.map.cellCenter(10, 4);
+      const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
       const held = this.items.heldBy(2);
       // Distância física evita depender do texto ou da célula de orientação do tutorial.
       if (distance(position, crate) <= 2.3) {
@@ -187,15 +192,46 @@ export class OrlaPhase {
     if (!nearby) return;
     if (nearby.id === 'broken-light-pole-1') {
       this.patch(nearby.id, { status: 'MAINTENANCE' });
-      this.openRepair();
+      this.openRepair('pole');
+    } else if (nearby.id === 'sensor-failure') {
+      this.patch(nearby.id, { status: 'MAINTENANCE' });
+      this.openRepair('sensor');
+    } else if (nearby.id === 'traffic-signal-failure') {
+      this.patch(nearby.id, { status: 'MAINTENANCE' });
+      this.openRepair('signal');
     } else if (nearby.id !== 'minor-collision' || this.traffic.isIncidentProtected()) {
-      if (this.service?.id !== nearby.id) this.service = { id: nearby.id, elapsed: 0 };
+      if (nearby.id === 'minor-collision' && !this.completedSteps.has(502)) {
+        this.completedSteps.add(502);
+        this.patch(nearby.id, { status: 'MAINTENANCE' });
+        this.openRepair('car');
+      }
     }
   }
 
   completeRepair(): void {
     const problem = this.problem('broken-light-pole-1');
     if (problem?.status === 'MAINTENANCE') this.resolve(problem.id, 101);
+  }
+
+  completePuzzle(type: RepairPuzzleType): void {
+    const targets: Partial<Record<RepairPuzzleType, { id: string; step: number }>> = {
+      signal: { id: 'traffic-signal-failure', step: 601 },
+      sensor: { id: 'sensor-failure', step: 401 },
+      car: { id: 'minor-collision', step: 502 },
+      traffic: { id: 'rush-hour', step: 301 },
+    };
+    if (type === 'crossing') {
+      const problem = this.problem('unsafe-crossing');
+      if (problem?.status !== 'MAINTENANCE') return;
+      this.resolve(problem.id, 202);
+      this.traffic.setUnsafeCrossing(false); this.pedestrians.setCrossingIncident(false);
+      this.pedestrians.setRoadBatchHold(false); this.crossingProtected = false;
+      return;
+    }
+    const target = targets[type];
+    if (!target) return;
+    if (type === 'car') this.traffic.clearCollision();
+    this.resolve(target.id, target.step);
   }
 
   mobilityAction(player: Player, action: MobilityRoadAction): boolean {
@@ -215,11 +251,11 @@ export class OrlaPhase {
         return true;
       }
       if (action === 'release' && this.completedSteps.has(201) && !this.pedestrians.getCrossingProgress().occupied) {
-        this.resolve(crossing.id, 202);
-        this.traffic.setUnsafeCrossing(false);
-        this.pedestrians.setCrossingIncident(false);
-        this.pedestrians.setRoadBatchHold(false);
-        this.crossingProtected = false;
+        if (!this.completedSteps.has(202)) {
+          this.completedSteps.add(202);
+          this.patch(crossing.id, { status: 'MAINTENANCE', instruction: 'Travessia protegida. Ajuste o controlador da faixa.' });
+          this.openRepair('crossing');
+        }
       }
     }
     if (action === 'release') {
@@ -233,7 +269,7 @@ export class OrlaPhase {
   guidance(player: Player): { target: Point | null; prompt: string | null } {
     const problem = this.objective(player);
     const held = this.items.heldBy(2) === 'cone';
-    const crate = this.map.cellCenter(10, 4);
+    const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
     if (player.id === 2 && distance(player.position, crate) <= 2.3) {
       return { target: this.targetFor(player, problem), prompt: held ? 'GUARDAR CONE NO BAÚ' : 'PEGAR CONE DO BAÚ' };
     }
@@ -249,6 +285,7 @@ export class OrlaPhase {
       && distance(player.position, this.serviceTarget(item)) <= 1.6) : null;
     const prompt = near ? near.id === 'broken-light-pole-1' ? 'REPARAR CIRCUITO'
       : near.id === 'sensor-failure' ? 'INSTALAR SENSOR'
+        : near.id === 'traffic-signal-failure' ? 'SINCRONIZAR SEMÁFORO'
         : this.traffic.isIncidentProtected() ? 'LIBERAR VEÍCULO' : 'AGUARDE CONE E DESVIO DA MOBILIDADE' : null;
     return { target: this.targetFor(player, problem), prompt };
   }
@@ -265,12 +302,12 @@ export class OrlaPhase {
     if (player.id === 1) return problem ? this.serviceTarget(problem) : null;
     if (problem?.id === 'minor-collision' && this.traffic.getIncidentPosition()) {
       if (this.traffic.isIncidentProtected()) return problem.position;
-      if (!this.items.heldBy(2) && !this.traffic.getNearestConePosition(problem.position)) return this.map.cellCenter(10, 4);
+      if (!this.items.heldBy(2) && !this.traffic.getNearestConePosition(problem.position)) return this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
       return this.traffic.getIncidentConeTarget();
     }
     if (problem) return problem.position;
     const cone = this.traffic.getNearestConePosition(player.position);
-    return this.items.heldBy(2) === 'cone' ? this.map.cellCenter(10, 4) : cone;
+    return this.items.heldBy(2) === 'cone' ? this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row) : cone;
   }
 
   private serviceTarget(problem: UrbanProblem): Point {

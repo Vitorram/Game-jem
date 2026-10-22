@@ -40,6 +40,7 @@ export class TrafficSignals {
 
   private lastActiveIndex = -1;
   private disposed = false;
+  private faulty = false;
 
   constructor(map: GridMap, private readonly traffic: TrafficSystem) {
     this.group.name = 'traffic-signals';
@@ -118,10 +119,23 @@ export class TrafficSignals {
   update(): void {
     if (this.disposed) return;
 
+    if (this.faulty) {
+      const blink = Math.floor(Date.now() / 360) % 2 === 0;
+      this.bulbMaterials.forEach((material, index) => { material.emissiveIntensity = index === 1 && blink ? BULB_ON : BULB_OFF; });
+      return;
+    }
+
     const activeIndex = this.phaseIndex();
     if (activeIndex === this.lastActiveIndex) return;
 
     this.syncBulbs(activeIndex);
+  }
+
+  setFaulty(faulty: boolean): void {
+    if (this.disposed || this.faulty === faulty) return;
+    this.faulty = faulty;
+    this.lastActiveIndex = -1;
+    if (!faulty) this.syncBulbs(this.phaseIndex());
   }
 
   setVisible(visible: boolean): void {

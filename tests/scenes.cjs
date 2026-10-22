@@ -513,7 +513,7 @@ test('Orla preserva item e direção ao selecionar outra personagem; meshes segu
   const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => axis });
   orla.interact(); orla.interact(); orla.interact();
   orla.selectPlayer(2);
-  const sourcePosition = orla.map.cellCenter(10, 5);
+  const sourcePosition = orla.map.cellCenter(11, 6);
   orla.player.setPosition(sourcePosition.x, sourcePosition.z);
   orla.interact();
   assert.equal(orla.items.heldBy(2), 'cone');
@@ -567,7 +567,7 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
   game.start('fase1-orla');
   const phase = game.scenes.current;
   game.selectPlayer(2);
-  const source = phase.map.cellCenter(10, 5);
+  const source = phase.map.cellCenter(11, 6);
   phase.player.setPosition(source.x, source.z);
   game.input.setTouch(1, 'KeyW');
   const key = (code, extra = {}) => {

@@ -123,7 +123,7 @@ test('colisão exige cone e desvio antes do serviço; recuperação preserva pen
     game.run(4);
     assert.equal(problem('minor-collision').status, 'ACTIVE');
     game.scene.selectPlayer(2);
-    const crate = game.scene.map.cellCenter(10, 4);
+    const crate = game.scene.map.cellCenter(11, 5);
     game.scene.player.setPosition(crate.x - 2, crate.z);
     game.scene.interact();
     assert.equal(game.scene.items.heldBy(2), 'cone');
@@ -138,7 +138,7 @@ test('colisão exige cone e desvio antes do serviço; recuperação preserva pen
     game.scene.player.setPosition(incident.x, incident.z - 1.1);
     game.scene.interact();
     game.run(3.1);
-    assert.equal(problem('minor-collision').status, 'RESOLVED');
+    assert.equal(problem('minor-collision').status, 'RESOLVED', JSON.stringify({ service: game.scene.phase.service, position: game.scene.player.position, incident, cones: game.scene.traffic.cones.map(c => ({x:c.x, lane:c.lane.id})), roads:game.scene.traffic.getRoadStates().map(r => ({id:r.id,status:r.status})) }));
     assert.equal(game.scene.traffic.getIncidentPosition(), null);
     game.jump(325_000);
     assert.equal(suburbanGameState.snapshot().phase.recovery, true);
@@ -187,7 +187,7 @@ test('rodada contínua de seis minutos combina todos os eventos e permite recupe
     const incident = game.scene.traffic.getIncidentPosition();
     assert.ok(incident);
     game.scene.selectPlayer(2);
-    const crate = game.scene.map.cellCenter(10, 4);
+    const crate = game.scene.map.cellCenter(11, 5);
     game.scene.player.setPosition(crate.x - 2, crate.z);
     game.scene.interact();
     const cone = game.scene.traffic.getIncidentConeTarget();
@@ -196,7 +196,7 @@ test('rodada contínua de seis minutos combina todos os eventos e permite recupe
     game.scene.selectPlayer(1);
     game.scene.player.setPosition(incident.x, incident.z - 1.1);
     game.scene.interact(); game.run(3.1);
-    assert.equal(problem('minor-collision').status, 'RESOLVED');
+    assert.equal(problem('minor-collision').status, 'RESOLVED', JSON.stringify({ service: game.scene.phase.service, position: game.scene.player.position, incident, cones: game.scene.traffic.cones.map(c => ({x:c.x, lane:c.lane.id})), roads:game.scene.traffic.getRoadStates().map(r => ({id:r.id,status:r.status})) }));
     assert.equal(game.session.snapshot().completedOrders, 5);
     assert.equal(game.session.snapshot().status, 'playing');
     game.scene.selectPlayer(2);

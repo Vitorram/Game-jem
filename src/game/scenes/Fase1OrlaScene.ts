@@ -23,6 +23,7 @@ import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
 import { AnalystCabin } from './AnalystCabin';
 import { OrlaPhase } from './OrlaPhase';
+import type { RepairPuzzleType } from '../session/repairPuzzleTypes';
 
 export type MobilityTutorialSnapshot = {
   holdingCone: boolean;
@@ -92,7 +93,7 @@ export class Fase1OrlaScene implements GameScene {
   startPhase(onStep: (id: string, step: number) => void): void {
     if (this.phase) return;
     this.phase = new OrlaPhase(this.map, this.traffic, this.activeMobility, this.items,
-      this.brokenPoleMarker, () => this.onRepairPuzzleStart?.(), onStep);
+      this.brokenPoleMarker, type => this.onRepairPuzzleStart?.(type), onStep);
     this.scene.add(this.phase.group);
     this.itemVisuals.sync(this.items);
     this.objectiveMarker.setVisible(false);
@@ -105,7 +106,7 @@ export class Fase1OrlaScene implements GameScene {
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
   private currentInteractionPrompt: string | null = null;
-  constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: () => void, private readonly onObjectiveDistance?: (distance: number | null) => void, private readonly onMissionStep?: (step: number) => void) {
+  constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: (type: RepairPuzzleType) => void, private readonly onObjectiveDistance?: (distance: number | null) => void, private readonly onMissionStep?: (step: number) => void) {
     this.input = input;
     suburbanGameState.setActiveCharacter(3);
     const { hemisphere, sun } = ORLA_CONFIG;
@@ -218,7 +219,7 @@ export class Fase1OrlaScene implements GameScene {
         const workZone = this.getWorkZoneReadiness(pole.position);
         if (workZone.prepared) {
           if (pole.status === 'ACTIVE') suburbanGameState.setProblemStatus(pole.id, 'MAINTENANCE');
-          this.onRepairPuzzleStart?.();
+          this.onRepairPuzzleStart?.('pole');
         }
         this.updateProblemPresentation();
         return;
@@ -321,6 +322,13 @@ export class Fase1OrlaScene implements GameScene {
     this.updateProblemPresentation();
   }
 
+  completeRepairPuzzle(type: RepairPuzzleType): void {
+    if (type === 'pole') { this.completePoleRepair(); return; }
+    const expectedRole = type === 'crossing' || type === 'traffic' ? 'mobilidade' : 'infraestrutura';
+    if (this.disposed || this.player.role !== expectedRole) return;
+    this.phase?.completePuzzle(type);
+  }
+
   resetPoleAfterTutorialRepair(): void {
     if (this.disposed) return;
     const pole = suburbanGameState.snapshot().problems[0];
@@ -416,6 +424,8 @@ export class Fase1OrlaScene implements GameScene {
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.phase?.update(dt, this.player);
+    const signalFault = suburbanGameState.snapshot().problems.find(problem => problem.id === 'traffic-signal-failure');
+    this.trafficSignals.setFaulty(!!signalFault && signalFault.status !== 'RESOLVED');
     this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {
