@@ -13,6 +13,22 @@ npm run dev
 
 Abra http://localhost:3000. Clique em **Entrar no cenário**. Mova com WASD, setas ou os botões de direção. Esc pausa/retoma. Ao sair da janela, o jogo pausa e aguarda sua confirmação para continuar.
 
+## Orla ampliada
+
+O botão **Jogar na Orla** abre a mesma fase original, ampliada de 32 para 40 unidades de largura e mantendo 20 de profundidade. Não existe uma fase adicional de rotatória. A missão, o poste, os itens e os personagens preservam suas posições no mundo.
+
+O cenário mantém mar, areia, calçadão, ciclovia e avenida com duas faixas por sentido, além da faixa operacional de desvio usada pela Mobilidade. O paisagismo toma como referência a Avenida Arthur Costa Filho, na orla central de Caraguatatuba. A frota inclui hatch, sedã, SUV, picape, ônibus e moto, dimensionados para as faixas da Orla.
+
+### Pedestres e ciclistas da Orla
+
+Os pedestres usam a mesma modelagem articulada e caminhada das personagens, com quatro aparências (coral, verde, boné e lilás). A animação acompanha a distância percorrida, suaviza as mudanças de direção e volta ao repouso quando o NPC espera na faixa.
+
+Há três variações de ciclistas: passeio com cestinha, esportivo e entregador com bag amarela **99Food**. Todos têm capacete, mãos apoiadas no guidão, pernas pedalando e rodas que giram conforme o deslocamento. A bag acompanha o tronco do entregador. Os modelos ficam em `src/game/traffic/NpcModels.ts`; rotas e travessias ficam no `ActiveMobilitySystem.ts` da fase original.
+
+As travessias funcionam sem semáforos e têm filas independentes. Um pedestre esperando na ciclovia solicita a parada das bicicletas; a fila da avenida não interfere nessa decisão. Na avenida, três pedestres formam um grupo e solicitam a parada dos carros. Quem já passou do ponto de parada termina de liberar a faixa antes da entrada dos pedestres. O trio atravessa junto, e os carros retomam quando todos saem. Há um intervalo mínimo de circulação de três segundos entre grupos na avenida e de 0,6 segundo entre travessias na ciclovia.
+
+As distâncias de parada e liberação ficam em `src/game/traffic/crossingRules.ts`. `node --test tests/crossings.cjs` simula as filas separadas, a travessia em grupo e 180 segundos de circulação em dois ritmos de atualização.
+
 ## Personagens jogáveis
 
 ### Teste livre de habilidades
@@ -26,6 +42,58 @@ Em `/jogo`, escolha uma das três personagens nos botões à esquerda. Use **Ver
 Os modelos procedurais em `Player.ts` têm ombros, cotovelos, quadris, joelhos e tornozelos articulados. A caminhada posiciona os pés com cinemática inversa de duas articulações. Respiração, piscadas, mochilas e cabelos continuam animados em repouso; cachos, mechas longas e cabelo azul têm movimentos próprios. Pausar o jogo congela as animações. Os modelos são construídos em Three.js, sem arquivos GLB externos.
 
 Valide movimento, contato dos pés, seleção e liberação de recursos com `npm run test:characters` (Node 22.13+ ou 24).
+
+## Itens na Fase 1 · Orla
+
+Abra **Fase 1 · Orla** em `/jogo`. WASD/setas ou o direcional de toque movem a personagem. **E** ou **Ação · E** interage com a célula adjacente na última direção de movimento (eixo dominante nas diagonais). **T** troca a personagem; os botões de seleção continuam disponíveis.
+
+Na Orla, a Mobilidade usa o baú laranja de cones, junto à estação. Depois de ser acionada pela Analista, aproxime-se do baú, vire-se para ele e aperte **E**: um cone aparece sobre a personagem. Leve-o até uma faixa da avenida e aperte **E** para posicioná-lo; veículos reduzem a velocidade e desviam. **E** perto de um cone já colocado recolhe-o. O inventário acompanha a personagem ao trocar de equipe; reiniciar a fase limpa os cones.
+
+O catálogo fica em `src/game/items/itemData.ts`; as regras e direções em `ItemInteractions.ts`, sem Three.js. `orlaMap.ts` define as caixas e seus tipos; `ItemVisuals.ts` mantém os meshes e libera seus recursos no descarte da cena. Altura e tamanho dos itens ficam em `ITEM_VIEW_CONFIG`.
+
+## Fluxo cooperativo de riscos na Orla
+
+Há três pontos na faixa inferior do mapa: **1 · iluminação**, **2 · sensor**, **3 · rota/calçada interditada**. Um, dois ou três traços identificam os pontos no chão. A cor muda de azul (não inspecionado) para amarelo (inspecionado), vermelho (tarefa liberada), roxo (desvio em preparação) e verde (resolvido). O painel mostra o estado também em texto e pode ser recolhido.
+
+1. Selecione **Análise**, caminhe até a célula vizinha e olhe para o ponto. **E** ou **Ação · E** inspeciona; outra ação marca o risco e libera a tarefa.
+2. Troque com **T** ou os três botões de personagem. Posição, direção, itens e intervenções concluídas permanecem com suas donas.
+3. **Infraestrutura** usa E no ponto marcado para instalar o sensor ou acender a iluminação. **Mobilidade** usa E no ponto de rota para preparar um desvio de teste predefinido, e E novamente para confirmar. A rota original permanece até a confirmação; trocar para outra personagem cancela só o rascunho.
+
+O papel errado ou uma tarefa ainda não liberada não produz intervenção. Ações repetidas em um risco resolvido não duplicam equipamento nem desligam a luz. Nesta etapa, habilidades não consomem os itens carregáveis e não há pedidos, pontuação ou multiplayer em rede. Sair da fase reinicia o teste.
+
+`AbilityActions.ts` compartilha as regras de inspeção, sensores, luz e paradas entre o laboratório e `RiskWorkflow.ts`. Este último contém a máquina de estados sem Three/React. `riskData.ts` define os três riscos e o desvio; a cena reaproveita `AbilityVisuals` para mostrar as intervenções. O React só recebe snapshots em ações, nunca por frame. `npm test` cobre o fluxo puro, papéis, troca de personagem, inventário, pausa e descarte de GPU.
+
+## Módulo de partida e pedidos
+
+`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. `sessionData.ts` fornece um catálogo de teste para a Orla: fase de 180 segundos, primeiro pedido imediato e próximos a cada 30 segundos. Duração, intervalo, atraso inicial, sequência de riscos, prazo, pontos, bônus máximo e penalidade são configuráveis. O catálogo se repete em ordem.
+
+- Estados: `menu` → `playing` ↔ `paused` → `finished`. `start()` inicia ou reinicia após o fim; `returnToMenu()` limpa a partida. A pausa congela fase, chegadas e prazos. Só `playing` aceita resoluções.
+- A fila é FIFO: apenas o primeiro pedido recebe progresso, seguindo seus `riskIds` em ordem. Todos os prazos contam desde a chegada, inclusive para pedidos em espera. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
+- Concluir rende `basePoints + floor(maxSpeedBonus × tempoRestante / timeLimitMs)`. Etapas isoladas não pontuam. Expirar desconta `expirationPenalty` uma única vez; o total pode ficar negativo.
+- No prazo exato, o pedido expira. No fim da fase, todas as pendências também expiram com penalidade; nenhuma chegada acontece no instante final. Empates processam expiração antes de chegada.
+- `advance(deltaMs)` recebe milissegundos, inclusive frações, e processa todos os eventos de avanços grandes. Use o tempo real decorrido enquanto jogando, sem o limite de delta usado na física. Avance o relógio antes de registrar uma resolução. Não repasse tempo passado em pausa após retomar.
+- Métodos retornam eventos de mudança; `snapshot()` devolve uma cópia com fila, próximo risco, relógios, placar e contadores. Não há callbacks ou atualizações React por frame, nem recursos de GPU a descartar.
+
+Exemplo de uso em lógica sem renderização:
+
+```ts
+import { GameSession } from './src/game/session/GameSession';
+import { ORLA_SESSION_CONFIG } from './src/game/session/sessionData';
+
+const session = new GameSession(ORLA_SESSION_CONFIG);
+session.start();
+session.advance(15_000);
+const order = session.snapshot().orders[0];
+// Depois de cada intervenção efetivamente concluída pelo RiskWorkflow:
+session.resolveRisk(order.id, 1);
+session.resolveRisk(order.id, 2);
+// Primeiro pedido: 100 pontos + 37 de bônus = 137.
+session.pause();
+session.advance(60_000); // Pausado: não altera relógios nem pedidos.
+session.resume();
+```
+
+O módulo está disponível para integração; a cena e o HUD ainda executam o teste livre de três riscos descrito acima. Ao conectar a partida, a cena deverá permitir a intervenção apenas no `nextRiskId` do primeiro pedido, enviar a conclusão com o ID desse pedido e criar um novo ciclo de riscos para as próximas instâncias. Um risco já resolvido no teste livre não deve concluir automaticamente pedidos futuros. `npm test` cobre expiração, pontuação, ordem, pausa, reinício, tempo acumulado e consumo de conclusões reais do `RiskWorkflow` sem carregar Three.
 
 ## Organização
 
@@ -89,3 +157,36 @@ Definir perspectiva (top-down, terceira pessoa ou outra), controles principais e
 - https://vercel.com/docs/frameworks/full-stack/nextjs
 - https://threejs.org/docs/
 - https://gsap.com/docs/v3/
+
+
+### Rodada jogável da Orla
+
+Em `/jogo`, escolha **Jogar na Orla**. A rodada dura até três minutos e termina ao
+reparar o poste ou esgotar o prazo. A pontuação combina 300 pontos pela missão
+concluída e até 300 de bônus pelo tempo restante.
+
+1. Com a Analista, use **E** três vezes: selecionar a ocorrência, acionar
+   Infraestrutura e acionar Mobilidade.
+2. Escolha Mobilidade, siga a seta até o baú laranja, vire-se para ele e aperte
+   **E** para pegar um cone. Leve-o até o ponto indicado na avenida e aperte **E**
+   para colocá-lo. Os veículos param/desviam antes da área de trabalho; espere o
+   trecho ficar livre.
+3. Escolha Infraestrutura, aproxime-se do poste e use **E**. Acerte os três pinos
+   com **Espaço** ou toque. O resumo permite reiniciar a fase inteira ou voltar.
+
+**Controles:** WASD/setas para mover, Shift para correr, T para trocar de equipe,
+E para interagir e Esc para pausar. A Analista permanece na cabine, como antes.
+No celular há botões de direção, corrida e ações das vias. Usar os botões de personagens
+seleciona a equipe; o anel no chão identifica quem está sob controle.
+
+O movimento da Orla usa a mesma velocidade direta do laboratório: 1,8 unidades/s,
+com Shift a 1,45×, além das colisões com deslizamento do mapa. O relógio conta tempo real
+(inclusive durante o reparo), mas congela ao pausar ou sair da janela. O puzzle
+preserva a etapa e pausa suas animações e callbacks.
+
+**Validação manual:** confira movimento diagonal, corrida, colisão em bancadas,
+troca de equipe sem deslocar a anterior, pausa por Esc e ao sair da janela,
+zoom/resize, vitória, tempo esgotado e reinício com poste, cones e placar limpos.
+Repita em celular e confirme que os controles não cobrem o alvo. Verifique também
+`/teste-personagem`. Os testes automatizados usam Three.js com renderer simulado;
+não substituem a inspeção visual nem uma medição de desempenho em aparelho real.

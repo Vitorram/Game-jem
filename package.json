@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "test:characters": "node --test tests/player.cjs",
-    "test": "node --test tests/player.cjs"
+    "test": "node --test tests/*.cjs"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -28,3 +28,4 @@
     "typescript": "7.0.2"
   }
 }
+

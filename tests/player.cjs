@@ -40,11 +40,11 @@ for (const id of [1, 2, 3]) {
       for (const side of [-1, 1]) {
         player.mesh.getObjectByName(`foot-${side}`).getWorldPosition(foot);
         // O tornozelo fica a 10,5 cm do chão e a sola a 0,5 cm.
-        assert.ok(foot.y >= 0.104, `pé atravessou o chão: ${foot.y}`);
+        assert.ok(foot.y >= 0.104 * player.mesh.scale.y, `pé atravessou o chão: ${foot.y}`);
         highest = Math.max(highest, foot.y);
       }
     }
-    assert.ok(highest > 0.2, 'o pé deve levantar durante a passada');
+    assert.ok(highest > 0.2 * player.mesh.scale.y, 'o pé deve levantar durante a passada');
     tick(player, idle);
     assert.ok(Math.abs(player.mesh.getObjectByName('shoulder-1').rotation.x) < 0.04);
     player.dispose();
@@ -174,3 +174,4 @@ test('editar rota bloqueia movimento e indicadores podem ser recriados e descart
   scene.dispose();
   assert.equal(scene.scene.children.length, 0);
 });
+

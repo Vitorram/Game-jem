@@ -4,7 +4,7 @@ export class Input {
   private keys = new Set<string>();
   private touch = new Map<number, string>();
   private onKeyDown = (event: KeyboardEvent) => {
-    if (!movementCodes.has(event.code)) return;
+    if (!movementCodes.has(event.code) && event.code !== 'ShiftLeft' && event.code !== 'ShiftRight') return;
     if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     event.preventDefault();
     this.keys.add(event.code);
@@ -34,6 +34,8 @@ export class Input {
     return { x: x / length, z: z / length };
   }
 
+  isSprinting() { return this.held('ShiftLeft', 'ShiftRight'); }
+
   dispose() {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
@@ -41,3 +43,4 @@ export class Input {
     this.clear();
   }
 }
+

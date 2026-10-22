@@ -1,4 +1,4 @@
-﻿import { CircleGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, RingGeometry, Vector3 } from 'three';
+import { CircleGeometry, CylinderGeometry, Group, Mesh, MeshBasicMaterial, MeshStandardMaterial, PointLight, RingGeometry, Vector3 } from 'three';
 import type { AbilitySnapshot, MapPoint } from '../core/AbilityLab';
 
 /** Apenas indicadores de habilidade sobre a plataforma vazia. */
@@ -13,6 +13,8 @@ export class AbilityVisuals {
     });
     this.group.clear();
   }
+  dispose(): void { this.clear(); }
+
   private ring(point: MapPoint, radius: number, color: string, opacity = 1) {
     const mesh = new Mesh(new RingGeometry(radius - 0.045, radius, 48), new MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
     mesh.rotation.x = -Math.PI / 2;
