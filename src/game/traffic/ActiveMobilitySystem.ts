@@ -24,8 +24,9 @@ const CROSSING_END_Z = 9.55;
 const CYCLIST_SAFE_GAP = 1.05;
 const WALKER_SAFE_GAP = 0.82;
 const CROSSING_MERGE_CLEARANCE = 0.85;
-const CROSSING_GROUP_THRESHOLD = 4;
-const CROSSING_GROUP_X_OFFSETS = [0.63, 0.21, -0.21, -0.63];
+const CROSSING_GROUP_THRESHOLD = 3;
+const CROSSING_GROUP_WAIT_TIME = 4.5;
+const CROSSING_GROUP_X_OFFSETS = [0.42, 0, -0.42];
 const CROSSING_ALIGNMENT_DURATION = 0.8;
 
 /** Ciclovia com tráfego leve e travessia de pedestres simples. */
@@ -48,8 +49,9 @@ export class ActiveMobilitySystem {
   private readonly clothes = ['#d75c50', '#4a8795', '#df9a42', '#577455'].map(color => new MeshStandardMaterial({ color, roughness: 0.8 }));
   private readonly skin = new MeshStandardMaterial({ color: '#d99b70', roughness: 0.85 });
   private spawnCycleTimer = 4.5;
-  private spawnWalkerTimer = 7;
+  private spawnWalkerTimer = 13;
   private crossingBatchActive = false;
+  private crossingQueueTimer = 0;
   private randomSeed = 827;
   private disposed = false;
 
@@ -59,7 +61,7 @@ export class ActiveMobilitySystem {
     this.maxX = map.width / 2 - 1;
     this.createCrossing();
     for (let i = 0; i < 4; i++) this.spawnCyclist(this.minX + i * 7.3);
-    for (let i = 0; i < 3; i++) this.spawnWalker(this.minX + i * 4.5);
+    for (let i = 0; i < 2; i++) this.spawnWalker(this.minX + i * 5.5);
   }
 
   private createCrossing(): void {
@@ -92,7 +94,7 @@ export class ActiveMobilitySystem {
     const z = WALK_Z + (this.random() - 0.5) * 0.22;
     mesh.position.set(x, 0, z);
     this.group.add(mesh);
-    this.walkers.push({ mesh, x, z, speed: 0.68 + this.random() * 0.22, state: 'walking', wantsToCross: this.random() < 0.78 });
+    this.walkers.push({ mesh, x, z, speed: 0.68 + this.random() * 0.22, state: 'walking', wantsToCross: this.random() < 0.7 });
   }
 
   update(delta: number): void {
@@ -106,7 +108,7 @@ export class ActiveMobilitySystem {
     this.spawnWalkerTimer -= dt;
     if (this.spawnWalkerTimer <= 0) {
       this.spawnWalker(this.minX + 0.55);
-      this.spawnWalkerTimer = 6 + this.random() * 6;
+      this.spawnWalkerTimer = 12 + this.random() * 8;
     }
 
     this.moveCyclists(dt);
@@ -193,7 +195,10 @@ export class ActiveMobilitySystem {
     const occupied = this.walkers.some(walker => walker.state === 'crossing');
     const waitingGroup = this.walkers.filter(walker => walker.state === 'waiting').sort((a, b) => b.x - a.x);
     const aligning = this.walkers.some(walker => walker.state === 'aligning');
-    if (!this.crossingBatchActive && waitingGroup.length >= CROSSING_GROUP_THRESHOLD) {
+    this.crossingQueueTimer = waitingGroup.length >= CROSSING_GROUP_THRESHOLD
+      ? this.crossingQueueTimer + dt : 0;
+    if (!this.crossingBatchActive && waitingGroup.length >= CROSSING_GROUP_THRESHOLD
+      && this.crossingQueueTimer >= CROSSING_GROUP_WAIT_TIME) {
       this.crossingBatchActive = true;
     }
     if (this.crossingBatchActive && !occupied && !aligning && waitingGroup.length >= CROSSING_GROUP_THRESHOLD
@@ -208,7 +213,7 @@ export class ActiveMobilitySystem {
     if (this.crossingBatchActive && !occupied && !aligning && waitingGroup.length < CROSSING_GROUP_THRESHOLD) {
       this.crossingBatchActive = false;
     }
-    // Cars yield only for an assembled group (four waiting pedestrians) or
+    // Cars yield only for an assembled group (three waiting pedestrians) or
     // while someone is physically crossing. Others continue along the path.
     this.traffic.setPedestrianCrossingState(this.crossingBatchActive || occupied, occupied);
   }
