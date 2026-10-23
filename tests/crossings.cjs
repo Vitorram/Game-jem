@@ -22,7 +22,7 @@ function world() {
   const map = new GridMap(ORLA_MAP, 2, .3);
   const traffic = new TrafficSystem(map);
   const mobility = new ActiveMobilitySystem(map, traffic);
-  return { traffic, mobility, dispose() { mobility.dispose(); traffic.dispose(); } };
+  return { map, traffic, mobility, dispose() { mobility.dispose(); traffic.dispose(); } };
 }
 function tick(world, seconds, inspect = () => {}, dt = .05) {
   for (let i = 0; i < Math.ceil(seconds / dt); i++) {
@@ -79,8 +79,12 @@ test('trio inicia junto, carros respeitam a faixa e retomam quando o ultimo sai'
       const crossing = w.mobility.walkers.filter(p => p.state === 'cross-road');
       if (crossing.length) {
         sawGroup = true;
-        assert.equal(crossing.length, 3);
-        assert.ok(Math.max(...crossing.map(p => p.z)) - Math.min(...crossing.map(p => p.z)) < .001);
+        // O lote tem sempre 3; quem chega primeiro ao destino sai de 'cross-road'.
+        assert.equal(w.mobility.roadBatch.length, 3);
+        // O grupo atravessa em fila indiana: mesmo X, espaçamento fixo de 0,72 em Z.
+        assert.ok(Math.max(...crossing.map(p => p.x)) - Math.min(...crossing.map(p => p.x)) < .001);
+        const zs = w.mobility.roadBatch.map(p => p.z).sort((a, b) => a - b);
+        assert.ok(zs[2] - zs[0] <= 1.44 + .001, 'fila deve manter no máximo o espaçamento inicial');
         for (const v of w.traffic.vehicles) assert.ok(Math.abs(v.mesh.position.x - 1) >= CROSSING_RULES.roadConflictHalfWidth - .001, 'carro invadiu faixa ocupada');
       }
       sawStoppedCar ||= w.traffic.waitingPedestrians >= 3 && w.traffic.vehicles.some(v => v.speed < .01);
@@ -113,4 +117,104 @@ for (const dt of [.05, 1 / 60]) test(`fluxo continuo por 180s sem travamento nem
     assert.ok(groups >= 3, `apenas ${groups} grupos atravessaram`);
     assert.ok(cyclePassages >= 5, `apenas ${cyclePassages} travessias da ciclovia`);
   } finally { w.dispose(); }
+});
+
+/** Deixa só dois carros na faixa principal de sentido +1, nas posições pedidas, sem novos carros por perto. */
+function twoCars(w, firstX, secondX) {
+  const lane = w.traffic.lanes.find(l => l.type === 'PRINCIPAL' && l.direction === 1);
+  w.mobility.spawnWalkerTimer = Infinity;
+  w.mobility.walkers.forEach(p => { p.state = 'exit'; p.x = -17; p.z = 10.75; });
+  w.traffic.setScheduledDemand(0);
+  const [a, b] = w.traffic.vehicles;
+  w.traffic.vehicles.slice(2).forEach(v => w.traffic.removeVehicle(v));
+  for (const [v, x] of [[a, firstX], [b, secondX]]) {
+    v.lane = lane; v.homeLane = lane; v.preferredLane = lane; v.kind = 'sedan';
+    v.mesh.position.set(x, 0.27, lane.z); v.speed = 1.5; v.maxSpeed = 1.7;
+  }
+  return { lane, a, b, crossingX: w.traffic.pedestrianCrossingX };
+}
+
+test('CT-2.2: carro que já passou da faixa continua quando a pista é bloqueada; o que chega para', () => {
+  const w = world();
+  try {
+    const { lane, a, b, crossingX } = twoCars(w, 0, 0);
+    a.mesh.position.x = crossingX + 5;
+    b.mesh.position.x = crossingX - 8;
+    w.traffic.applyMobilityAction(lane.id, 'block');
+    const startA = a.mesh.position.x;
+    tick(w, 4);
+    assert.ok(a.mesh.position.x - startA > 3, 'quem já cruzou a faixa segue até sair do mapa');
+    assert.ok(b.speed < .01, 'quem ainda chega à faixa para');
+    assert.ok(b.mesh.position.x < crossingX - CROSSING_RULES.roadConflictHalfWidth, 'e para antes da faixa');
+  } finally { w.dispose(); }
+});
+
+test('CT-2.3: sem espaço depois da faixa o carro espera antes dela, nunca sobre ela', () => {
+  const w = world();
+  try {
+    const { a, b, crossingX } = twoCars(w, 0, 0);
+    // O da frente está parado logo depois da faixa; sobra menos que um carro entre a faixa e ele.
+    a.mesh.position.x = crossingX + CROSSING_RULES.roadConflictHalfWidth + 0.9;
+    a.speed = 0; a.maxSpeed = 0;
+    b.mesh.position.x = crossingX - 7;
+    tick(w, 12, () => {
+      assert.ok(b.mesh.position.x <= crossingX - CROSSING_RULES.roadStopDistance + .05, 'carro invadiu a faixa sem espaço para sair');
+    });
+    assert.ok(b.speed < .01);
+    // Quando a fila anda e abre espaço, o carro volta a seguir.
+    a.maxSpeed = 1.7;
+    tick(w, 8);
+    assert.ok(b.mesh.position.x > crossingX, 'com espaço livre o carro atravessa');
+  } finally { w.dispose(); }
+});
+
+test('CT-3.2: pedestre em dispersão contorna obstáculo urbano e segue adiante', () => {
+  const w = world();
+  try {
+    w.mobility.spawnWalkerTimer = Infinity;
+    const z = 9.2;
+    w.mobility.walkers.forEach((p, i) => {
+      p.state = 'exit'; p.exitDirection = 1; p.z = z + (i ? 6 : 0); p.x = -5 - i * 3; p.speed = .8;
+    });
+    const walker = w.mobility.walkers[0];
+    // Poste, lixeira ou banco exatamente na linha de caminhada do pedestre.
+    const obstacle = { x: -3, z, radius: .3 };
+    w.map.addObstacle(obstacle.x, obstacle.z, obstacle.radius);
+    let closest = Infinity;
+    tick(w, 7, () => { closest = Math.min(closest, Math.hypot(walker.x - obstacle.x, walker.z - obstacle.z)); });
+    assert.ok(closest >= obstacle.radius + .17 - 1e-6, `pedestre atravessou o obstáculo (distância mínima ${closest.toFixed(3)})`);
+    assert.ok(walker.x > obstacle.x + 1, 'depois de contornar, o pedestre continua em frente');
+  } finally { w.dispose(); }
+});
+
+test('combinação CT-2.2 + CT-2.3: com bloqueios e liberações alternados, nenhum carro fica parado sobre a faixa', () => {
+  for (const dt of [.05, 1 / 60]) {
+    const w = world();
+    try {
+      const crossingX = w.traffic.pedestrianCrossingX;
+      const zone = CROSSING_RULES.roadConflictHalfWidth;
+      const east = w.traffic.lanes.find(l => l.type === 'PRINCIPAL' && l.direction === 1);
+      const west = w.traffic.lanes.find(l => l.type === 'PRINCIPAL' && l.direction === -1);
+      const schedule = [['block', east], ['release', east], ['blockAll', east], ['release', west], ['block', west], ['release', east]];
+      const stoppedFor = new Map();
+      let step = 0, sampled = 0, longest = 0;
+      tick(w, 240, () => {
+        const t = sampled++ * dt;
+        if (t >= (step + 1) * 14 && step < schedule.length * 3) {
+          const [action, lane] = schedule[step++ % schedule.length];
+          w.traffic.applyMobilityAction(lane.id, action);
+        }
+        for (const v of w.traffic.vehicles) {
+          const inZone = Math.abs(v.mesh.position.x - crossingX) < zone && v.lane.type === 'PRINCIPAL';
+          if (inZone && v.speed < .05) {
+            const time = (stoppedFor.get(v) ?? 0) + dt;
+            stoppedFor.set(v, time);
+            longest = Math.max(longest, time);
+          } else stoppedFor.delete(v);
+        }
+      }, dt);
+      assert.ok(longest <= 2.5, `carro parado ${longest.toFixed(1)} s sobre a faixa (dt=${dt.toFixed(3)})`);
+      assert.ok(w.traffic.vehicles.some(v => v.speed > .3), 'o trânsito continua circulando depois de todas as intervenções');
+    } finally { w.dispose(); }
+  }
 });

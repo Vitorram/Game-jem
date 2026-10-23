@@ -7,6 +7,7 @@ type Props = {
   step: AnalystTutorialStep;
   onBegin: () => void;
   onComplete: () => void;
+  onSkip: () => void;
 };
 
 type TargetRect = { top: number; right: number; bottom: number; left: number; width: number; height: number };
@@ -25,7 +26,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), Math.max(min, max));
 }
 
-export default function AnalystTutorialGuide({ step, onBegin, onComplete }: Props) {
+export default function AnalystTutorialGuide({ step, onBegin, onComplete, onSkip }: Props) {
   const cardRef = useRef<HTMLElement>(null);
   const [layout, setLayout] = useState<GuideLayout | null>(null);
   const isInteractiveStep = step >= 1 && step <= 4;
@@ -106,6 +107,7 @@ export default function AnalystTutorialGuide({ step, onBegin, onComplete }: Prop
       {step === 5 && <button className="analyst-guide-button" onClick={onComplete}>Continuar para Mobilidade <span aria-hidden="true">→</span></button>}
       {isInteractiveStep && <small className="analyst-guide-hint">Use somente o item iluminado para continuar.</small>}
       {(step === 0 || step === 5) && <small className="analyst-guide-required">Esta orientação faz parte do início da fase.</small>}
+      <button type="button" className="analyst-guide-skip" onClick={onSkip}>Pular tutorial</button>
     </aside>
   </>;
 }

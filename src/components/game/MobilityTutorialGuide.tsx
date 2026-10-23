@@ -7,6 +7,7 @@ type Props = {
   onBegin: () => void;
   onContinue: () => void;
   onComplete: () => void;
+  onSkip: () => void;
 };
 
 const lessons: Partial<Record<MobilityTutorialStep, { eyebrow: string; title: string; body: string; button: string; key?: string }>> = {
@@ -22,7 +23,7 @@ const lessons: Partial<Record<MobilityTutorialStep, { eyebrow: string; title: st
   18: { eyebrow: 'TREINO CONCLUÍDO', title: 'Você praticou todas as habilidades', body: 'Aprendeu a sinalizar, liberar, bloquear um sentido, interditar as vias e desviar carros elétricos da avenida verde quando necessário. Agora pode combinar essas ações com as demais equipes nas ocorrências da Orla.', button: 'Começar desafio' },
 };
 
-export default function MobilityTutorialGuide({ step, onBegin, onContinue, onComplete }: Props) {
+export default function MobilityTutorialGuide({ step, onBegin, onContinue, onComplete, onSkip }: Props) {
   const lesson = lessons[step];
   if (!lesson) return null;
   const isLast = step === 18;
@@ -42,6 +43,7 @@ export default function MobilityTutorialGuide({ step, onBegin, onContinue, onCom
       {lesson.key && <kbd className="mobility-guide-key">{lesson.key}</kbd>}
       <button className="analyst-guide-button" onClick={isFirst ? onBegin : isLast ? onComplete : onContinue}>{lesson.button} <span aria-hidden="true">→</span></button>
       <small className="analyst-guide-required">A personagem e o relógio ficam parados nesta instrução.</small>
+      <button type="button" className="analyst-guide-skip" onClick={onSkip}>Pular tutorial</button>
     </aside>
   </>;
 }

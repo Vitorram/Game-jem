@@ -4,6 +4,7 @@ import {
 import type { GridMap } from '../map/GridMap';
 import { WORK_ZONE_CLEARANCE, type TrafficSystem } from './TrafficSystem';
 import { ORLA_CROSSING } from '../config';
+import { ROAD_LAYOUT } from '../map/roadLayout';
 import { NpcModels, type NpcVisual } from './NpcModels';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 
@@ -16,6 +17,9 @@ const CROSSING_X = ORLA_CROSSING.centerX;
 const SIDEWALK_Y = 0.02;
 const CYCLIST_SAFE_GAP = 1.55;
 const WALKER_SAFE_GAP = 0.85;
+const WALKER_RADIUS = 0.17;
+/** Perto do destino o pedestre ignora o mobiliário para conseguir chegar à posição exata da fila. */
+const FURNITURE_RELEASE_DISTANCE = 0.9;
 const CYCLIST_YIELD_LOOKAHEAD = 6;
 const CYCLIST_STOP_DISTANCE = 1.05;
 const WORKER_REST_SECONDS = 40;
@@ -114,7 +118,7 @@ export class ActiveMobilitySystem {
     return this.injuredWorker ? { x: this.injuredWorker.x, z: this.injuredWorker.z } : null;
   }
 
-  constructor(map: GridMap, private readonly traffic: TrafficSystem) {
+  constructor(private readonly map: GridMap, private readonly traffic: TrafficSystem) {
     this.group.name = 'cycleway-and-pedestrians';
     this.minX = -map.width / 2 + 1;
     this.maxX = map.width / 2 - 1;
@@ -172,7 +176,7 @@ export class ActiveMobilitySystem {
     const stripeCount = 11;
     const startZ = this.roadNorthEdgeZ + 0.26;
     const endZ = this.roadSouthEdgeZ - 1.06;
-    const medianZ = this.roadSouthEdgeZ - 2.94;
+    const medianZ = this.roadNorthEdgeZ + ROAD_LAYOUT.median;
     const stepZ = (endZ - startZ) / (stripeCount - 1);
 
     for (let i = 0; i < stripeCount; i++) {
@@ -192,10 +196,14 @@ export class ActiveMobilitySystem {
     }
 
     // 2. Linhas de retenção (Stop Lines) antes da faixa para cada sentido da avenida
-    const eastboundStopZ = this.roadNorthEdgeZ + 1.46;
-    const westboundStopZ = this.roadSouthEdgeZ - 1.79;
-    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.48, 0.002, eastboundStopZ, 0.18, 0.024, 2.64);
-    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.48, 0.002, westboundStopZ, 0.18, 0.024, 1.74);
+    // Cobre a faixa verde e as duas pistas de sentido leste, até a borda da segunda.
+    const eastboundBottom = ROAD_LAYOUT.eastbound[1] + 0.48;
+    const eastboundStopZ = this.roadNorthEdgeZ + eastboundBottom / 2;
+    // Cobre as duas pistas de sentido oeste, de borda a borda.
+    const westboundTop = ROAD_LAYOUT.westbound[0] - 0.48, westboundBottom = ROAD_LAYOUT.westbound[1] + 0.48;
+    const westboundStopZ = this.roadNorthEdgeZ + (westboundTop + westboundBottom) / 2;
+    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.48, 0.002, eastboundStopZ, 0.18, 0.024, eastboundBottom);
+    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.48, 0.002, westboundStopZ, 0.18, 0.024, westboundBottom - westboundTop);
 
     // 3. Travessia de pedestres demarcada sobre a ciclovia (Row 7: Z = 2.0 a 4.0)
     for (let i = 0; i < 4; i++) {
@@ -378,7 +386,11 @@ export class ActiveMobilitySystem {
 
   private publishCrossing(): void {
     const waiting = this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road' || walker.state === 'cross-road').length;
-    this.traffic.setPedestrianCrossingState(waiting, this.roadBatch.some(w => w.state === 'cross-road'));
+    // Os carros só cedem quando a travessia vai de fato acontecer: grupo
+    // completo, lote já em formação ou fila sendo esvaziada. Com 1–2 pedestres
+    // esperando o terceiro, o tráfego segue livre em vez de travar a via.
+    const crossingWillHappen = this.roadBatch.length > 0 || this.drainRoadQueue || waiting >= CROSSING_RULES.roadGroupSize;
+    this.traffic.setPedestrianCrossingState(crossingWillHappen ? waiting : 0, this.roadBatch.some(w => w.state === 'cross-road'));
   }
 
   private moveCyclists(dt: number): void {
@@ -426,6 +438,22 @@ export class ActiveMobilitySystem {
     return distance <= step + .000001;
   }
 
+  /** Empurra o pedestre para fora de postes, lixeiras, bancos e coqueiros, deslizando pela borda. */
+  private avoidFurniture(walker: Walker, target?: { x: number; z: number }): void {
+    if (target && Math.hypot(target.x - walker.x, target.z - walker.z) < FURNITURE_RELEASE_DISTANCE) return;
+    for (const obstacle of this.map.obstacles) {
+      const minimum = obstacle.radius + WALKER_RADIUS;
+      const dx = walker.x - obstacle.x;
+      let dz = walker.z - obstacle.z;
+      if (Math.hypot(dx, dz) >= minimum) continue;
+      // De frente, sem desvio lateral, o lado é escolhido pelo slot para o pedestre não ficar preso.
+      if (Math.abs(dz) < 0.08) dz = (walker.slot % 2 ? 1 : -1) * 0.08;
+      const distance = Math.hypot(dx, dz);
+      walker.x = obstacle.x + dx / distance * minimum;
+      walker.z = obstacle.z + dz / distance * minimum;
+    }
+  }
+
   private roadQueuePosition(batchIndex: number): { x: number; z: number } {
     return {
       x: CROSSING_X,
@@ -448,8 +476,11 @@ export class ActiveMobilitySystem {
       const queueX = CROSSING_X + (walker.slot % 3 - 1) * .48;
       switch (walker.state) {
         case 'approach-cycle':
-          if (this.moveToward(walker, queueX, this.cycleCenterZ - 1.5 - Math.floor(walker.slot / 3) * .55, dt)) {
-            walker.state = 'wait-cycle'; walker.arrived = this.elapsed;
+          {
+            const target = { x: queueX, z: this.cycleCenterZ - 1.5 - Math.floor(walker.slot / 3) * .55 };
+            if (this.moveToward(walker, target.x, target.z, dt)) {
+              walker.state = 'wait-cycle'; walker.arrived = this.elapsed;
+            } else this.avoidFurniture(walker, target);
           }
           break;
         case 'cross-cycle':
@@ -460,8 +491,11 @@ export class ActiveMobilitySystem {
           }
           break;
         case 'approach-road':
-          if (this.moveToward(walker, queueX, this.roadQueueZ - Math.floor(walker.slot / 3) * .65, dt)) {
-            walker.state = 'wait-road'; walker.arrived = this.elapsed;
+          {
+            const target = { x: queueX, z: this.roadQueueZ - Math.floor(walker.slot / 3) * .65 };
+            if (this.moveToward(walker, target.x, target.z, dt)) {
+              walker.state = 'wait-road'; walker.arrived = this.elapsed;
+            } else this.avoidFurniture(walker, target);
           }
           break;
         case 'form-road':
@@ -478,6 +512,7 @@ export class ActiveMobilitySystem {
           break;
         case 'exit':
           walker.x += walker.exitDirection * walker.speed * dt;
+          this.avoidFurniture(walker);
           break;
       }
       const dx = walker.x - oldX, dz = walker.z - oldZ, traveled = Math.hypot(dx, dz);

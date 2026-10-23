@@ -19,6 +19,7 @@ import {
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { GRID_CONFIG } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
+import { ROAD_LAYOUT } from './roadLayout';
 import { TextureLibrary, type TextureKey } from './proceduralTextures';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
@@ -803,6 +804,7 @@ export class GridMapView {
   private addPalm(x: number, z: number, scale: number, rotation: number): void {
     const palm = new Group();
     palm.name = 'beach-palm';
+    this.map.addObstacle(x, z, 0.2 * scale);
     palm.position.set(x, 0, z);
     palm.rotation.y = rotation;
     palm.scale.setScalar(scale);
@@ -845,6 +847,7 @@ export class GridMapView {
   private addUmbrella(x: number, z: number, colorIndex: number, rotation: number): void {
     const umbrella = new Group();
     umbrella.name = 'beach-umbrella';
+    this.map.addObstacle(x, z, 0.32);
     umbrella.position.set(x, 0, z);
     umbrella.rotation.y = rotation;
 
@@ -874,6 +877,7 @@ export class GridMapView {
   private addLifeguardTower(x: number, z: number): void {
     const tower = new Group();
     tower.name = 'lifeguard-tower';
+    this.map.addObstacle(x, z, 0.8);
     tower.position.set(x, 0, z);
 
     for (const dx of [-0.34, 0.34]) {
@@ -954,6 +958,7 @@ export class GridMapView {
   private addBench(x: number, z: number, flip: boolean): void {
     const bench = new Group();
     bench.name = 'promenade-bench';
+    this.map.addObstacle(x, z, 0.45);
     bench.position.set(x, 0, z);
     bench.rotation.y = flip ? Math.PI : 0;
 
@@ -980,6 +985,7 @@ export class GridMapView {
   private addLamp(x: number, z: number): void {
     const lamp = new Group();
     lamp.name = 'promenade-lamp';
+    this.map.addObstacle(x, z, 0.12);
     lamp.position.set(x, 0, z);
 
     const pole = new Mesh(this.lampPole, this.ambienceMaterials.lamp);
@@ -996,6 +1002,7 @@ export class GridMapView {
   private addBin(x: number, z: number): void {
     const bin = new Group();
     bin.name = 'promenade-bin';
+    this.map.addObstacle(x, z, 0.2);
     bin.position.set(x, 0, z);
 
     const body = new Mesh(this.binBody, this.ambienceMaterials.bin);
@@ -1391,23 +1398,24 @@ export class GridMapView {
       // Linhas de bordo contínuas (Norte e Sul da avenida), interrompidas na faixa de pedestres
       if (column !== 11) {
         this.line(`edge-top-${column}-${row}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.08);
-        this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + 5.14, size, 0.08);
+        this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + ROAD_LAYOUT.bottomEdge, size, 0.08);
       }
 
       // Avenida Verde (Z = 6.00 a 6.92): faixa exclusiva, com símbolos de elétrico.
       if (column !== 1 && column !== 11 && column !== 20) {
-        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + 0.46, size, 0.82);
+        const { greenCenter, greenWidth } = ROAD_LAYOUT;
+        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + greenCenter, size, greenWidth);
         this.line(`electric-lane-edge-${column}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.055);
-        this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + 0.86, size, 0.055);
-        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + 0.46);
+        this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + greenCenter + greenWidth / 2 - 0.04, size, 0.055);
+        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + greenCenter);
       }
 
       // Divisórias tracejadas brancas entre Faixa 1 e Faixa 2 (Leste em Z=7.88, Oeste em Z=10.24)
       for (const dx of [-0.25, 0.25]) {
         const dashX = center.x + dx * size;
         if (Math.abs(dashX - crossingX) < 1.85) continue;
-        this.line(`lane-east-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + 1.88, size * 0.28, 0.065);
-        this.line(`lane-west-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + 4.24, size * 0.28, 0.065);
+        this.line(`lane-east-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + ROAD_LAYOUT.eastDash, size * 0.28, 0.065);
+        this.line(`lane-west-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + ROAD_LAYOUT.westDash, size * 0.28, 0.065);
       }
     } else if (kind === 'cycleway' && !this.isSidewalk(column, row)) {
       if (column !== 11) {
@@ -1431,6 +1439,8 @@ export class GridMapView {
     const icon = new Group();
     icon.name = 'electric-car-pictogram';
     icon.position.set(x, 0.033, z);
+    // Dimensionado para a faixa de 1,2 m: ~0,8 m de carro, legível na câmera do jogo.
+    icon.scale.setScalar(1.3);
     const body = new Mesh(this.flat, material);
     body.scale.set(0.5, 0.024, 0.23);
     const cabin = new Mesh(this.flat, material);
@@ -1478,7 +1488,7 @@ export class GridMapView {
   /** Canteiro central paisagístico entre os sentidos Leste e Oeste da avenida, com refúgio na travessia. */
   private addRoadMedian(): void {
     const size = this.map.tileSize;
-    const medianZ = this.map.cellCenter(0, this.map.rows - 1).z - 1.94;
+    const medianZ = this.map.depth / 2 - this.map.tileSize * 3 + ROAD_LAYOUT.median;
     const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
     const yellowMat = this.material('mark:dash', MARK_COLORS.dash, { texture: 'grain', coloredTexture: false });
     const curbGeo = this.roundedBox(size * 0.97, 0.11, 0.38, 0.032);

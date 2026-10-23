@@ -86,6 +86,8 @@ export class Fase1OrlaScene implements GameScene {
   };
   private readonly resolveInfrastructureMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
     this.traffic.resolveWorkerMovement(from, this.resolveOrlaMovement(from, to), GRID_CONFIG.playerRadius);
+  private readonly resolveMobilityMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
+    this.traffic.resolveWorkerMovement(from, this.resolveOrlaMovement(from, to), GRID_CONFIG.playerRadius, true);
   private readonly sun: DirectionalLight;
   private disposed = false;
   private readonly cameraTarget = new Vector3();
@@ -488,7 +490,8 @@ export class Fase1OrlaScene implements GameScene {
     this.updateProblemPresentation();
     for (const player of this.players) {
       const movementResolver = player.active && player.role === 'infraestrutura' && !this.phase?.isServicing(player)
-        ? this.resolveInfrastructureMovement : this.resolveOrlaMovement;
+        ? this.resolveInfrastructureMovement
+        : player.role === 'mobilidade' ? this.resolveMobilityMovement : this.resolveOrlaMovement;
       if (!player.active) player.stopMovement();
       player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
     }

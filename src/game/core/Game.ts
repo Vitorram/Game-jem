@@ -250,6 +250,15 @@ export class Game {
     return current instanceof Fase1OrlaScene ? current.getInfrastructureTutorialSnapshot() : null;
   }
 
+  /** Pula o treino de qualquer etapa: libera a partida como se o tutorial tivesse terminado. */
+  skipTutorial(): boolean {
+    if (this.disposed || !this.mandatoryTutorialActive) return false;
+    this.repairPuzzleOpen = false;
+    this.onRepairPuzzleChange?.(false);
+    this.finishTeamTutorials();
+    return true;
+  }
+
   finishTeamTutorials(): void {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.mandatoryTutorialActive = false;

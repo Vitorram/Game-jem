@@ -147,6 +147,13 @@ export default function GameCanvas() {
     setInfrastructureTutorialStep(step);
   };
 
+  const skipTutorial = () => {
+    game.current?.skipTutorial();
+    setAnalystTutorialStep(null);
+    setMobilityTutorialStep(null);
+    setInfrastructureTutorialStep(null);
+  };
+
   const finishInfrastructureTutorial = () => {
     game.current?.finishTeamTutorials();
     setInfrastructureTutorialStep(null);
@@ -231,18 +238,21 @@ export default function GameCanvas() {
           step={analystTutorialStep}
           onBegin={beginAnalystTutorialSteps}
           onComplete={beginMobilityTutorial}
+          onSkip={skipTutorial}
         />}
         {isOriginalOrla && mobilityTutorialStep !== null && <MobilityTutorialGuide
           step={mobilityTutorialStep}
           onBegin={() => setMobilityStep(1)}
           onContinue={() => setMobilityStep((mobilityTutorialStep + 1) as MobilityTutorialStep)}
           onComplete={finishTeamTutorials}
+          onSkip={skipTutorial}
         />}
         {isOriginalOrla && infrastructureTutorialStep !== null && <InfrastructureTutorialGuide
           step={infrastructureTutorialStep}
           onBegin={() => setInfrastructureStep(1)}
           onContinue={() => setInfrastructureStep((infrastructureTutorialStep + 1) as InfrastructureTutorialStep)}
           onComplete={finishInfrastructureTutorial}
+          onSkip={skipTutorial}
         />}
         <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}

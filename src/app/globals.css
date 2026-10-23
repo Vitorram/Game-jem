@@ -820,6 +820,9 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
 .analyst-guide-card p { margin: 0; color: #53665e; font: 700 13px/1.5 Arial,sans-serif; }
 .analyst-guide-hint { display: block; margin-top: 11px; color: #96763e; font: 1000 8px Arial,sans-serif; letter-spacing: .08em; text-transform: uppercase; }
 .analyst-guide-required { display: block; margin-top: 10px; color: #788174; font: 700 9px Arial,sans-serif; }
+.analyst-guide-skip { display: block; min-height: 36px; margin: 8px 0 0 auto; padding: 6px 10px; border: 2px solid transparent; border-radius: 8px; background: transparent; color: #53665e; font: 1000 10px Arial,sans-serif; letter-spacing: .04em; text-decoration: underline; cursor: pointer; }
+.analyst-guide-skip:hover { color: #203b43; }
+.analyst-guide-skip:focus-visible { outline: 3px solid #f3a139; outline-offset: 2px; }
 .analyst-guide-button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 43px; margin-top: 16px; padding: 9px 13px; border: 3px solid #203941; border-radius: 10px; background: #edb94e; color: #233d44; box-shadow: 0 4px 0 #a07838; font: 1000 11px Arial,sans-serif; cursor: pointer; }
 .analyst-guide-button:hover,.analyst-guide-button:focus-visible { outline: 3px solid #f3a139; outline-offset: 3px; transform: translateY(-1px); }
 .tutorial-focus { position: relative; z-index: 8; outline: 4px solid #f4ba48 !important; outline-offset: 3px; box-shadow: 0 0 0 6px #fff5cb,0 0 22px 8px #ffc44caa !important; animation: analyst-tutorial-pulse 1s ease-in-out infinite alternate; }

@@ -13,6 +13,7 @@ export const TILE_TYPES = {
 } as const;
 export type TileKind = keyof typeof TILE_TYPES;
 export type Point = { x: number; z: number };
+export type Obstacle = { x: number; z: number; radius: number };
 export type TileCell = { column: number; row: number };
 export type MapDefinition = {
   rows: readonly string[];
@@ -30,6 +31,8 @@ export class GridMap {
   readonly tiles: readonly TileKind[];
   readonly spawns: readonly Point[];
   readonly itemSources: readonly Readonly<TileCell & { item: ItemId }>[];
+  /** Mobiliário urbano (postes, lixeiras, bancos, coqueiros) que os pedestres NPC devem contornar. */
+  readonly obstacles: Obstacle[] = [];
 
   constructor(definition: MapDefinition, readonly tileSize: number, readonly playerRadius: number) {
     if (!Number.isFinite(tileSize) || tileSize <= 0) throw new Error('Tamanho de tile inválido.');
@@ -59,6 +62,11 @@ export class GridMap {
       if (!Number.isInteger(cell.column) || !Number.isInteger(cell.row) || this.isSolid(cell.column, cell.row)) throw new Error('Spawn inválido ou bloqueado.');
       return Object.freeze(this.cellCenter(cell.column, cell.row));
     }));
+  }
+
+  addObstacle(x: number, z: number, radius: number): void {
+    if (![x, z, radius].every(Number.isFinite) || radius <= 0) throw new Error('Obstáculo inválido.');
+    this.obstacles.push({ x, z, radius });
   }
 
   tileAt(column: number, row: number): TileKind | undefined {

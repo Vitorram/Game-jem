@@ -13,6 +13,7 @@ require.extensions['.ts'] = (module, filename) => {
 
 const { GameSession } = require('../src/game/session/GameSession.ts');
 const { ORLA_SESSION_CONFIG } = require('../src/game/session/sessionData.ts');
+const { ORLA_EVENTS } = require('../src/game/session/orlaEvents.ts');
 const { ORLA_RISKS } = require('../src/game/risks/riskData.ts');
 const { RiskWorkflow } = require('../src/game/risks/RiskWorkflow.ts');
 const definition = (overrides = {}) => ({
@@ -239,17 +240,20 @@ test('rejeita tempos, catálogo e pontuações inválidos; delta fracionário é
   assert.equal(game.snapshot().elapsedMs, 1);
 });
 
-test('Orla emite cinco eventos nos horários exatos e mantém os seis minutos após resoluções', () => {
+test('Orla libera os eventos em série nos horários programados e encerra ao concluir o último', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
   game.start();
   assert.equal(game.snapshot().remainingMs, 360_000);
   assert.equal(game.snapshot().orders.length, 0);
-  for (const [index, at] of [30_000, 85_000, 150_000, 190_000, 215_000, 280_000].entries()) {
+  assert.equal(ORLA_SESSION_CONFIG.orders.length, ORLA_EVENTS.length);
+  for (const [index, event] of ORLA_EVENTS.entries()) {
+    const at = event.atMs;
     game.advance(at - game.snapshot().elapsedMs - 1);
     assert.equal(game.snapshot().orders.length, 0);
-    const arrivals = game.advance(1).filter(event => event.type === 'order-arrived');
+    const arrivals = game.advance(1).filter(item => item.type === 'order-arrived');
     assert.equal(arrivals.length, 1);
     const order = head(game);
+    assert.equal(order.definitionId, event.id);
     assert.equal(order.definitionId, ORLA_SESSION_CONFIG.orders[index].id);
     assert.equal(order.createdAtMs, at);
     for (const step of order.riskIds) game.resolveRisk(order.id, step);
@@ -257,36 +261,43 @@ test('Orla emite cinco eventos nos horários exatos e mantém os seis minutos ap
     assert.deepEqual(game.resolveRisk(order.id, order.riskIds.at(-1)), []);
     assert.equal(game.snapshot().score, score);
     assert.deepEqual(game.finish(), []);
-    assert.equal(game.snapshot().status, 'playing');
+    if (index < ORLA_EVENTS.length - 1) {
+      // O chamado resolvido espera no tablet até ser arquivado; só então o próximo é liberado.
+      assert.equal(game.snapshot().status, 'playing');
+      assert.deepEqual(game.archiveCompleted(order.id), []);
+    }
   }
-  assert.equal(game.snapshot().completedOrders, 6);
-  assert.deepEqual(game.advance(45_000), []);
-  assert.equal(game.snapshot().elapsedMs, 325_000);
-  assert.deepEqual(game.advance(34_999), []);
-  assert.equal(game.snapshot().status, 'playing');
-  game.advance(1);
-  assert.equal(game.snapshot().status, 'finished');
+  assert.equal(game.snapshot().completedOrders, ORLA_EVENTS.length);
   assert.equal(game.snapshot().expiredOrders, 0);
+  assert.equal(game.snapshot().status, 'finished');
 });
 
-test('eventos da Orla podem ser resolvidos fora de ordem e pendências só expiram no fim', () => {
+test('Orla expira um chamado por vez em série e encerra a fase após o limite de expirações', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
+  const { maxExpiredOrders } = ORLA_SESSION_CONFIG;
   game.start();
-  game.advance(325_000);
-  const orders = game.snapshot().orders;
-  assert.equal(orders.length, 6);
-  assert.equal(game.snapshot().expiredOrders, 0);
-  const sensor = orders.find(order => order.definitionId === 'sensor-failure');
-  assert.equal(game.resolveRisk(sensor.id, 401).at(-1).type, 'order-completed');
-  assert.equal(game.snapshot().orders[0].definitionId, 'broken-light-pole-1');
+  game.advance(ORLA_EVENTS[0].atMs);
+  assert.equal(game.snapshot().orders.length, 1);
+  assert.equal(head(game).definitionId, ORLA_EVENTS[0].id);
   game.pause();
   const paused = game.snapshot();
   game.advance(100_000);
   assert.deepEqual(game.snapshot(), paused);
   game.resume();
-  game.advance(35_000);
-  assert.equal(game.snapshot().expiredOrders, 5);
-  assert.equal(game.snapshot().completedOrders, 1);
+  // Em série só há um chamado ativo: cada prazo vencido libera imediatamente o seguinte.
+  for (let expired = 1; expired <= maxExpiredOrders; expired++) {
+    const active = head(game);
+    const events = game.advance(active.expiresAtMs - game.snapshot().elapsedMs);
+    assert.equal(events.filter(item => item.type === 'order-expired').length, 1);
+    assert.equal(game.snapshot().expiredOrders, expired);
+    if (expired < maxExpiredOrders) {
+      assert.equal(game.snapshot().status, 'playing');
+      assert.equal(game.snapshot().orders.length, 1);
+      assert.equal(head(game).definitionId, ORLA_EVENTS[expired].id);
+    }
+  }
+  assert.equal(game.snapshot().status, 'finished');
+  assert.equal(game.snapshot().completedOrders, 0);
   assert.deepEqual(game.finish(), []);
   game.start();
   assert.equal(game.snapshot().elapsedMs, 0);
