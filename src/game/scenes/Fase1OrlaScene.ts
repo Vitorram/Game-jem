@@ -242,7 +242,7 @@ export class Fase1OrlaScene implements GameScene {
     if (this.phase) {
       const state = suburbanGameState.snapshot();
       const selected = state.problems.find(problem => problem.id === state.selectedProblemId);
-      if (!selected?.requiredTeams?.includes(team) || selected.dispatchedTeams.includes(team)) return false;
+      if (!selected?.analyzed || !selected.requiredTeams?.includes(team) || selected.dispatchedTeams.includes(team)) return false;
       suburbanGameState.dispatchTeam(selected.id, team);
       this.phase.teamDispatched();
       return true;
@@ -334,6 +334,21 @@ export class Fase1OrlaScene implements GameScene {
   archiveResolvedProblem(id: string): boolean {
     if (this.disposed || this.player.role !== 'analista') return false;
     return this.phase?.archiveResolved(id) ?? false;
+  }
+
+  analyzeProblem(id: string): boolean {
+    if (this.disposed || this.player.role !== 'analista') return false;
+    return suburbanGameState.analyzeProblem(id);
+  }
+
+  requestReinforcements(id: string): boolean {
+    if (this.disposed || this.player.role !== 'analista') return false;
+    const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
+    if (!problem?.analyzed || problem.status === 'RESOLVED') return false;
+    suburbanGameState.selectProblem(id);
+    let dispatched = false;
+    for (const team of problem.requiredTeams ?? []) dispatched = this.dispatchTeam(team) || dispatched;
+    return dispatched;
   }
 
   resetPoleAfterTutorialRepair(): void {

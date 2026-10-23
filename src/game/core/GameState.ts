@@ -13,6 +13,7 @@ export type UrbanProblem = {
   stage?: 'warning' | 'active';
   instruction?: string;
   startedAtMs?: number;
+  analyzed?: boolean;
 };
 
 export type RoadState = {
@@ -68,6 +69,14 @@ export class GameState {
   selectProblem(id: UrbanProblem['id'] | null): void {
     if (id !== null && !this.state.problems.some(problem => problem.id === id && problem.status !== 'RESOLVED')) return;
     this.state.selectedProblemId = id;
+  }
+
+  analyzeProblem(id: UrbanProblem['id']): boolean {
+    const problem = this.state.problems.find(item => item.id === id && item.status !== 'RESOLVED');
+    if (!problem) return false;
+    problem.analyzed = true;
+    this.state.selectedProblemId = id;
+    return true;
   }
 
   setBudget(budget: number): void {

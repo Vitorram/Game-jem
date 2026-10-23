@@ -290,14 +290,23 @@ export class Game {
   }
 
   selectPlayer(id: PlayerId) {
-    if (this.disposed || this.repairPuzzleOpen || this.status !== 'playing') return;
-    if (this.mandatoryTutorialActive && id !== (this.tutorialStage >= 30 ? 1 : this.tutorialStage >= 10 ? 2 : 3)) return;
+    if (!this.canSelectPlayer(id) || this.repairPuzzleOpen) return;
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
       current.selectPlayer(id);
       this.onPlayerSelected?.(id);
     }
+  }
+
+  canSelectPlayer(id: PlayerId): boolean {
+    if (this.disposed || this.status !== 'playing') return false;
+    if (this.mandatoryTutorialActive) return id === (this.tutorialStage >= 30 ? 1 : this.tutorialStage >= 10 ? 2 : 3);
+    const current = this.scenes.current;
+    if (!(current instanceof Fase1OrlaScene) || id === 3) return true;
+    const team: ResponseTeam = id === 1 ? 'infraestrutura' : 'mobilidade';
+    return suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED'
+      && problem.dispatchedTeams.includes(team));
   }
 
   interact() {
@@ -312,7 +321,21 @@ export class Game {
 
   selectProblem(id: string): void {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    const scene = this.scenes.current;
+    if (scene instanceof Fase1OrlaScene && scene.player.role !== 'analista') return;
     suburbanGameState.selectProblem(id);
+  }
+
+  analyzeProblem(id: string): boolean {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    const scene = this.scenes.current;
+    return scene instanceof Fase1OrlaScene && scene.analyzeProblem(id);
+  }
+
+  requestReinforcements(id: string): boolean {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    const scene = this.scenes.current;
+    return scene instanceof Fase1OrlaScene && scene.requestReinforcements(id);
   }
 
   archiveResolvedProblem(id: string): boolean {
@@ -473,7 +496,12 @@ export class Game {
 
   private nextPlayerId(current: PlayerId): PlayerId {
     const cycle: readonly PlayerId[] = [3, 1, 2]; // Analista â†’ Infraestrutura â†’ Mobilidade
-    return cycle[(cycle.indexOf(current) + 1) % cycle.length];
+    const start = cycle.indexOf(current);
+    for (let offset = 1; offset <= cycle.length; offset++) {
+      const candidate = cycle[(start + offset) % cycle.length];
+      if (this.canSelectPlayer(candidate)) return candidate;
+    }
+    return current;
   }
 
   private tick = (time: number) => {

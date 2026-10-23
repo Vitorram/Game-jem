@@ -1,11 +1,12 @@
 import type { SessionConfig } from './GameSession';
 import { ORLA_DURATION_MS, ORLA_EVENTS } from './orlaEvents';
 
-/** Um chamado por vez; o próximo só entra depois do arquivamento pela Analista. */
+/** Chamados espaçados durante os seis minutos e liberados em série após arquivamento. */
 export const ORLA_SESSION_CONFIG = {
   phaseDurationMs: ORLA_DURATION_MS,
-  orderIntervalMs: ORLA_DURATION_MS,
-  firstOrderDelayMs: 0,
+  orderIntervalMs: 55_000,
+  firstOrderDelayMs: ORLA_EVENTS[0].atMs,
+  scheduledAtMs: ORLA_EVENTS.map(event => event.atMs),
   sequential: true,
   orders: ORLA_EVENTS.map(event => ({
     id: event.id, title: event.title, riskIds: event.steps,

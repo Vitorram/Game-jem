@@ -75,7 +75,7 @@ export class GameSession {
   snapshot(): SessionSnapshot {
     return {
       status: this.status, elapsedMs: this.elapsedMs,
-      remainingMs: this.config.phaseDurationMs - this.elapsedMs,
+      remainingMs: Math.max(0, this.config.phaseDurationMs - this.elapsedMs),
       score: this.score, completedOrders: this.completedOrders, expiredOrders: this.expiredOrders,
       orders: this.orders.map(order => ({
         ...order, riskIds: [...order.riskIds],
@@ -91,7 +91,7 @@ export class GameSession {
     this.reset();
     this.status = 'playing';
     const events: SessionEvent[] = [{ type: 'status', status: this.status }];
-    if (this.config.sequential || this.nextArrival() === 0) this.issueOrder(events);
+    if (this.nextArrival() === 0) this.issueOrder(events);
     return events;
   }
 
@@ -131,8 +131,20 @@ export class GameSession {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) throw new Error('Delta de tempo inválido.');
     if (this.status !== 'playing' || deltaMs === 0) return [];
     if (this.config.sequential) {
-      this.elapsedMs += deltaMs;
-      return [];
+      const events: SessionEvent[] = [];
+      const target = this.elapsedMs + deltaMs;
+      if (this.orders.length === 0 && this.issuedOrders < this.config.orders.length
+        && this.nextArrival() <= target) {
+        this.elapsedMs = Math.max(this.elapsedMs, this.nextArrival());
+        this.issueOrder(events);
+      }
+      this.elapsedMs = target;
+      if (this.elapsedMs >= this.config.phaseDurationMs
+        && this.issuedOrders === this.config.orders.length && this.orders.length === 0) {
+        this.status = 'finished';
+        events.push({ type: 'status', status: this.status });
+      }
+      return events;
     }
     const target = Math.min(this.config.phaseDurationMs, this.elapsedMs + deltaMs);
     const events: SessionEvent[] = [];
@@ -168,7 +180,7 @@ export class GameSession {
     const events: SessionEvent[] = [{ type: 'risk-resolved', orderId, riskId }];
     if (order.completedSteps === order.riskIds.length) {
       const remaining = order.expiresAtMs - this.elapsedMs;
-      const speedBonus = Math.floor(order.maxSpeedBonus * (remaining / order.timeLimitMs));
+      const speedBonus = Math.max(0, Math.floor(order.maxSpeedBonus * (remaining / order.timeLimitMs)));
       const points = order.basePoints + speedBonus;
       this.score += points;
       this.completedOrders++;
@@ -185,8 +197,9 @@ export class GameSession {
     if (!order || order.completedSteps !== order.riskIds.length) return [];
     this.orders.splice(this.orders.indexOf(order), 1);
     const events: SessionEvent[] = [];
-    if (this.issuedOrders < this.config.orders.length) this.issueOrder(events);
-    else if (this.orders.length === 0) {
+    if (this.issuedOrders < this.config.orders.length && this.nextArrival() <= this.elapsedMs) this.issueOrder(events);
+    else if (this.issuedOrders === this.config.orders.length && this.orders.length === 0
+      && this.elapsedMs >= this.config.phaseDurationMs) {
       this.status = 'finished';
       events.push({ type: 'status', status: this.status });
     }

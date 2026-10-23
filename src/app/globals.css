@@ -318,6 +318,13 @@ h1 span { color: var(--accent); }
 .tablet-map-column, .tablet-incident-column { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .tablet-section-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 8px; color: #587471; font: 1000 8px Arial,sans-serif; letter-spacing: .12em; }
 .tablet-section-title b { color: #324e51; font-size: 8px; }
+.tablet-workflow { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 6px; margin: -1px 0 8px; padding: 7px; border: 1px solid #a99362; border-radius: 9px; background: #f4e6c3; }
+.tablet-workflow > span { display: flex; align-items: center; gap: 6px; min-width: 0; color: #82908a; }
+.tablet-workflow > span > i { display: grid; place-items: center; flex: 0 0 21px; height: 21px; border: 1px solid #a5a28c; border-radius: 50%; background: #e8e4ce; color: #63736e; font: 900 10px Arial,sans-serif; font-style: normal; }
+.tablet-workflow > span > b { color: inherit; font: 900 8px Arial,sans-serif; letter-spacing: .045em; text-transform: uppercase; }
+.tablet-workflow > span[data-state="current"] { color: #704a1e; }.tablet-workflow > span[data-state="current"] > i { border-color: #94672d; background: #edbb54; color: #243b42; box-shadow: 0 0 0 3px #edbb5444; }
+.tablet-workflow > span[data-state="done"] { color: #2d735a; }.tablet-workflow > span[data-state="done"] > i { border-color: #589176; background: #8ed0a6; color: #123e32; }
+.tablet-workflow > em { color: #998765; font: 1000 15px Arial,sans-serif; font-style: normal; }
 .tablet-section-title .active-tag { display: flex; align-items: center; gap: 5px; padding: 4px 7px; border: 1px solid #80b99a; border-radius: 6px; background: #d1e9bb; color: #2d6b55; }
 .active-tag i { width: 6px; height: 6px; box-shadow: none; }
 .tablet-map-frame { position: relative; display: grid; flex: 1; min-height: 0; place-items: center; padding: 15px 17px; border: 2px solid #32535a; border-radius: 12px; background: #d2bf91; box-shadow: inset 0 0 0 3px #f6e8c5, 0 4px 0 #a59167; }
@@ -367,10 +374,12 @@ h1 span { color: var(--accent); }
 .tablet-team.gold { border-color: #d1ad60; background: #f3e0aa; color: #775b32; }.tablet-team.is-dispatched { background: #b9dbab; }.tablet-team.gold.is-dispatched { background: #e5c776; }
 .team-check { display: grid; place-items: center; flex: 0 0 19px; height: 19px; border: 2px solid currentColor; border-radius: 6px; font: 1000 12px Arial,sans-serif; }
 .tablet-team > span:last-child { display: grid; gap: 2px; min-width: 0; }.tablet-team b { overflow: hidden; font: 1000 8px Arial,sans-serif; text-overflow: ellipsis; white-space: nowrap; }.tablet-team small { font: 900 6px Arial,sans-serif; letter-spacing: .07em; }
-.tablet-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 39px; margin-top: 9px; padding: 6px 10px; border: 3px solid #1b3943; border-radius: 10px; background: #eebc55; color: #243e45; box-shadow: 0 4px 0 #9f7638; font: 1000 10px Arial,sans-serif; letter-spacing: .06em; }
+.tablet-action { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; margin-top: 9px; padding: 7px 11px; border: 3px solid #1b3943; border-radius: 10px; background: #eebc55; color: #243e45; box-shadow: 0 4px 0 #9f7638; font: 1000 11px Arial,sans-serif; letter-spacing: .06em; }
 .tablet-action > span { display: grid; place-items: center; width: 20px; height: 20px; border: 2px solid #89683e; border-radius: 6px; font-size: 12px; }
 .tablet-action kbd { margin-left: auto; padding: 4px 6px; border: 2px solid #253e46; border-radius: 5px; background: #fff0c8; color: #283f46; font: 1000 8px Arial,sans-serif; }
 .tablet-action:disabled { background: #8fc7a1; box-shadow: 0 4px 0 #527e68; cursor: default; }
+.tablet-action:not(:disabled):hover { background: #ffd36f; transform: translateY(-1px); }
+.character-selector button:disabled { opacity: .42; filter: grayscale(.55); cursor: not-allowed; }
 .tablet-action-hint { display: block; margin-top: 6px; color: #617773; font: 700 8px Arial,sans-serif; text-align: center; }
 .tablet-footer { display: flex; align-items: center; justify-content: space-between; padding: 0 11px; border-top: 2px solid #304a4c; background: #d6c292; color: #576660; font: 900 7px Arial,sans-serif; letter-spacing: .08em; }
 .tablet-footer span { display: flex; align-items: center; gap: 5px; }.tablet-footer span:first-child i { width: 6px; height: 6px; box-shadow: none; }.tablet-footer b { color: #4c9a7b; }

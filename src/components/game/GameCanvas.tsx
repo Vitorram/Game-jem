@@ -53,6 +53,7 @@ export default function GameCanvas() {
   const [testPuzzleType, setTestPuzzleType] = useState<RepairPuzzleType | null>(null);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
+  const [, refreshTeamAvailability] = useState(0);
 
   useEffect(() => {
     if (!host.current) return;
@@ -175,6 +176,12 @@ export default function GameCanvas() {
     return () => window.clearInterval(timer);
   }, [infrastructureTutorialStep, interactionPrompt]);
 
+  useEffect(() => {
+    if (!isOriginalOrla || status !== 'playing') return;
+    const timer = window.setInterval(() => refreshTeamAvailability(value => value + 1), 220);
+    return () => window.clearInterval(timer);
+  }, [isOriginalOrla, status]);
+
   return (
     <section className={`game-shell${isLaboratory ? '' : ' is-orla'}`} aria-label="Suburban — jogo de mobilidade urbana">
       <div ref={host} className="viewport" />
@@ -207,12 +214,11 @@ export default function GameCanvas() {
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
-        {isAnalystTablet && <OrlaTablet onAction={id => {
+        {isAnalystTablet && <OrlaTablet onAnalyze={id => game.current?.analyzeProblem(id)} onAction={id => {
           if (!id || analystTutorialStep !== null) return;
           const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
           if (problem?.status === 'RESOLVED') game.current?.archiveResolvedProblem(id);
-          else if (suburbanGameState.snapshot().selectedProblemId === id) game.current?.interact();
-          else game.current?.selectProblem(id);
+          else game.current?.requestReinforcements(id);
         }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
           step={analystTutorialStep}
@@ -248,7 +254,7 @@ export default function GameCanvas() {
           </div>
         </aside>}
         {analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <div className="character-selector" role="group" aria-label="Escolher personagem">
-          {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
+          {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id} disabled={isOriginalOrla && !game.current?.canSelectPlayer(id)}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>
             <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
             {PLAYER_APPEARANCES[id].name}

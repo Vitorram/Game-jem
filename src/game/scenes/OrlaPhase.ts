@@ -70,7 +70,6 @@ export class OrlaPhase {
     antenna.position.y = 1;
     this.sensor.add(box, antenna);
     this.group.add(this.sensor);
-    this.issueNext();
     this.publishMetrics();
   }
 
@@ -99,7 +98,7 @@ export class OrlaPhase {
 
   private issueNext(): void {
     const event = ORLA_EVENTS[this.eventIndex];
-    if (!event) return;
+    if (!event || this.elapsedMs < event.atMs || suburbanGameState.snapshot().problems.length > 0) return;
     suburbanGameState.setProblems([{ id: event.id,
       type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
       label: event.title, position: { ...event.position }, status: 'ACTIVE', stage: 'warning',
@@ -110,6 +109,7 @@ export class OrlaPhase {
 
   advance(elapsedMs: number): void {
     this.elapsedMs = elapsedMs;
+    this.issueNext();
     const event = ORLA_EVENTS[this.eventIndex];
     const active = event && this.problem(event.id);
     if (event && active && active.stage === 'warning' && this.dispatchStartedAt !== null
@@ -189,11 +189,9 @@ export class OrlaPhase {
         ?? state.problems.find(item => item.status !== 'RESOLVED');
       if (problem) {
         suburbanGameState.selectProblem(problem.id);
-        const nextTeam = problem.requiredTeams?.find(team => !problem.dispatchedTeams.includes(team));
-        if (nextTeam) {
-          suburbanGameState.dispatchTeam(problem.id, nextTeam);
-          this.teamDispatched();
-        }
+        if (!problem.analyzed) { suburbanGameState.analyzeProblem(problem.id); return; }
+        for (const team of problem.requiredTeams ?? []) suburbanGameState.dispatchTeam(problem.id, team);
+        this.teamDispatched();
       }
       return;
     }

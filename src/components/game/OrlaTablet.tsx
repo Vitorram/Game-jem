@@ -21,8 +21,9 @@ function problemCategory(problem: UrbanProblem): string {
 
 export type AnalystTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
 
-export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress }: {
+export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutorialProgress }: {
   onAction: (problemId?: string) => void;
+  onAnalyze?: (problemId: string) => void;
   tutorialStep?: AnalystTutorialStep | null;
   onTutorialProgress?: (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => void;
 }) {
@@ -35,19 +36,30 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
 
   const state = suburbanGameState.snapshot();
   const problems = state.problems;
-  const selected = selectedId !== null;
   const issue = problems.find(problem => problem.id === selectedId)
     ?? problems.find(problem => problem.id === state.selectedProblemId)
     ?? problems.find(problem => problem.status !== 'RESOLVED')
     ?? problems[0];
   const selectedInGame = issue?.id === state.selectedProblemId;
-  const requiredTeams = teams.filter(team => !issue?.requiredTeams || issue.requiredTeams.includes(team.id));
+  const selected = !!issue && (selectedId === issue.id || selectedInGame);
+  const requiredTeams = issue ? teams.filter(team => !issue.requiredTeams || issue.requiredTeams.includes(team.id)) : [];
   const nextTeam = requiredTeams.find(team => !issue?.dispatchedTeams.includes(team.id));
-  const resolved = !issue || issue.status === 'RESOLVED';
+  const resolved = !!issue && issue.status === 'RESOLVED';
   const activeCount = problems.filter(problem => problem.status !== 'RESOLVED').length;
-  const actionLabel = resolved ? 'ARQUIVAR CHAMADO · RECEBER XP' : !selected ? 'SELECIONE UMA OCORRÊNCIA' : !selectedInGame ? 'CONFIRMAR OCORRÊNCIA' : nextTeam ? `ACIONAR ${nextTeam.label.toLocaleUpperCase('pt-BR')}` : 'EQUIPES ACIONADAS';
+  const allDispatched = requiredTeams.length > 0 && requiredTeams.every(team => issue?.dispatchedTeams.includes(team.id));
+  const actionLabel = tutorialStep !== undefined && tutorialStep !== null ? (!selectedInGame ? 'CONFIRMAR CHAMADO' : nextTeam ? 'SOLICITAR EQUIPE' : 'EQUIPES ACIONADAS') : resolved ? 'ARQUIVAR CHAMADO - RECEBER XP' : !selected ? 'ANALISAR CHAMADO' : !allDispatched ? 'SOLICITAR REFOR\u00C7O' : 'EQUIPES EM CAMPO';
   const infrastructureDispatched = issue?.dispatchedTeams.includes('infraestrutura') ?? false;
   const mobilityDispatched = issue?.dispatchedTeams.includes('mobilidade') ?? false;
+
+  useEffect(() => {
+    if (selectedId && !problems.some(problem => problem.id === selectedId)) setSelectedId(null);
+  }, [selectedId, problems]);
+
+  const analyze = (problemId: string) => {
+    setSelectedId(problemId);
+    onTutorialProgress?.('selected');
+    if (tutorialStep === undefined || tutorialStep === null) onAnalyze?.(problemId);
+  };
 
   useEffect(() => {
     if (tutorialStep === 2 && selectedInGame) onTutorialProgress?.('confirmed');
@@ -87,7 +99,7 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
                 const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
                 const tileClass = kind === '-' && rowIndex === 7 ? 'sidewalk' : tiles[kind] ?? 'sand';
                 return <div key={`${rowIndex}-${column}`} role="gridcell" className={`map-tile map-row-${rowIndex} map-col-${column} ${tileClass}${issues.length ? ' has-incident' : ''}`}>
-                  {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { setSelectedId(issues[0].id); onTutorialProgress?.('selected'); event.currentTarget.blur(); }}>
+                  {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { analyze(issues[0].id); event.currentTarget.blur(); }}>
                     <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>
                   </button>}
                   {!issues.length && ['B', 'C', 'E'].includes(kind) && <span className={`map-object object-${kind.toLowerCase()}`}>{kind === 'B' ? '▰' : kind === 'C' ? '□' : '⌂'}</span>}
@@ -107,13 +119,18 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
 
         <div className="tablet-incident-column">
           <div className="tablet-section-title"><span>02 / CENTRAL DE OCORRÊNCIAS</span><b className="active-tag"><i /> {activeCount} ATIVA{activeCount === 1 ? '' : 'S'}</b></div>
+          <div className="tablet-workflow" aria-label="Fluxo de atendimento">
+            <span data-state={!issue ? 'waiting' : issue.analyzed ? 'done' : 'current'}><i>1</i><b>Analisar chamado</b></span>
+            <em aria-hidden="true">›</em>
+            <span data-state={!issue ? 'waiting' : allDispatched ? 'done' : issue.analyzed ? 'current' : 'waiting'}><i>2</i><b>Solicitar reforço</b></span>
+          </div>
           <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
-            {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { setSelectedId(problem.id); onTutorialProgress?.('selected'); event.currentTarget.blur(); }}>
+            {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { analyze(problem.id); event.currentTarget.blur(); }}>
               <span className="incident-icon">{problem.type === 'broken-light-pole' ? 'ϟ' : '!'}</span>
               <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : 'Setor Orla'} · {problem.dispatchedTeams.length}/{problem.requiredTeams?.length ?? 2} equipes</em></span>
               <span className="incident-chevron">›</span>
             </button>)}
-            {!problems.length && <div className="tablet-empty-list">Nenhuma ocorrência registrada.</div>}
+            {!problems.length && <div className="tablet-empty-list">A central está monitorando. O próximo chamado chega no horário previsto.</div>}
           </div>
           <div className={`tablet-detail-card${!selected || !issue ? ' is-unselected' : ''}`}>
             <div className="tablet-detail-heading"><span className="detail-alert">!</span><div><small>RELATÓRIO DE CAMPO</small><b>{selected && issue ? problemTitle(issue) : 'Selecione uma ocorrência'}</b></div></div>
@@ -132,10 +149,8 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
               </div>;
             })}
           </div>
-          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && !nextTeam && selectedInGame)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}>
-            <span>{resolved ? '✦' : !selectedInGame ? '◉' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : 'E'}</kbd>
-          </button>
-          <small className="tablet-action-hint">{resolved ? 'Relatório concluído. Arquive para registrar a experiência e liberar o próximo chamado.' : !selected ? 'Selecione o chamado atual para iniciar o atendimento.' : !selectedInGame ? 'Confirme a ocorrência para liberar o atendimento.' : 'Acione a próxima equipe para continuar o plano.'}</small>
+          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && allDispatched && tutorialStep == null)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : 'E'}</kbd></button>
+          <small className="tablet-action-hint">{!issue ? 'Aguarde o pr\u00F3ximo chamado da central.' : resolved ? 'Relat\u00F3rio conclu\u00EDdo. Arquive para registrar XP e liberar o pr\u00F3ximo chamado.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relat\u00F3rio e confirme a an\u00E1lise para continuar.' : allDispatched ? 'Refor\u00E7o solicitado. Escolha uma equipe liberada para agir.' : 'An\u00E1lise conclu\u00EDda. Solicite refor\u00E7o para liberar a equipe.'}</small>
         </div>
       </div>
       <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>

@@ -179,6 +179,17 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
   const frozen = paused || snapshot.status !== 'playing';
   const urgent = snapshot.status === 'playing' && snapshot.remainingMs > 0 && snapshot.remainingMs <= 30_000;
   const overtime = Math.max(0, snapshot.elapsedMs - 360_000);
+  const currentCall = world.problems[0];
+  const nextCall = ORLA_EVENTS.find(event => event.atMs > snapshot.elapsedMs);
+  const statusMessage = currentCall?.status === 'RESOLVED'
+    ? 'RELATORIO RESOLVIDO - arquive no sistema para receber XP e seguir'
+    : currentCall
+      ? `${currentCall.label.toLocaleUpperCase('pt-BR')} - chamado em atendimento`
+      : nextCall
+        ? `CENTRAL EM MONITORAMENTO - proximo chamado em ${formatTime(nextCall.atMs - snapshot.elapsedMs)}`
+        : snapshot.elapsedMs < 360_000
+          ? `TODOS OS CHAMADOS ATENDIDOS - operacao encerra em ${formatTime(360_000 - snapshot.elapsedMs)}`
+          : 'TEMPO-ALVO ATINGIDO - finalize o atendimento em andamento';
   return (
     <>
       <div className={styles.strip} aria-label="Pedidos da fase">
@@ -192,9 +203,7 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
           <span aria-hidden="true">⏱</span> {overtime ? `+${formatTime(overtime)}` : formatTime(snapshot.remainingMs)}
         </div>
         <div className={styles.phaseStatus} role="status">
-          {snapshot.completedOrders === ORLA_EVENTS.length
-            ? 'OPERAÇÃO CONCLUÍDA · todas as ocorrências foram arquivadas'
-            : `CHAMADO ${snapshot.completedOrders + 1}/${ORLA_EVENTS.length} · resolva e arquive para liberar o próximo`}
+          {statusMessage}
           {world.phase && <span>{world.phase.waitingPedestrians} pedestres esperando · {world.phase.queuedVehicles} carros na fila</span>}
         </div>
       </div>
