@@ -149,6 +149,7 @@ export class OrlaPhase {
           this.service = null;
         }
       } else if (problem) {
+        this.patch(problem.id, { status: 'ACTIVE' });
         this.patch(problem.id, { instruction: 'Serviço pausado. Retorne com Infraestrutura e mantenha a área protegida para continuar.' });
       }
     }
@@ -189,22 +190,17 @@ export class OrlaPhase {
       && problem.status !== 'RESOLVED' && problem.requiredTeams?.includes('infraestrutura')
       && distance(player.position, this.serviceTarget(problem)) <= 1.6)
       .sort((a, b) => distance(player.position, this.serviceTarget(a)) - distance(player.position, this.serviceTarget(b)))[0];
-    if (!nearby) return;
+    if (!nearby || this.service) return;
     if (nearby.id === 'broken-light-pole-1') {
       this.patch(nearby.id, { status: 'MAINTENANCE' });
       this.openRepair('pole');
     } else if (nearby.id === 'sensor-failure') {
-      this.patch(nearby.id, { status: 'MAINTENANCE' });
-      this.openRepair('sensor');
+      this.beginService(nearby.id);
     } else if (nearby.id === 'traffic-signal-failure') {
       this.patch(nearby.id, { status: 'MAINTENANCE' });
       this.openRepair('signal');
-    } else if (nearby.id !== 'minor-collision' || this.traffic.isIncidentProtected()) {
-      if (nearby.id === 'minor-collision' && !this.completedSteps.has(502)) {
-        this.completedSteps.add(502);
-        this.patch(nearby.id, { status: 'MAINTENANCE' });
-        this.openRepair('car');
-      }
+    } else if (nearby.id === 'minor-collision' && this.traffic.isIncidentProtected()) {
+      this.beginService(nearby.id);
     }
   }
 
@@ -313,6 +309,11 @@ export class OrlaPhase {
   private serviceTarget(problem: UrbanProblem): Point {
     // Trabalhar ao lado do veículo permite chegar sem atravessar sua colisão física.
     return problem.id === 'minor-collision' ? { x: problem.position.x, z: problem.position.z - 1.1 } : problem.position;
+  }
+
+  private beginService(id: string): void {
+    this.service = { id, elapsed: 0 };
+    this.patch(id, { status: 'MAINTENANCE' });
   }
 
   private problem(id: string): UrbanProblem | undefined {

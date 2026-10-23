@@ -206,6 +206,7 @@ export class Game {
     if (current instanceof Fase1OrlaScene) {
       current.setTutorialCollisionProtection(true);
       current.setTutorialMovementEnabled(false);
+      current.setTutorialWorkZonePrepared(true);
     }
   }
 
@@ -233,6 +234,7 @@ export class Game {
     this.tutorialStage = 0;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) {
+      current.setTutorialWorkZonePrepared(false);
       current.setTutorialCollisionProtection(false);
       current.setTutorialMovementEnabled(true);
       current.startPhase((id, step) => sessionStore.resolveEvent(id, step));
