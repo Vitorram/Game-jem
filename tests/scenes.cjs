@@ -726,7 +726,7 @@ test('prazo encerra ações, relógio ignora pausa e menu desmonta a sessão', t
   assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 358000);
   game.togglePause(); renderer.loop(100100); renderer.loop(458100);
   assert.equal(statuses.at(-1), 'finished');
-  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 5);
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 6);
   game.interact();
   assert.equal(suburbanGameState.snapshot().selectedProblemId, null);
   game.returnToMenu();

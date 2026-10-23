@@ -63,7 +63,7 @@ export class OrlaPhase {
       this.group.add(ring);
     }
     const sensorPosition = ORLA_EVENTS.find(event => event.id === 'sensor-failure')!.position;
-    this.sensor.position.set(sensorPosition.x, 0, sensorPosition.z);
+    this.sensor.position.set(sensorPosition.x, 0, sensorPosition.z + 0.88);
     const box = new Mesh(this.boxGeometry, this.sensorMaterial);
     box.position.y = 0.4;
     const antenna = new Mesh(this.antennaGeometry, this.sensorMaterial);
@@ -128,7 +128,7 @@ export class OrlaPhase {
       this.patch(rush.id, { instruction: flowing
         ? `Desvio aberto. Mantenha as faixas livres: ${Math.min(8, Math.floor(this.rushFlowSeconds))}/8 s.`
         : ORLA_EVENTS[2].instruction });
-      if (this.rushFlowSeconds >= 8 && !this.completedSteps.has(301)) { this.completedSteps.add(301); this.openRepair('traffic'); }
+      if (this.rushFlowSeconds >= 8 && rush.status !== 'MAINTENANCE' && !this.completedSteps.has(301)) { this.patch(rush.id, { status: 'MAINTENANCE' }); this.openRepair('traffic'); }
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status !== 'RESOLVED' && this.traffic.isIncidentProtected()) {
@@ -248,7 +248,7 @@ export class OrlaPhase {
       }
       if (action === 'release' && this.completedSteps.has(201) && !this.pedestrians.getCrossingProgress().occupied) {
         if (!this.completedSteps.has(202)) {
-          this.completedSteps.add(202);
+          void 0;
           this.patch(crossing.id, { status: 'MAINTENANCE', instruction: 'Travessia protegida. Ajuste o controlador da faixa.' });
           this.openRepair('crossing');
         }

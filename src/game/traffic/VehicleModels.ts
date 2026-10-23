@@ -1,7 +1,7 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry } from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
-export const VEHICLE_KINDS = ['hatch', 'sedan', 'suv', 'pickup', 'bus', 'motorcycle'] as const;
+export const VEHICLE_KINDS = ['hatch', 'sedan', 'suv', 'pickup', 'truck', 'bus', 'motorcycle'] as const;
 export type VehicleKind = typeof VEHICLE_KINDS[number];
 export type VehicleModel = { group: Group; wheels: Mesh[]; brakeLights: Mesh[]; length: number; width: number; kind: VehicleKind };
 
@@ -68,6 +68,25 @@ export class VehicleModels {
       helmet.scale.set(.24, .25, .24); helmet.position.set(0, 1.37, -.09); group.add(helmet);
       part('helmet-visor', '#263c51', 0, 1.39, .1, .35, .12, .11);
       return { group, wheels, brakeLights, length: 1.5, width: .65, kind };
+    }
+    if (kind === 'truck') {
+      const length = 3.15, width = 1.12;
+      part('chassis', '#36434d', 0, .34, 0, width * .86, .2, length * .92);
+      part('cab', color, 0, .86, .95, width * .94, .96, .98);
+      part('windshield', '#729fa8', 0, 1.06, 1.445, width * .78, .38, .025, true);
+      part('cargo-box', '#f4f1ea', 0, 1.04, -.48, width, 1.24, 1.82);
+      part('cargo-stripe', color, 0, .98, -.48, width * 1.01, .16, 1.78, true);
+      for (const side of [-1, 1]) {
+        part('side-window', '#729fa8', side * width * .475, 1.05, 1.02, .025, .34, .44, true);
+        part('mirror', '#29363e', side * width * .54, 1.02, 1.32, .12, .18, .12);
+        part('headlight', '#fff0bb', side * width * .33, .56, length / 2 - .12, .22, .14, .04, false, true);
+        brakeLights.push(part('tail-light', '#ff6958', side * width * .34, .48, -length / 2 + .16, .18, .12, .04, false, true));
+        wheel(side * width * .46, .95, .27);
+        wheel(side * width * .46, -.88, .27);
+      }
+      part('front-bumper', '#d9e0d7', 0, .36, 1.46, width * .92, .14, .12);
+      part('rear-bumper', '#36434d', 0, .34, -1.42, width * .9, .12, .1);
+      return { group, wheels, brakeLights, length, width, kind };
     }
     const bus = kind === 'bus', pickup = kind === 'pickup', suv = kind === 'suv';
     const length = bus ? 3.7 : pickup ? 2.5 : kind === 'sedan' ? 2.35 : suv ? 2.2 : 1.9;

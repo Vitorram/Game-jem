@@ -19,8 +19,8 @@ export const ORLA_CONFIG = {
   sun: {
     color: '#ffdfaa', intensity: 2.8,
     position: { x: -6, y: 14, z: 8 },
-    shadowMapSize: 1024,
-    shadowExtent: 18,
+    shadowMapSize: 2048,
+    shadowExtent: 24,
     shadowNear: 0.5,
     shadowFar: 60,
     shadowBias: -0.0002,

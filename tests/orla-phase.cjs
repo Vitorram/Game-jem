@@ -19,7 +19,8 @@ beforeEach(() => suburbanGameState.reset());
 const problem = id => suburbanGameState.snapshot().problems.find(item => item.id === id);
 function phase() {
   let opened = 0;
-  const scene = new Fase1OrlaScene(undefined, undefined, undefined, () => opened++);
+  let scene;
+  scene = new Fase1OrlaScene(undefined, undefined, undefined, type => { opened++; if (type && type !== 'pole') scene.completeRepairPuzzle(type); });
   const session = new GameSession(ORLA_SESSION_CONFIG);
   session.start();
   scene.startPhase((id, step) => {
@@ -142,7 +143,7 @@ test('colisão exige cone e desvio antes do serviço; recuperação preserva pen
     assert.equal(game.scene.traffic.getIncidentPosition(), null);
     game.jump(325_000);
     assert.equal(suburbanGameState.snapshot().phase.recovery, true);
-    assert.equal(suburbanGameState.snapshot().problems.length, 5);
+    assert.equal(suburbanGameState.snapshot().problems.length, 6);
     assert.equal(problem('sensor-failure').status, 'ACTIVE');
     assert.equal(game.session.snapshot().status, 'playing');
   } finally { game.scene.dispose(); }
@@ -177,6 +178,12 @@ test('rodada contínua de seis minutos combina todos os eventos e permite recupe
     assert.equal(problem('rush-hour').status, 'RESOLVED');
     game.scene.useMobilityHotkey('Digit1');
     game.scene.selectPlayer(3);
+    until(198);
+    game.scene.selectPlayer(1);
+    game.scene.player.setPosition(0, 4.7);
+    game.scene.interact();
+    assert.equal(problem('traffic-signal-failure').status, 'RESOLVED');
+    game.scene.selectPlayer(3);
     until(222);
     game.scene.selectPlayer(1);
     game.scene.player.setPosition(9, 4.7);
@@ -197,7 +204,7 @@ test('rodada contínua de seis minutos combina todos os eventos e permite recupe
     game.scene.player.setPosition(incident.x, incident.z - 1.1);
     game.scene.interact(); game.run(3.1);
     assert.equal(problem('minor-collision').status, 'RESOLVED', JSON.stringify({ service: game.scene.phase.service, position: game.scene.player.position, incident, cones: game.scene.traffic.cones.map(c => ({x:c.x, lane:c.lane.id})), roads:game.scene.traffic.getRoadStates().map(r => ({id:r.id,status:r.status})) }));
-    assert.equal(game.session.snapshot().completedOrders, 5);
+    assert.equal(game.session.snapshot().completedOrders, 6);
     assert.equal(game.session.snapshot().status, 'playing');
     game.scene.selectPlayer(2);
     game.scene.player.setPosition(cone.x, cone.z);
@@ -211,6 +218,6 @@ test('rodada contínua de seis minutos combina todos os eventos e permite recupe
     until(360);
     assert.equal(game.session.snapshot().status, 'finished');
     assert.equal(game.session.snapshot().expiredOrders, 0);
-    assert.equal(suburbanGameState.snapshot().problems.length, 5);
+    assert.equal(suburbanGameState.snapshot().problems.length, 6);
   } finally { game.scene.dispose(); }
 });

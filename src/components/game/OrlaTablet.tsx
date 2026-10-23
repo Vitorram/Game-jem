@@ -85,7 +85,7 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
             <div className="tablet-map" role="grid" aria-label="Mini mapa da Orla">
               {ORLA_MAP.rows.flatMap((row, rowIndex) => Array.from(row, (kind, column) => {
                 const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
-                const tileClass = kind === '-' && rowIndex === 7 ? 'sidewalk' : tiles[kind] ?? 'sand';
+                const tileClass = kind === '-' && rowIndex === 8 ? 'sidewalk' : tiles[kind] ?? 'sand';
                 return <div key={`${rowIndex}-${column}`} role="gridcell" className={`map-tile map-row-${rowIndex} map-col-${column} ${tileClass}${issues.length ? ' has-incident' : ''}`}>
                   {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { setSelectedId(issues[0].id); onTutorialProgress?.('selected'); event.currentTarget.blur(); }}>
                     <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>

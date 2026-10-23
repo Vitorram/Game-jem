@@ -64,6 +64,28 @@ export class Fase1OrlaScene implements GameScene {
     const radius = GRID_CONFIG.playerRadius;
     const left = crate.x - 0.95 - radius, right = crate.x + 0.95 + radius;
     const near = crate.z - 0.78 - radius, far = crate.z + 0.78 + radius;
+    const cabin = this.map.spawns[2];
+    const obstacles = [
+      { cx: crate.x, cz: crate.z, hx: 0.95, hz: 0.78 },
+      { cx: cabin.x, cz: cabin.z, hx: 1.18, hz: 1.06 },
+      { cx: this.map.cellCenter(4, 8).x, cz: this.map.cellCenter(4, 8).z - 0.34, hx: 1.22, hz: 0.32 },
+      { cx: this.map.cellCenter(17, 8).x, cz: this.map.cellCenter(17, 8).z - 0.34, hx: 1.22, hz: 0.32 },
+      { cx: -9, cz: 5.58, hx: 0.22, hz: 0.22 },
+    ];
+    let { x: rx, z: rz } = resolved;
+    for (const obs of obstacles) {
+      const oLeft = obs.cx - obs.hx - radius, oRight = obs.cx + obs.hx + radius;
+      const oNear = obs.cz - obs.hz - radius, oFar = obs.cz + obs.hz + radius;
+      if (from.z > oNear && from.z < oFar) {
+        if (from.x <= oLeft && rx > oLeft) rx = oLeft;
+        if (from.x >= oRight && rx < oRight) rx = oRight;
+      }
+      if (rx > oLeft && rx < oRight) {
+        if (from.z <= oNear && rz > oNear) rz = oNear;
+        if (from.z >= oFar && rz < oFar) rz = oFar;
+      }
+    }
+    return { x: rx, z: rz };
     let { x, z } = resolved;
     if (from.z > near && from.z < far) {
       if (from.x <= left && x > left) x = left;
