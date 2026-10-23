@@ -188,6 +188,14 @@ h1 span { color: var(--accent); }
 .ability-reset { width: 100%; background: transparent; border: 1px solid #61777b; color: #c6d9d6; }
 .ability-finding { display: grid; gap: 8px; font-size: 12px; }
 .ability-finding button { background: #663e35; color: #ffe4dc; }
+.repair-test-panel { position: absolute; top: 176px; left: 28px; z-index: 2; width: 245px; padding: 16px; border: 1px solid #5b7a7d; border-radius: 14px; background: #102127ed; }
+.repair-test-panel h2 { margin: 8px 0; font-size: 18px; }
+.repair-test-panel p { margin: 0 0 12px; color: #bdcecd; font-size: 11px; line-height: 1.45; }
+.repair-test-options { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.repair-test-options button { padding: 9px 7px; border: 1px solid #627c80; background: #233c44; color: #e5f3ee; font-size: 11px; }
+.repair-test-options button:last-child { grid-column: 1 / -1; }
+.repair-puzzle-cancel { position: absolute; top: 36px; right: 0; padding: 7px 10px; border: 1px solid #61777b; background: #233c44; color: #e5f3ee; font-size: 10px; }
+@media (max-width: 600px) { .repair-test-panel { top: auto; bottom: 66px; left: 12px; width: 195px; padding: 10px; }.repair-test-panel h2 { font-size: 15px; }.repair-test-panel p { font-size: 10px; margin-bottom: 8px; }.repair-test-options { gap: 5px; }.repair-test-options button { padding: 7px 5px; font-size: 10px; } }
 @media (min-width: 901px) and (min-height: 760px) { .ability-panel { max-height: calc(100dvh - 220px); right: 28px; }.touch-controls { right: 350px; } }
 @media (max-width: 600px) { .ability-panel { top: 165px; right: 12px; width: 235px; max-height: calc(100dvh - 440px); padding: 12px; }.ability-panel h2 { font-size: 16px; }.ability-map-wrap { width: 160px; }.ability-help { font-size: 11px; } }
 @media (max-height: 650px) { .ability-panel { top: 165px; bottom: 60px; max-height: none; width: 260px; }.touch-controls { right: 310px; }.ability-map-wrap { width: 140px; } }
@@ -493,6 +501,67 @@ h1 span { color: var(--accent); }
 .repair-puzzle-chip { position: absolute; top: 4px; right: 0; padding: 7px 9px; border: 2px solid #182f3a; border-radius: 8px; background: #efbd58; color: #203b43; box-shadow: 0 3px 0 #a57937; font: 1000 9px Arial,sans-serif; }
 .repair-puzzle-card h2 { margin: 5px 0 6px; color: #fff1c8; font: 1000 clamp(18px, 4vw, 25px)/1.05 Arial,sans-serif; letter-spacing: .02em; }
 .repair-puzzle-header p { margin: 0; color: #c1d4c8; font: 700 12px/1.4 Arial,sans-serif; }
+.signal-repair-card { border-color: #182a36; background: linear-gradient(180deg,#f2dfb8 0 10px,#183746 10px 100%); box-shadow: 0 8px 0 #0d202b,0 20px 55px #0009,inset 0 0 0 2px #ffffff25; }
+.signal-repair-card .repair-puzzle-header { padding-right: 150px; }
+.signal-repair-card .repair-puzzle-kicker { color: #8fd9c6; }
+.signal-board-frame { padding: 9px 10px 5px; border: 2px solid #142e39; border-radius: 13px; background: linear-gradient(145deg,#e7d5ad,#9eaa91); box-shadow: inset 0 0 0 2px #fff5d4,0 5px 0 #0d202b; }
+.signal-board-labels { display: grid; grid-template-columns: 1fr 1fr 1fr; padding: 0 5% 3px; color: #294b50; font: 900 8px Arial,sans-serif; letter-spacing: .16em; }
+.signal-board-labels span:nth-child(2) { text-align: center; }.signal-board-labels span:last-child { text-align: right; }
+.signal-cable-board { display: block; width: 100%; height: auto; overflow: visible; }
+.signal-board-shell { fill: url(#signal-metal); stroke: #74838b; stroke-width: 2; }
+.signal-controller { fill: url(#signal-panel); stroke: #46545c; stroke-width: 2; filter: drop-shadow(0 5px 5px #0009); }
+.signal-controller-seam { stroke: #313e45; stroke-width: 2; }.signal-screw { fill: #a4afb4; stroke: #12191e; stroke-width: 2; }
+.signal-wire-shadow { fill: none; stroke: #172c33; stroke-width: 17; stroke-linecap: round; filter: drop-shadow(0 2px 2px #0008); }
+.signal-wire-strand { fill: none; stroke-width: 9; stroke-linecap: round; filter: drop-shadow(0 0 3px currentColor); transition: filter .2s,stroke-width .2s; }
+.signal-wire.is-connected .signal-wire-strand { stroke-dasharray: 1; stroke-dashoffset: 0; animation: signal-wire-draw .5s ease-out both; }
+.signal-wire-tip { fill: #9aa5aa; stroke: #303d44; stroke-width: 4; }
+.signal-terminal { cursor: pointer; outline: none; }.signal-terminal-hit { fill: transparent; stroke: transparent; stroke-width: 2; transition: stroke .15s,filter .15s; }
+.signal-terminal-metal { fill: url(#signal-metal); stroke: #f2d991; stroke-width: 2; }.signal-terminal-face { stroke: #142e39; stroke-width: 2; }
+.signal-terminal-symbol { fill: #11181d; text-anchor: middle; font: 1000 17px Arial,sans-serif; pointer-events: none; }
+.signal-terminal-pin { fill: #c1c9cc; stroke: #252f35; stroke-width: 3; }
+.signal-terminal:hover .signal-terminal-hit,.signal-terminal:focus .signal-terminal-hit,.signal-terminal.is-selected .signal-terminal-hit { stroke: #fff2a8; filter: drop-shadow(0 0 8px #f9dc78); }
+.signal-terminal.is-connected .signal-terminal-face { stroke: #d8f8e3; stroke-width: 3; }
+.signal-terminal.is-error .signal-terminal-hit { stroke: #ff6d68; filter: drop-shadow(0 0 8px #ff5148); }
+.signal-status-light { fill: #e8a64d; stroke: #6a4926; stroke-width: 4; filter: drop-shadow(0 0 3px #e8a64d66); transition: all .3s; }
+.signal-status-light.is-active { fill: #ffe17a; filter: drop-shadow(0 0 9px #ffe17a); }
+.signal-status-light.is-on { fill: #7be5a3; stroke: #b8ffd0; filter: drop-shadow(0 0 13px #7be5a3); }
+.signal-status-mark { stroke: #172127; stroke-width: 3; stroke-linecap: round; pointer-events: none; }
+.signal-repair-status { margin-top: 11px; background: #203f4a; border-color: #3b6061; color: #e5e2bd; }
+.signal-repair-status i { background: #e8a64d; box-shadow: 0 0 8px #e8a64d; }
+.signal-repair-status.is-error { border-color: #bd5753; color: #ffb1aa; }
+.signal-repair-card.is-solved .signal-repair-status { border-color: #72d99c; color: #baf5c9; }
+.signal-repair-card.is-solved .signal-wire-strand { filter: drop-shadow(0 0 6px currentColor); }
+@keyframes signal-wire-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+.flow-repair-card { width: min(620px,100%); }
+.flow-board-wrap { width: min(100%,470px); margin: 0 auto 12px; padding: 10px; border: 2px solid #142e39; border-radius: 14px; background: linear-gradient(145deg,#e7d5ad,#a9b29a); box-shadow: inset 0 0 0 2px #fff5d4,0 5px 0 #0d202b; }
+.flow-board-legend { display: flex; justify-content: space-between; gap: 5px; margin: 0 2px 8px; color: #294b50; font: 900 8px Arial,sans-serif; letter-spacing: .08em; }
+.flow-board-legend span { display: flex; align-items: center; gap: 4px; }.flow-board-legend i { width: 8px; height: 8px; border: 2px solid #183746; border-radius: 50%; background: #f2bd58; }.flow-board-legend .flow-legend-route { background: #62c09a; }.flow-board-legend .flow-legend-destination { background: #ff806d; }
+.flow-board { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 3px; width: 100%; aspect-ratio: 1; padding: 5px; border: 2px solid #142e39; border-radius: 10px; background-color: #203b43; background-image: linear-gradient(#67817b55 1px,transparent 1px),linear-gradient(90deg,#67817b55 1px,transparent 1px); background-size: 20% 20%; box-shadow: inset 0 0 0 2px #f2dfb844; }
+.flow-cell { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; aspect-ratio: 1; padding: 0; overflow: hidden; border: 1px solid #526d6c; border-radius: 7px; background: linear-gradient(145deg,#344f54,#233d44); color: #203b43; box-shadow: inset 0 1px #ffffff12; }
+.flow-cell-empty { background: #1b343b99; box-shadow: inset 0 0 0 1px #ffffff08; }
+.flow-cell-empty span { width: 4px; height: 4px; border-radius: 50%; background: #81948a; opacity: .5; }
+.flow-cell.is-rotatable { cursor: pointer; background: linear-gradient(145deg,#ead9b4,#b8a77e); border: 2px solid #183746; box-shadow: 0 3px 0 #0d202b,inset 0 0 0 2px #fff4cf; transition: transform .15s,border-color .15s,filter .15s; }
+.flow-cell.is-rotatable:hover:not(:disabled),.flow-cell.is-rotatable:focus-visible { z-index: 2; border-color: #f2bd58; outline: 3px solid #f2bd58; outline-offset: 1px; transform: translateY(-2px); }
+.flow-cell.is-selected { border-color: #f2bd58; box-shadow: 0 0 0 3px #f2bd5866,0 3px 0 #0d202b; }
+.flow-cell.is-on-route { background: linear-gradient(145deg,#b1ddc1,#78bca3); }
+.flow-cell.is-terminal { background: linear-gradient(145deg,#f4d98e,#c89d4b); border: 2px solid #183746; box-shadow: 0 3px 0 #0d202b,inset 0 0 0 2px #fff4cf; cursor: default; }
+.flow-tile-graphic { display: block; width: 100%; height: 100%; overflow: visible; }
+.flow-road-shadow,.flow-road-line,.flow-road-center { fill: none; stroke-linecap: round; }
+.flow-road-shadow { stroke: #142e39; stroke-width: 34; }
+.flow-road-line { stroke: #566b6c; stroke-width: 26; }
+.flow-road-center { stroke: #f2bd58; stroke-width: 2.5; stroke-dasharray: 8 7; }
+.flow-cell.is-on-route .flow-road-line { stroke: #348e7d; }
+.flow-cell.is-on-route .flow-road-center { stroke: #fff1a8; animation: flow-lane-motion 1.3s linear infinite; }
+.flow-cell.is-solved .flow-road-line { stroke: #4aa987; }
+.flow-road-joint { fill: #d4bc85; stroke: #203b43; stroke-width: 4; }
+.flow-cell.is-on-route .flow-road-joint { fill: #b8f0c9; }
+.flow-terminal-label { fill: #183746; text-anchor: middle; font: 1000 15px Arial,sans-serif; letter-spacing: .02em; }
+.flow-turn-indicator { fill: #fff1c8; stroke: #183746; stroke-width: 2; }
+.flow-cell.is-terminal .flow-road-line { stroke: #344f54; }
+.flow-cell.is-terminal .flow-road-center { stroke: #fff1a8; }
+.flow-repair-status { margin-top: 11px; }.flow-repair-status.is-on { border-color: #72d99c; color: #baf5c9; }
+.flow-repair-card.is-solved .flow-board-wrap { border-color: #72d99c; box-shadow: inset 0 0 0 2px #d7ffe2,0 5px 0 #0d202b,0 0 18px #62c09a55; }
+@keyframes flow-lane-motion { to { stroke-dashoffset: -30; } }
 .circuit-board { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 6px; width: min(100%, 416px); aspect-ratio: 1; margin: 3px auto 12px; padding: 8px; border: 3px solid #112b36; border-radius: 15px; background-color: #d8c49b; background-image: linear-gradient(#b59f7480 1px,transparent 1px),linear-gradient(90deg,#b59f7480 1px,transparent 1px); background-size: 25% 25%; box-shadow: inset 0 0 0 2px #f4e4bd,0 5px 0 #0d2632; }
 .circuit-cell { position: relative; display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; border: 2px solid #1b3944; border-radius: 11px; background: #f2dfb8; box-shadow: 0 3px 0 #b39b6d; }
 button.circuit-cell { padding: 0; color: inherit; cursor: pointer; appearance: none; }

@@ -86,6 +86,7 @@ export class Fase1OrlaScene implements GameScene {
   private returningConeToCrate = false;
   private tutorialMovementEnabled = true;
   private tutorialCollisionProtected = false;
+  private tutorialWorkZonePrepared = false;
   private collisionRecovery: { player: Player; elapsed: number; from: { x: number; z: number }; spawn: { x: number; z: number }; push: { x: number; z: number }; respawned: boolean } | null = null;
   private collisionInvulnerability = 0;
   private phase: OrlaPhase | null = null;
@@ -348,7 +349,15 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   private getWorkZoneReadiness(position: { x: number; z: number }) {
+    // O treino já apresenta a área como isolada pela Mobilidade. Não deixe o
+    // tráfego de demonstração impedir a etapa de abrir a oficina do poste.
+    if (this.tutorialWorkZonePrepared) return { prepared: true, reason: null, nearbyVehicles: 0 } as const;
     return this.traffic.getWorkZoneReadiness(position, this.activeMobility.countCyclistsInWorkZone(position));
+  }
+
+  setTutorialWorkZonePrepared(prepared: boolean): void {
+    this.tutorialWorkZonePrepared = prepared;
+    this.updateProblemPresentation();
   }
 
   configureCamera(camera: PerspectiveCamera, aspect: number, closeView = true): void {

@@ -46,6 +46,7 @@ export default function GameCanvas() {
   const [interactionPrompt, setInteractionPrompt] = useState<string | null>(null);
   const [repairPuzzleOpen, setRepairPuzzleOpen] = useState(false);
   const [repairPuzzleType, setRepairPuzzleType] = useState<RepairPuzzleType>('pole');
+  const [testPuzzleType, setTestPuzzleType] = useState<Exclude<RepairPuzzleType, 'pole'> | null>(null);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
 
@@ -197,6 +198,7 @@ export default function GameCanvas() {
       )}
       {isOriginalOrla && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
+      {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
         {isAnalystTablet && <OrlaTablet onAction={id => { if (id && analystTutorialStep === null) game.current?.selectProblem(id); game.current?.interact(); }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
@@ -221,6 +223,17 @@ export default function GameCanvas() {
         {!isLaboratory && interactionPrompt && <div className={`interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`} role="status"><kbd>E</kbd> {interactionPrompt}</div>}
 
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
+        {isLaboratory && <aside className="repair-test-panel" aria-label="Testar quebra-cabeças de reparo">
+          <span className="ability-kicker">OFICINA · TESTE ISOLADO</span>
+          <h2>Quebra-cabeças</h2>
+          <p>Abra qualquer reparo sem iniciar uma ocorrência.</p>
+          <div className="repair-test-options">
+            {([
+              ['signal', 'Semáforo'], ['crossing', 'Travessia'], ['traffic', 'Fluxo de vias'],
+              ['sensor', 'Sensor'], ['car', 'Veículo'],
+            ] as const).map(([type, label]) => <button key={type} type="button" onClick={() => setTestPuzzleType(type)}>{label}</button>)}
+          </div>
+        </aside>}
         {analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>
