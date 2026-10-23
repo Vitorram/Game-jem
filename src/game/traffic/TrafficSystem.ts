@@ -5,6 +5,14 @@ import type { GridMap } from '../map/GridMap';
 import { suburbanGameState, type RoadState } from '../core/GameState';
 import { ORLA_CROSSING } from '../config';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
+import { VehicleModels, type VehicleKind } from './VehicleModels';
+
+const FLEET_SEQUENCE: readonly VehicleKind[] = [
+  'sedan', 'motorcycle', 'bus', 'truck', 'hatch', 'suv', 'pickup', 'motorcycle',
+  'sedan', 'truck', 'hatch', 'motorcycle', 'suv', 'bus', 'pickup', 'sedan',
+  'motorcycle', 'hatch', 'pickup', 'suv',
+];
+const FLEET_COLORS = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84', '#5c9c6b', '#d97a43'] as const;
 
 type Lane = {
   id: string;
@@ -77,8 +85,8 @@ export class TrafficSystem {
   private readonly cabinGeometry = new BoxGeometry(0.62, 0.3, 0.46);
   private readonly wheelGeometry = new CylinderGeometry(0.1, 0.1, 0.08, 10);
   private readonly roadGeometry = new BoxGeometry(1, 0.035, 1.78);
-  private readonly connectorGeometry = new BoxGeometry(0.72, 0.045, 2.05);
-  private readonly barrierGeometry = new BoxGeometry(0.15, 0.12, 1.5);
+  private readonly connectorGeometry = new BoxGeometry(0.84, 0.045, 1.05);
+  private readonly barrierGeometry = new BoxGeometry(0.15, 0.14, 0.84);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
   private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
     .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
@@ -119,6 +127,8 @@ export class TrafficSystem {
   private readonly pedestrianCrossingX = ORLA_CROSSING.centerX;
   /** Posição do personagem a pé, usada para frear e para detectar atropelamento. */
   private playerPosition: { x: number; z: number } | null = null;
+  private readonly vehicleModels = new VehicleModels();
+  private spawnedCount = 0;
   private disposed = false;
 
   constructor(map: GridMap) {
@@ -129,18 +139,17 @@ export class TrafficSystem {
     arrowShape.moveTo(-0.38, -0.16); arrowShape.lineTo(0.05, -0.16); arrowShape.lineTo(0.05, -0.3);
     arrowShape.lineTo(0.42, 0); arrowShape.lineTo(0.05, 0.3); arrowShape.lineTo(0.05, 0.16); arrowShape.lineTo(-0.38, 0.16); arrowShape.closePath();
     this.directionGeometry = new ShapeGeometry(arrowShape);
-    const mainRoadZ = map.cellCenter(0, map.rows - 1).z;
-    const roadLowEdge = mainRoadZ - map.tileSize * 1.5;
-    const escapeRoadZ = roadLowEdge + map.tileSize * 0.2;
+    const roadLowEdge = map.depth / 2 - map.tileSize * 3;
+    const escapeRoadZ = roadLowEdge + 0.46;
     this.lanes = [
-      this.createLane('orla-eastbound', 1, roadLowEdge + map.tileSize * 0.6, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-eastbound-2', 1, roadLowEdge + map.tileSize, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-westbound', -1, roadLowEdge + map.tileSize * 1.4, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-westbound-2', -1, roadLowEdge + map.tileSize * 1.8, 'PRINCIPAL', 100, 1),
+      this.createLane('orla-eastbound', 1, roadLowEdge + 1.4, 'PRINCIPAL', 100, 1),
+      this.createLane('orla-eastbound-2', 1, roadLowEdge + 2.36, 'PRINCIPAL', 100, 1),
+      this.createLane('orla-westbound', -1, roadLowEdge + 3.76, 'PRINCIPAL', 100, 1),
+      this.createLane('orla-westbound-2', -1, roadLowEdge + 4.72, 'PRINCIPAL', 100, 1),
       this.createLane('orla-escape', 1, escapeRoadZ, 'ESCAPE', ESCAPE_CAPACITY, 0, 'blocked'),
     ];
     this.connections = this.createConnections();
-    this.createEscapeConnectors(mainRoadZ, escapeRoadZ);
+    this.createEscapeConnectors(roadLowEdge + 1.4, escapeRoadZ);
     this.lanes.forEach((lane, laneIndex) => {
       if (lane.type === 'ESCAPE') return;
       this.spawnTimers.set(lane.id, 1.4 + laneIndex * 0.65);
@@ -178,12 +187,14 @@ export class TrafficSystem {
   private createLane(id: string, direction: 1 | -1, z: number, type: Lane['type'], capacity: number, priority: number, initialStatus: Lane['status'] = 'open'): Lane {
     const arrows = new Group();
     arrows.name = `direction-markers-${id}`;
-    const count = type === 'ESCAPE' ? 5 : 7;
+    const count = type === 'ESCAPE' ? 6 : 8;
     for (let i = 0; i < count; i++) {
+      const arrowX = this.minX + this.width * (i + 0.5) / count;
+      if (Math.abs(arrowX - this.pedestrianCrossingX) < 2.15) continue;
       const marker = new Mesh(this.directionGeometry, type === 'ESCAPE' ? this.escapeDirectionMaterial : this.directionMaterial);
       marker.rotation.x = -Math.PI / 2;
       marker.rotation.z = direction === 1 ? 0 : Math.PI;
-      marker.position.set(this.minX + this.width * (i + 0.5) / count, 0.055, z);
+      marker.position.set(arrowX, 0.055, z);
       arrows.add(marker);
     }
     this.group.add(arrows);
@@ -213,10 +224,10 @@ export class TrafficSystem {
       connector.position.set(x, 0.012, (mainZ + escapeZ) / 2);
       this.group.add(connector);
     }
-    // A clear asphalt strip makes the escape lane legible even when it is closed.
+    // Faixa de escape com largura proporcional às faixas principais (0.92m).
     const road = new Mesh(this.roadGeometry, this.roadMaterial);
     road.scale.x = this.width;
-    road.scale.z = 0.8 / 1.78;
+    road.scale.z = 0.92 / 1.78;
     road.position.set(0, 0, escapeZ);
     this.group.add(road);
   }
@@ -594,7 +605,7 @@ export class TrafficSystem {
     if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= MAX_VEHICLES_PER_LANE) return false;
     const entryX = spawnX ?? (lane.direction === 1 ? this.minX + VEHICLE_LENGTH / 2 : this.minX + this.width - VEHICLE_LENGTH / 2);
     const entryIsClear = this.vehicles.every(vehicle => {
-      if (Math.abs(vehicle.mesh.position.z - lane.z) >= 0.73) return true;
+      if (Math.abs(vehicle.mesh.position.z - lane.z) >= 1.02) return true;
       return Math.abs(vehicle.mesh.position.x - entryX) >= SAFE_GAP;
     });
     if (!entryIsClear) return false;
@@ -824,7 +835,7 @@ export class TrafficSystem {
     if ((!avoidingCone && vehicle.lane.status !== 'blocked')
       || vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) return;
     const compatible = this.lanes.filter(lane => lane.type === 'PRINCIPAL' && lane !== vehicle.lane
-      && Math.abs(lane.z - vehicle.lane.z) <= 0.9
+      && Math.abs(lane.z - vehicle.lane.z) <= 1.15
       && lane.direction === vehicle.lane.direction && !this.hasConeNearLane(lane, vehicle.mesh.position.x, LANE_CHANGE_LOOKAHEAD) && lane.status === 'open');
     const target = compatible
       .filter(lane => this.vehicles.filter(other => other !== vehicle && other.lane === lane)
@@ -846,7 +857,7 @@ export class TrafficSystem {
     let nearest = this.width;
     for (const other of this.vehicles) {
       if (other === vehicle) continue;
-      const lateralOverlap = Math.abs(other.mesh.position.z - vehicle.mesh.position.z) < 0.73;
+      const lateralOverlap = Math.abs(other.mesh.position.z - vehicle.mesh.position.z) < 1.02;
       if (other.lane !== vehicle.lane && !lateralOverlap) continue;
       const distance = (other.mesh.position.x - vehicle.mesh.position.x) * vehicle.lane.direction;
       if (distance > 0.001) nearest = Math.min(nearest, distance);
@@ -855,6 +866,22 @@ export class TrafficSystem {
   }
 
   private makeVehicle(bodyMaterial: MeshStandardMaterial): Group {
+    const vehicle = new Group();
+    vehicle.name = 'traffic-vehicle';
+    const seqIndex = this.spawnedCount++;
+    const kind = FLEET_SEQUENCE[seqIndex % FLEET_SEQUENCE.length];
+    const color = FLEET_COLORS[seqIndex % FLEET_COLORS.length];
+    const model = this.vehicleModels.create(kind, color);
+    model.group.rotation.y = Math.PI / 2;
+    const scale = kind === 'bus' ? 0.42 : kind === 'truck' ? 0.45 : kind === 'motorcycle' ? 0.56 : 0.52;
+    model.group.scale.setScalar(scale);
+    model.group.position.y = -0.27;
+    vehicle.add(model.group);
+    void bodyMaterial;
+    return vehicle;
+  }
+
+  private makeLegacyVehicle(bodyMaterial: MeshStandardMaterial): Group {
     const vehicle = new Group();
     vehicle.name = 'traffic-vehicle';
     const body = new Mesh(this.bodyGeometry, bodyMaterial);
@@ -873,6 +900,7 @@ export class TrafficSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.vehicleModels.dispose();
     [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
     [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
     this.group.clear();

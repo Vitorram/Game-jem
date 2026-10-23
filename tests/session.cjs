@@ -244,7 +244,7 @@ test('Orla emite cinco eventos nos horários exatos e mantém os seis minutos ap
   game.start();
   assert.equal(game.snapshot().remainingMs, 360_000);
   assert.equal(game.snapshot().orders.length, 0);
-  for (const [index, at] of [30_000, 85_000, 150_000, 215_000, 280_000].entries()) {
+  for (const [index, at] of [30_000, 85_000, 150_000, 190_000, 215_000, 280_000].entries()) {
     game.advance(at - game.snapshot().elapsedMs - 1);
     assert.equal(game.snapshot().orders.length, 0);
     const arrivals = game.advance(1).filter(event => event.type === 'order-arrived');
@@ -259,7 +259,7 @@ test('Orla emite cinco eventos nos horários exatos e mantém os seis minutos ap
     assert.deepEqual(game.finish(), []);
     assert.equal(game.snapshot().status, 'playing');
   }
-  assert.equal(game.snapshot().completedOrders, 5);
+  assert.equal(game.snapshot().completedOrders, 6);
   assert.deepEqual(game.advance(45_000), []);
   assert.equal(game.snapshot().elapsedMs, 325_000);
   assert.deepEqual(game.advance(34_999), []);
@@ -274,7 +274,7 @@ test('eventos da Orla podem ser resolvidos fora de ordem e pendências só expir
   game.start();
   game.advance(325_000);
   const orders = game.snapshot().orders;
-  assert.equal(orders.length, 5);
+  assert.equal(orders.length, 6);
   assert.equal(game.snapshot().expiredOrders, 0);
   const sensor = orders.find(order => order.definitionId === 'sensor-failure');
   assert.equal(game.resolveRisk(sensor.id, 401).at(-1).type, 'order-completed');
@@ -285,7 +285,7 @@ test('eventos da Orla podem ser resolvidos fora de ordem e pendências só expir
   assert.deepEqual(game.snapshot(), paused);
   game.resume();
   game.advance(35_000);
-  assert.equal(game.snapshot().expiredOrders, 4);
+  assert.equal(game.snapshot().expiredOrders, 5);
   assert.equal(game.snapshot().completedOrders, 1);
   assert.deepEqual(game.finish(), []);
   game.start();

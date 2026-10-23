@@ -123,61 +123,65 @@ export class ActiveMobilitySystem {
   }
 
   private createCrossingAndRamps(): void {
-    // 1. Faixa de pedestres zebrada oficial na avenida (barras paralelas ao fluxo dos carros)
-    const stripeCount = 9;
-    const startZ = this.roadNorthEdgeZ + 0.32;
-    const endZ = this.roadSouthEdgeZ - 0.32;
+    // 1. Faixa de pedestres zebrada oficial na avenida (Z = 6.26 a 10.94, preservando o refúgio central em Z = 9.06)
+    const stripeCount = 11;
+    const startZ = this.roadNorthEdgeZ + 0.26;
+    const endZ = this.roadSouthEdgeZ - 1.06;
+    const medianZ = this.roadSouthEdgeZ - 2.94;
     const stepZ = (endZ - startZ) / (stripeCount - 1);
 
     for (let i = 0; i < stripeCount; i++) {
       const z = startZ + i * stepZ;
+      if (Math.abs(z - medianZ) < 0.25) continue;
       this.addBox(
         this.group,
         `crosswalk-stripe-${i + 1}`,
         this.white,
         CROSSING_X,
-        -0.006,
+        0.002,
         z,
         1.58,
         0.024,
-        0.26,
+        0.24,
       );
     }
 
     // 2. Linhas de retenção (Stop Lines) antes da faixa para cada sentido da avenida
-    // Sentido Leste (Z = 6.18 a 8.28): para antes de X = CROSSING_X - 1.52
-    const eastboundStopZ = this.roadSouthEdgeZ - 2.4;
-    const westboundStopZ = this.roadSouthEdgeZ - 0.8;
-    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.52, -0.006, eastboundStopZ, 0.2, 0.024, 1.8);
-    // Sentido Oeste (Z = 8.52 a 9.84): para antes de X = CROSSING_X + 1.52
-    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.52, -0.006, westboundStopZ, 0.2, 0.024, 1.8);
+    const eastboundStopZ = this.roadNorthEdgeZ + 1.46;
+    const westboundStopZ = this.roadSouthEdgeZ - 1.79;
+    this.addBox(this.group, 'crosswalk-stop-line-eastbound', this.white, CROSSING_X - 1.48, 0.002, eastboundStopZ, 0.18, 0.024, 2.64);
+    this.addBox(this.group, 'crosswalk-stop-line-westbound', this.white, CROSSING_X + 1.48, 0.002, westboundStopZ, 0.18, 0.024, 1.74);
 
-    // 3. Travessia de pedestres demarcada sobre a ciclovia (Z = 2.24 a 3.76)
+    // 3. Travessia de pedestres demarcada sobre a ciclovia (Row 7: Z = 2.0 a 4.0)
     for (let i = 0; i < 4; i++) {
       const z = this.cycleCenterZ - 0.66 + i * 0.44;
-      this.addBox(this.group, `cycleway-crosswalk-stripe-${i + 1}`, this.white, CROSSING_X, -0.001, z, 1.32, 0.014, 0.22);
+      this.addBox(this.group, `cycleway-crosswalk-stripe-${i + 1}`, this.white, CROSSING_X, 0.002, z, 1.32, 0.016, 0.21);
     }
     // Linhas de parada para bicicletas antes da faixa na ciclovia
-    this.addBox(this.group, 'cycleway-stop-west', this.white, CROSSING_X - 0.95, -0.001, this.cycleCenterZ, 0.1, 0.014, 1.62);
-    this.addBox(this.group, 'cycleway-stop-east', this.white, CROSSING_X + 0.95, -0.001, this.cycleCenterZ, 0.1, 0.014, 1.62);
+    this.addBox(this.group, 'cycleway-stop-west', this.white, CROSSING_X - 0.95, 0.002, this.cycleCenterZ, 0.1, 0.016, 1.68);
+    this.addBox(this.group, 'cycleway-stop-east', this.white, CROSSING_X + 0.95, 0.002, this.cycleCenterZ, 0.1, 0.016, 1.68);
 
-    // 4. Rampas de acessibilidade (guias rebaixadas) e piso tátil de alerta (Norte e Sul)
-    this.buildAccessibilityRamp('north', CROSSING_X, this.roadNorthEdgeZ - 0.1, this.roadNorthEdgeZ - 0.36, 1);
-    this.buildAccessibilityRamp('south', CROSSING_X, this.roadSouthEdgeZ + 0.1, this.roadSouthEdgeZ + 0.36, -1);
+    // 4. Rampas de acessibilidade (guias rebaixadas) e piso tátil de alerta (Norte, Canteiro e Sul)
+    this.buildAccessibilityRamp('north', CROSSING_X, this.roadNorthEdgeZ - 0.06, this.roadNorthEdgeZ - 0.34, 1, 0);
+    this.addBox(this.group, 'tactile-directional-path', this.tactileYellow, CROSSING_X, 0.022, this.northSidewalkZ - 0.08, 0.34, 0.01, 1.18);
+    this.addBox(this.group, 'tactile-median-refuge', this.tactileYellow, CROSSING_X, 0.032, medianZ, 1.48, 0.012, 0.24);
+    this.buildAccessibilityRamp('south', CROSSING_X, this.roadSouthEdgeZ - 0.74, this.roadSouthEdgeZ - 0.48, -1, 0.016);
 
-    // Piso tátil na chegada da calçada norte junto à ciclovia
-    this.addBox(this.group, 'tactile-cycleway-edge', this.tactileYellow, CROSSING_X, 0.024, this.northSidewalkZ - 0.84, 1.48, 0.01, 0.22);
+    // Guias rebaixadas e piso tátil junto às bordas da ciclovia
+    this.addBox(this.group, 'curb-ramp-cycle-north', this.rampConcrete, CROSSING_X, 0.012, this.cycleCenterZ - 1.06, 1.54, 0.032, 0.16);
+    this.addBox(this.group, 'curb-ramp-cycle-south', this.rampConcrete, CROSSING_X, 0.012, this.cycleCenterZ + 0.94, 1.54, 0.032, 0.16);
+    this.addBox(this.group, 'tactile-cycleway-edge', this.tactileYellow, CROSSING_X, 0.024, this.northSidewalkZ - 0.82, 1.48, 0.01, 0.22);
   }
 
-  private buildAccessibilityRamp(side: 'north' | 'south', x: number, curbZ: number, tactileZ: number, dirZ: 1 | -1): void {
+  private buildAccessibilityRamp(side: 'north' | 'south', x: number, curbZ: number, tactileZ: number, dirZ: 1 | -1, yOffset = 0): void {
     // Rampa central rebaixada substituindo o meio-fio elevado
-    this.addBox(this.group, `curb-ramp-slope-${side}`, this.rampConcrete, x, 0.01, curbZ, 1.54, 0.032, 0.26);
+    this.addBox(this.group, `curb-ramp-slope-${side}`, this.rampConcrete, x, 0.014 + yOffset, curbZ, 1.54, 0.032, 0.24);
     // Abas laterais chanfradas da rampa
-    this.addBox(this.group, `curb-ramp-wing-w-${side}`, this.rampConcrete, x - 0.87, 0.025, curbZ, 0.2, 0.048, 0.24);
-    this.addBox(this.group, `curb-ramp-wing-e-${side}`, this.rampConcrete, x + 0.87, 0.025, curbZ, 0.2, 0.048, 0.24);
+    this.addBox(this.group, `curb-ramp-wing-w-${side}`, this.rampConcrete, x - 0.87, 0.028 + yOffset, curbZ, 0.2, 0.048, 0.22);
+    this.addBox(this.group, `curb-ramp-wing-e-${side}`, this.rampConcrete, x + 0.87, 0.028 + yOffset, curbZ, 0.2, 0.048, 0.22);
 
     // Placa base do piso tátil de alerta (amarelo)
-    this.addBox(this.group, `tactile-paving-${side}`, this.tactileYellow, x, 0.026, tactileZ, 1.5, 0.012, 0.28);
+    this.addBox(this.group, `tactile-paving-${side}`, this.tactileYellow, x, 0.026 + yOffset, tactileZ, 1.5, 0.012, 0.28);
 
     // Fileira de domos táteis em relevo
     for (let ix = -3; ix <= 3; ix++) {
@@ -187,7 +191,7 @@ export class ActiveMobilitySystem {
           `tactile-stud-${side}-${ix}-${iz}`,
           this.tactileYellow,
           x + ix * 0.2,
-          0.034,
+          0.034 + yOffset,
           tactileZ + iz * dirZ,
           0.07,
           0.008,
@@ -381,8 +385,9 @@ export class ActiveMobilitySystem {
       const heading = traveled > .000001 ? Math.atan2(dx, dz) : 0;
       const turn = Math.atan2(Math.sin(heading - walker.mesh.rotation.y), Math.cos(heading - walker.mesh.rotation.y)) * (1 - Math.exp(-12 * dt));
       walker.mesh.rotation.y += turn;
-      const onRoad = walker.z > this.roadNorthEdgeZ && walker.z < this.roadSouthEdgeZ;
-      walker.mesh.position.set(walker.x, onRoad ? 0 : SIDEWALK_Y, walker.z);
+      const onRoad = walker.z > this.roadNorthEdgeZ && walker.z < this.roadSouthEdgeZ - 0.8;
+      const onSouthSidewalk = walker.z >= this.roadSouthEdgeZ - 0.8;
+      walker.mesh.position.set(walker.x, onRoad ? 0 : onSouthSidewalk ? 0.036 : SIDEWALK_Y, walker.z);
       walker.visual.animate(dt, traveled, dt > 0 ? turn / dt : 0);
       if (walker.state === 'exit' && (walker.x < this.minX || walker.x > this.maxX)) {
         this.group.remove(walker.mesh); walker.visual.dispose(); this.walkers.splice(this.walkers.indexOf(walker), 1);

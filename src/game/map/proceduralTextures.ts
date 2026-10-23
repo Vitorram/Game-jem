@@ -188,7 +188,7 @@ const RECIPES: Record<TextureKey, Draw> = {
 
   // Asfalto: brita grossa sobre base escura, com remendos e marcas de pneu.
   road: (ctx, random) => {
-    ctx.fillStyle = '#4b555b';
+    ctx.fillStyle = '#363f45';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     speckle(ctx, random, 3200, [
@@ -249,14 +249,14 @@ const RECIPES: Record<TextureKey, Draw> = {
 
   // Ciclovia: pintura vermelha com desgaste leve.
   cycleway: (ctx, random) => {
-    ctx.fillStyle = '#ce7060';
+    ctx.fillStyle = '#b83a2d';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
     speckle(ctx, random, 2400, [
-      '#c06454',
-      '#dd8171',
-      '#b55a4c',
-      '#e89787',
+      '#a63226',
+      '#c84436',
+      '#992c21',
+      '#d45243',
     ], 1.9);
 
     for (let i = 0; i < 10; i++) {
