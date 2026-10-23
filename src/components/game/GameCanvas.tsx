@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import StoryIntro from './StoryIntro';
-import EntryScreen from './EntryScreen';
 import { gsap } from 'gsap';
 import { Game, type GameSceneId, type GameStatus } from '@/game/core/Game';
 import { PLAYER_APPEARANCES, type PlayerId } from '@/game/entities/Player';
@@ -73,6 +72,22 @@ export default function GameCanvas() {
   }, []);
 
   useEffect(() => {
+    if (initialized && status === 'ready' && !error) setStoryOpen(true);
+  }, [initialized, status, error]);
+
+  useEffect(() => {
+    if (status !== 'playing' && status !== 'paused') return;
+
+    const confirmLeavingDuringGame = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+
+    window.addEventListener('beforeunload', confirmLeavingDuringGame);
+    return () => window.removeEventListener('beforeunload', confirmLeavingDuringGame);
+  }, [status]);
+
+  useEffect(() => {
     if (status === 'playing' || !panel.current) return;
     const context = gsap.context(() => {
       gsap.from(panel.current, {
@@ -84,17 +99,7 @@ export default function GameCanvas() {
   }, [status, error]);
 
   const returnToMenu = () => {
-    setStoryOpen(false);
-    game.current?.returnToMenu();
-    setSceneId('test');
-    setRisks(null);
-    setSelectedPlayer(1);
-    setCloseView(false);
-    setAnalystTutorialStep(null);
-    setMobilityTutorialStep(null);
-    setInfrastructureTutorialStep(null);
-
-    setObjectiveDistance(null);
+    window.location.assign('/');
   };
 
   const startAnalystTutorial = () => {
@@ -184,7 +189,8 @@ export default function GameCanvas() {
   }, [isOriginalOrla, status]);
 
   const promptClassName = `interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`;
-  const promptIsInstruction = !!interactionPrompt && (/USE [13]/.test(interactionPrompt) || interactionPrompt.startsWith('AGUARDE'));
+  const promptIsInstruction = !!interactionPrompt && (/USE [1-4]/.test(interactionPrompt)
+    || interactionPrompt.startsWith('AGUARDE') || interactionPrompt.startsWith('DESVIO'));
 
   return (
     <section className={`game-shell${isLaboratory ? '' : ' is-orla'}`} aria-label="Suburban — jogo de mobilidade urbana">
@@ -193,7 +199,7 @@ export default function GameCanvas() {
         <div className="brand"><span className="brand-mark">S</span><span>SUBURBAN<small>{isLaboratory ? 'LABORATÓRIO DE HABILIDADES' : 'FASE 1 · ORLA'}</small></span></div>
         <span className="build-label">{isLaboratory ? 'TESTE LIVRE' : 'ORLA ORIGINAL'}</span>
       </header>
-      {status === 'ready' && !error && <EntryScreen ready={initialized} onStory={() => setStoryOpen(true)} onLab={() => { game.current?.start(); setSceneId('test'); }} />}
+      {status === 'ready' && !error && !storyOpen && <div className="game-preparing-screen" role="status">PREPARANDO A CIDADE…</div>}
       {(status === 'paused' || error) && (
         <div className={`overlay${status === 'paused' && !error ? ' pause-overlay' : ''}`}>
           <div ref={panel} className="panel">
@@ -201,13 +207,7 @@ export default function GameCanvas() {
             <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? <>Pausa<span>.</span></> : <>Como você<br />quer começar<span>?</span></>}</h1>
             <p>{error ?? (status === 'paused' ? pauseSettingsOpen ? 'CONTROLES\nWASD ou setas · mover\nE ou clique · interagir\nT · trocar personagem\nEsc · pausar e continuar' : '' : 'Jogue a fase da Orla ou explore as habilidades e os puzzles na área de testes.')}</p>
             {error ? <button onClick={() => window.location.reload()}>Tentar novamente ↗</button> :
-              <button disabled={!initialized} onClick={status === 'ready' ? () => setStoryOpen(true) : event => { game.current?.togglePause(); event.currentTarget.blur(); }}>
-                {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Jogar a fase →'}
-              </button>}
-            {!error && status === 'ready' && <button className="secondary" disabled={!initialized}
-              onClick={event => { game.current?.start(); setSceneId('test'); event.currentTarget.blur(); }}>
-              Área de testes →
-            </button>}
+              <button onClick={event => { game.current?.togglePause(); event.currentTarget.blur(); }}>Continuar →</button>}
             {!error && status === 'paused' && <div className="pause-actions">
               <button className="pause-secondary" onClick={returnToMenu}>Sair</button>
               <button className="pause-secondary" onClick={() => setPauseSettingsOpen(value => !value)}>{pauseSettingsOpen ? 'Fechar configurações' : 'Configurações'}</button>
@@ -217,7 +217,7 @@ export default function GameCanvas() {
         </div>
       )}
       {storyOpen && !error && <StoryIntro onComplete={startAnalystTutorial} />}
-      {isOriginalOrla && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} />}
+      {isOriginalOrla && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} onContinue={() => game.current?.togglePause()} />}
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
@@ -265,7 +265,7 @@ export default function GameCanvas() {
           <div className="repair-test-options">
             {([
               ['pole', 'Poste · circuito'], ['signal', 'Semáforo · cabos'], ['sensor', 'Sensor · sincronização'],
-              ['signal-check', 'Controlador · calibração'], ['car', 'Colisão · segurança'],
+              ['signal-check', 'Controlador · calibração'], ['car', 'Colisão · segurança'], ['charger', 'Carregador · elétrico'],
             ] as const).map(([type, label]) => <button key={type} type="button" onClick={() => setTestPuzzleType(type)}>{label}</button>)}
           </div>
         </aside>}
@@ -282,7 +282,7 @@ export default function GameCanvas() {
         </div>}
         {isOriginalOrla && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
           <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
-          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Via de escape'].map((label, index) => {
+          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Desviar elétricos'].map((label, index) => {
             const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;
             const target = activeSkill === index;
             const locked = mobilityTutorialStep !== null && !target;

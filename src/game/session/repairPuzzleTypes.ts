@@ -3,4 +3,5 @@ export type RepairPuzzleType =
   | 'signal'
   | 'sensor'
   | 'car'
-  | 'signal-check';
+  | 'signal-check'
+  | 'charger';

@@ -1,10 +1,11 @@
 import { BoxGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, SphereGeometry } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
-export const VEHICLE_KINDS = ['hatch', 'sedan', 'suv', 'pickup', 'truck', 'bus', 'motorcycle'] as const;
+export const VEHICLE_KINDS = ['hatch', 'sedan', 'suv', 'pickup', 'truck', 'bus', 'motorcycle', 'ev-sedan', 'ev-crossover'] as const;
 export type VehicleKind = typeof VEHICLE_KINDS[number];
 export const VEHICLE_VISUAL_SCALE: Record<VehicleKind, number> = {
   hatch: .54, sedan: .54, suv: .59, pickup: .59, truck: .58, bus: .62, motorcycle: .56,
+  'ev-sedan': .56, 'ev-crossover': .57,
 };
 export type VehicleModel = { group: Group; wheels: Mesh[]; brakeLights: Mesh[]; length: number; width: number; kind: VehicleKind };
 
@@ -71,6 +72,52 @@ export class VehicleModels {
       helmet.scale.set(.24, .25, .24); helmet.position.set(0, 1.37, -.09); group.add(helmet);
       part('helmet-visor', '#263c51', 0, 1.39, .1, .35, .12, .11);
       return { group, wheels, brakeLights, length: 1.5, width: .65, kind };
+    }
+    if (kind === 'ev-sedan') {
+      const length = 2.35, width = 1.02;
+      part('ev-chassis', '#25383d', 0, .31, 0, width * .91, .19, length * .94);
+      part('ev-body', color, 0, .5, 0, width, .42, length);
+      part('ev-hood', color, 0, .58, .72, width * .94, .31, .68);
+      part('ev-trunk', color, 0, .55, -.82, width * .93, .27, .49);
+      part('ev-panoramic-roof', '#263d46', 0, .89, -.06, width * .83, .12, 1.15);
+      part('ev-windshield', '#85adb0', 0, .83, .59, width * .75, .1, .49);
+      part('ev-rear-glass', '#466a70', 0, .82, -.61, width * .7, .09, .42);
+      for (const side of [-1, 1]) {
+        part('ev-side-glass', '#6e979a', side * width * .44, .78, -.04, .025, .22, .86, true);
+        part('ev-daylight', '#fff4ce', side * width * .31, .5, length / 2 + .018, .24, .055, .035, false, true);
+        brakeLights.push(part('ev-tail-light', '#ff6558', side * width * .32, .54, -length / 2 - .018, .23, .075, .035, false, true));
+        wheel(side * width * .48, -.7, .25, .17);
+        wheel(side * width * .48, .72, .25, .17);
+      }
+      part('ev-front-trim', '#dfece5', 0, .37, length / 2 + .015, width * .69, .045, .025);
+      part('ev-rear-trim', '#f78b79', 0, .55, -length / 2 - .02, width * .58, .045, .025, false, true);
+      part('ev-front-bumper', '#edf0e6', 0, .33, length / 2, width * .86, .1, .1);
+      part('ev-rear-bumper', '#34484d', 0, .32, -length / 2, width * .84, .1, .1);
+      return { group, wheels, brakeLights, length, width, kind };
+    }
+    if (kind === 'ev-crossover') {
+      const length = 2.42, width = 1.08;
+      part('ev-crossover-chassis', '#25383d', 0, .34, 0, width * .92, .21, length * .93);
+      part('ev-crossover-body', color, 0, .58, 0, width, .55, length);
+      part('ev-crossover-hood', color, 0, .69, .76, width * .96, .35, .56);
+      part('ev-crossover-roof', color, 0, 1.09, -.04, width * .83, .13, 1.24);
+      part('ev-crossover-glass-front', '#83a9aa', 0, .98, .62, width * .75, .13, .43);
+      part('ev-crossover-glass-rear', '#527b7e', 0, .98, -.59, width * .72, .13, .4);
+      for (const side of [-1, 1]) {
+        part('ev-crossover-side-glass', '#6b9294', side * width * .44, .97, -.03, .025, .27, .91, true);
+        part('ev-crossover-window-pillar', '#263a40', side * width * .44, 1.02, -.03, .05, .32, .09, true);
+        part('ev-crossover-light', '#fff2c8', side * width * .31, .61, length / 2 + .018, .22, .085, .035, false, true);
+        brakeLights.push(part('ev-crossover-tail-light', '#f36558', side * width * .34, .67, -length / 2 - .018, .18, .17, .035, false, true));
+        wheel(side * width * .48, -.73, .27, .18);
+        wheel(side * width * .48, .73, .27, .18);
+      }
+      part('ev-crossover-front-grille', '#b7d4ca', 0, .51, length / 2 + .015, width * .58, .12, .025);
+      part('ev-crossover-lower-grille', '#31494c', 0, .36, length / 2 + .025, width * .72, .1, .025);
+      part('ev-crossover-bumper', '#e6eee6', 0, .38, length / 2, width * .88, .13, .1);
+      part('ev-crossover-rear-bumper', '#34494c', 0, .36, -length / 2, width * .86, .12, .1);
+      part('ev-crossover-roof-rail-left', '#c7ddd2', -.37, 1.19, -.02, .05, .06, 1.13);
+      part('ev-crossover-roof-rail-right', '#c7ddd2', .37, 1.19, -.02, .05, .06, 1.13);
+      return { group, wheels, brakeLights, length, width, kind };
     }
     if (kind === 'truck') {
       const length = 3.15, width = 1.12;

@@ -7,6 +7,7 @@ import { sessionStore, starsFor, type SessionView } from '@/game/session/session
 import styles from './OrdersHud.module.css';
 import { ORLA_EVENTS, ORLA_EVENT_STEPS } from '@/game/session/orlaEvents';
 import { suburbanGameState, type UrbanProblem } from '@/game/core/GameState';
+import FarewellIllustration from './FarewellIllustration';
 
 type HudOrder = SessionSnapshot['orders'][number];
 
@@ -89,7 +90,11 @@ function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | '
     case 'order-completed':
       return { tone: 'good', text: `Ocorrência resolvida! +${event.points} XP${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
     case 'order-expired':
-      return { tone: 'bad', text: `Prazo encerrado −${event.penalty}` };
+      return { tone: 'bad', text: `Você perdeu ${event.penalty} XP: o prazo da missão terminou sem concluir.` };
+    case 'xp-penalty':
+      return { tone: 'bad', text: `Você perdeu ${event.amount} XP. ${event.reason}` };
+    case 'xp-warning':
+      return { tone: 'info', text: event.message };
     case 'order-arrived':
       return { tone: 'info', text: ORLA_EVENTS.find(item => item.id === event.order.definitionId)?.warning ?? event.order.title };
     default:
@@ -132,6 +137,8 @@ const SUMMARY_MESSAGES = [
 function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
+  const allMissionsCompleted = snapshot.completedOrders === ORLA_EVENTS.length;
+  const lost = snapshot.expiredOrders >= 3;
 
   useEffect(() => {
     const node = root.current;
@@ -145,16 +152,22 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
 
   return (
     <div ref={root} className={styles.summary} role="dialog" aria-modal="true" aria-label="Fim de fase">
-      <div className={styles.card}>
-        <h2>Orla recuperada!</h2>
-        <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
-          {[1, 2, 3].map(n => <span key={n} className={styles.star} data-on={n <= stars}>★</span>)}
-        </div>
-        <p className={styles.verdict}>{SUMMARY_MESSAGES[stars]}</p>
+      <div className={`${styles.card}${allMissionsCompleted ? ` ${styles.farewellCard}` : ''}`}>
+        <h2>{lost ? 'VOCÊ PERDEU' : allMissionsCompleted ? 'Obrigado por jogar!' : 'Orla recuperada!'}</h2>
+        {allMissionsCompleted
+          ? <FarewellIllustration className={styles.farewellIllustration} />
+          : <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
+            {[1, 2, 3].map(n => <span key={n} className={styles.star} data-on={n <= stars}>★</span>)}
+          </div>}
+        <p className={`${styles.verdict}${allMissionsCompleted ? ` ${styles.farewellVerdict}` : ''}`}>{allMissionsCompleted
+          ? 'Obrigado por jogar nossa primeira fase! Ficaremos felizes em ter você para testar nossas próximas fases e nosso modo coop. Nos veremos em breve!'
+          : lost
+          ? 'Três missões venceram sem ser concluídas. Cada prazo encerrado tira XP. Jogue novamente e conclua as tarefas antes do tempo acabar.'
+          : SUMMARY_MESSAGES[stars]}</p>
         <dl className={styles.stats}>
           <div><dt>XP</dt><dd>{snapshot.score}</dd></div>
           <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}</dd></div>
-          <div><dt>Não concluídas</dt><dd>{snapshot.expiredOrders}</dd></div>
+          <div><dt>Missões perdidas</dt><dd>{snapshot.expiredOrders}</dd></div>
         </dl>
         <button type="button" className={styles.primary} onClick={() => sessionStore.restart()}>Jogar de novo</button>
         {onMenu && <button type="button" className={styles.primary} onClick={onMenu}>Voltar ao menu</button>}
@@ -167,7 +180,34 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
  * HUD de pedidos. `paused` congela as barras (a cena também para de avançar o relógio).
  * Renderize FORA do bloco `status === 'playing'` para a barra continuar sincronizada ao retomar.
  */
-export default function OrdersHud({ paused, showDebug = false, onMenu }: { paused: boolean; showDebug?: boolean; onMenu?: () => void }) {
+function PenaltyAlert({ feedback, finished, onContinue }: {
+  feedback: SessionView['feedback']; finished: boolean; onContinue?: () => void;
+}) {
+  if (!feedback || (feedback.event.type !== 'order-expired' && feedback.event.type !== 'xp-penalty')) return null;
+  const event = feedback.event;
+  const amount = event.type === 'order-expired' ? event.penalty : event.amount;
+  const explanation = event.type === 'order-expired'
+    ? 'A missão ficou sem ser concluída por 60 segundos. Esse prazo terminou e a tarefa foi perdida.'
+    : event.reason;
+  return (
+    <div className={styles.penaltyOverlay} role="alertdialog" aria-modal="true" aria-labelledby="penalty-title">
+      <div className={styles.penaltyCard}>
+        <span className={styles.penaltyEyebrow}>ENTENDA O QUE ACONTECEU</span>
+        <h2 id="penalty-title">Você perdeu {amount} XP</h2>
+        <p>{explanation}</p>
+        {finished && <p className={styles.penaltyExtra}>Três missões expiraram. A partida terminou; veja o resultado e tente novamente.</p>}
+        <button type="button" className={styles.primary} onClick={() => {
+          sessionStore.dismissFeedback(feedback.seq);
+          if (!finished) onContinue?.();
+        }}>{finished ? 'Ver resultado' : 'Entendi · continuar'}</button>
+      </div>
+    </div>
+  );
+}
+
+export default function OrdersHud({ paused, showDebug = false, onMenu, onContinue }: {
+  paused: boolean; showDebug?: boolean; onMenu?: () => void; onContinue?: () => void;
+}) {
   const { snapshot, feedback } = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
   const [world, setWorld] = useState(() => suburbanGameState.snapshot());
   useEffect(() => {
@@ -179,17 +219,6 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
   const frozen = paused || snapshot.status !== 'playing';
   const urgent = snapshot.status === 'playing' && snapshot.remainingMs > 0 && snapshot.remainingMs <= 30_000;
   const overtime = Math.max(0, snapshot.elapsedMs - 360_000);
-  const currentCall = world.problems[0];
-  const nextCall = ORLA_EVENTS.find(event => event.atMs > snapshot.elapsedMs);
-  const statusMessage = currentCall?.status === 'RESOLVED'
-    ? 'RELATORIO RESOLVIDO - arquive no sistema para receber XP e seguir'
-    : currentCall
-      ? `${currentCall.label.toLocaleUpperCase('pt-BR')} - chamado em atendimento`
-      : nextCall
-        ? `CENTRAL EM MONITORAMENTO - proximo chamado em ${formatTime(nextCall.atMs - snapshot.elapsedMs)}`
-        : snapshot.elapsedMs < 360_000
-          ? `TODOS OS CHAMADOS ATENDIDOS - operacao encerra em ${formatTime(360_000 - snapshot.elapsedMs)}`
-          : 'TEMPO-ALVO ATINGIDO - finalize o atendimento em andamento';
   return (
     <>
       <div className={styles.strip} aria-label="Pedidos da fase">
@@ -202,12 +231,9 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
         <div className={styles.clock} data-urgent={urgent || undefined} role="timer" aria-label={overtime ? 'Tempo além da meta de seis minutos' : 'Tempo restante da meta de seis minutos'}>
           <span aria-hidden="true">⏱</span> {overtime ? `+${formatTime(overtime)}` : formatTime(snapshot.remainingMs)}
         </div>
-        <div className={styles.phaseStatus} role="status">
-          {statusMessage}
-          {world.phase && <span>{world.phase.waitingPedestrians} pedestres esperando · {world.phase.queuedVehicles} carros na fila</span>}
-        </div>
       </div>
       <Toast feedback={feedback} />
+      <PenaltyAlert feedback={feedback} finished={snapshot.status === 'finished'} onContinue={onContinue} />
       {showDebug && snapshot.status === 'playing' && snapshot.orders[0] && (
         <button type="button" className={styles.debug} onClick={() => sessionStore.debugResolveNext()}>
           Resolver passo do pedido (teste)

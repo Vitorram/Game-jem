@@ -27,18 +27,13 @@ export default function GameObjectiveHUD({ player, distance, tutorialTarget = fa
   const problem = world.problems[0];
   const roads = useRoads();
   if (world.phase) {
-    const team = player === 1 ? 'infraestrutura' : 'mobilidade';
-    const candidates = world.problems.filter(item => item.status !== 'RESOLVED' && item.requiredTeams?.includes(team));
-    const objective = candidates.find(item => item.id === world.selectedProblemId) ?? candidates[0];
-    return <div className={`game-objective-hud phase-objective ${player === 1 ? 'for-infrastructure' : 'for-mobility'}`} role="status">
-      <b>{objective ? `${objective.stage === 'warning' ? 'AVISO' : 'OBJETIVO'} · ${objective.label.toLocaleUpperCase('pt-BR')}`
-        : world.phase.recovery ? 'RECUPERAÇÃO DA ORLA' : 'ACOMPANHE A ORLA'} {distance === null ? '' : `· ~${distance} m`}</b>
-      <span>{objective?.instruction ?? (player === 2
-        ? world.phase.recovery ? 'Sem novos incidentes. Recolha cones com E, devolva ao baú e use 1 para liberar as vias.'
-          : 'Recolha cones com E, devolva ao baú e use 1 para liberar as vias. Acompanhe os avisos no alto da tela.'
-        : 'Sua equipe está disponível. Acompanhe os avisos e troque para Mobilidade quando necessário.')}</span>
-      {objective && <span>{objective.requiredTeams?.length === 2 ? 'AÇÃO EM EQUIPE · MOBILIDADE + INFRAESTRUTURA' : `RESPONSÁVEL · ${team.toLocaleUpperCase('pt-BR')}`}</span>}
-    </div>;
+    const crossing = world.problems.find(item => item.id === 'traffic-signal-failure');
+    const returnToMobility = crossing?.instruction?.includes('Troque para Mobilidade');
+    return returnToMobility && (player === 1 || player === 2)
+      ? <div className="game-objective-hud phase-objective" role="status">
+          <b>PRÓXIMA ETAPA · MOBILIDADE</b><span>{crossing?.instruction}</span>
+        </div>
+      : null;
   }
   if (!problem) return null;
 
@@ -63,7 +58,14 @@ export default function GameObjectiveHUD({ player, distance, tutorialTarget = fa
   const team = player === 1 ? 'infraestrutura' : 'mobilidade';
   const interventionsRemain = roads.some(road => road.conesActive
     || (road.type === 'PRINCIPAL' && road.status === 'blocked')
-    || (road.type === 'ESCAPE' && road.redirected));
+    || (road.type === 'GREEN' && road.redirected));
+  if (problem.status === 'RESOLVED' && player === 1
+    && problem.dispatchedTeams.includes('mobilidade') && interventionsRemain) {
+    return <div className="game-objective-hud for-mobility" role="status">
+      <b>REPARO CONCLUÍDO</b>
+      <span>Troque para Mobilidade e use 1 para reabrir a via principal.</span>
+    </div>;
+  }
   if (problem.status === 'RESOLVED'
     && !(player === 2 && problem.dispatchedTeams.includes('mobilidade') && interventionsRemain)) return null;
   if (player === 2 && !problem.dispatchedTeams.includes(team)) return <div className="game-objective-hud for-mobility">

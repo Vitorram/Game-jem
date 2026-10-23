@@ -85,6 +85,47 @@ export function SensorCalibrationPuzzle({ paused, onComplete, onCancel }: Common
   </PuzzleFrame>;
 }
 
+export function ChargerRepairPuzzle({ paused, onComplete, onCancel }: CommonProps) {
+  const sequence = [
+    { id: 'isolate', label: 'Isolar o disjuntor', detail: 'Corte a alimentação antes de tocar no conector.' },
+    { id: 'connect', label: 'Reconectar o cabo', detail: 'Encaixe o conector de carga e confira a trava.' },
+    { id: 'reset', label: 'Rearmar o carregador', detail: 'Restaure a energia depois de testar a conexão.' },
+  ] as const;
+  const [step, setStep] = useState(0);
+  const [solved, setSolved] = useState(false);
+  const [status, setStatus] = useState('Siga a ordem de segurança para devolver o ponto de carga à avenida verde.');
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const choose = (id: string) => {
+    if (paused || solved) return;
+    if (sequence[step]?.id !== id) {
+      setStatus('Ordem insegura. Isole a energia antes de mexer nos cabos.');
+      return;
+    }
+    const nextStep = step + 1;
+    setStep(nextStep);
+    if (nextStep === sequence.length) {
+      setSolved(true);
+      setStatus('Carregador testado e liberado. Os elétricos podem voltar à avenida verde.');
+      timer.current = setTimeout(onComplete, 850);
+    } else {
+      setStatus(sequence[nextStep].detail);
+    }
+  };
+
+  return <PuzzleFrame title="REPARAR CARREGADOR ELÉTRICO" chip="PONTO 02" description="Desvie o fluxo e siga a sequência segura para recuperar o carregador." paused={paused} solved={solved} status={status} progress={`${step}/3 ETAPAS DE SEGURANÇA`} onCancel={onCancel} cardClassName="charger-repair-puzzle">
+    <div className="charger-repair-board">
+      <div className="charger-repair-visual" aria-hidden="true"><i>ϟ</i><b>{solved ? 'CARGA ATIVA' : 'PONTO ISOLADO'}</b><span className={solved ? 'is-live' : ''} /></div>
+      <div className="charger-repair-actions">
+        {sequence.map((action, index) => <button key={action.id} type="button" className={index < step ? 'is-done' : undefined} disabled={paused || solved || index < step} onClick={() => choose(action.id)}>
+          <i>{index < step ? '✓' : index + 1}</i><span><b>{action.label}</b><small>{action.detail}</small></span>
+        </button>)}
+      </div>
+    </div>
+  </PuzzleFrame>;
+}
+
 const COLLISION_ACTIONS = [
   { id: 'chock', icon: '▰', label: 'Calçar as rodas', detail: 'Imobiliza os dois carros antes da equipe se aproximar.' },
   { id: 'battery', icon: 'ϟ', label: 'Isolar bateria 12 V', detail: 'Desliga o sistema elétrico de baixa tensão.' },

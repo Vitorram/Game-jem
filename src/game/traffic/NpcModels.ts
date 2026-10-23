@@ -2,7 +2,7 @@ import { BoxGeometry, CanvasTexture, CylinderGeometry, Group, Mesh, MeshStandard
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { Player, type PlayerAppearance, type PlayerId } from '../entities/Player';
 
-export type NpcVisual = { mesh: Group; animate(dt: number, distance: number, turning?: number): void; dispose(): void };
+export type NpcVisual = { mesh: Group; animate(dt: number, distance: number, turning?: number): void; setSeated?(seated: boolean): void; dispose(): void };
 
 export const WALKER_LOOKS: readonly PlayerAppearance[] = [
   { name: 'Passeio coral', role: 'analista', skin: '#e6b38d', hair: '#754c32', shirt: '#dc927d', pants: '#e2d6b8', backpack: '#bc9275', hairstyle: 'long', hideBackpack: true },
@@ -136,13 +136,21 @@ export class NpcModels {
     this.rod(bike, '#34424b', [-.23, .83, .4], [.23, .83, .4], .025);
 
     let limpTime = 0;
+    let seated = false;
     const visual: NpcVisual = {
       mesh: root,
       animate: (dt, distance, turning) => {
         limpTime += dt;
         person.animateWalking(dt, distance * .72, turning);
+        if (seated) { root.rotation.z = 0; return; }
         root.rotation.z = Math.sin(limpTime * 7.5) * .055;
         bike.rotation.x = Math.sin(limpTime * 4) * .045;
+      },
+      setSeated: value => {
+        seated = value;
+        person.setSeated(value);
+        person.mesh.position.y = value ? -.04 : 0;
+        if (value) { root.rotation.z = 0; bike.rotation.x = 0; }
       },
       dispose: () => { person.dispose(); root.clear(); },
     };

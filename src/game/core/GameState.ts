@@ -20,7 +20,7 @@ export type RoadState = {
   id: string;
   direction: 'NORMAL' | 'REVERSE';
   status: 'open' | 'blocked' | 'stopped';
-  type: 'PRINCIPAL' | 'SECUNDARIA' | 'ESCAPE';
+  type: 'PRINCIPAL' | 'SECUNDARIA' | 'GREEN';
   capacity: number;
   priority: number;
   redirected: boolean;
@@ -54,7 +54,7 @@ export class GameState {
       { id: 'orla-eastbound-2', direction: 'NORMAL', status: 'open', type: 'PRINCIPAL', capacity: 100, priority: 1, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },
       { id: 'orla-westbound', direction: 'NORMAL', status: 'open', type: 'PRINCIPAL', capacity: 100, priority: 1, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },
       { id: 'orla-westbound-2', direction: 'NORMAL', status: 'open', type: 'PRINCIPAL', capacity: 100, priority: 1, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },
-      { id: 'orla-escape', direction: 'NORMAL', status: 'blocked', type: 'ESCAPE', capacity: 30, priority: 0, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },
+      { id: 'orla-green', direction: 'NORMAL', status: 'open', type: 'GREEN', capacity: 30, priority: 0, redirected: false, vehicleCount: 0, congestion: 0, conesActive: false, coneZoneId: null },
     ],
   };
 

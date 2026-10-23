@@ -6,6 +6,8 @@ import { GRID_CONFIG } from '@/game/config';
 import { suburbanGameState, type ResponseTeam, type UrbanProblem } from '@/game/core/GameState';
 
 const tiles: Record<string, string> = { '~': 'sea', '.': 'sand', '=': 'prom', '-': 'cycle', R: 'road', '#': 'wall', B: 'counter', E: 'station', C: 'box' };
+type ZoneLevel = 'green' | 'yellow' | 'red';
+const zoneLabel: Record<ZoneLevel, string> = { green: 'LIVRE', yellow: 'CHEIO', red: 'CRÍTICO' };
 const teams: { id: ResponseTeam; label: string; short: string; color: string }[] = [
   { id: 'infraestrutura', label: 'Infraestrutura', short: 'REPARO ELÉTRICO', color: 'mint' },
   { id: 'mobilidade', label: 'Mobilidade', short: 'ISOLAR O TRECHO', color: 'gold' },
@@ -16,7 +18,8 @@ function problemTitle(problem: UrbanProblem): string {
 }
 
 function problemCategory(problem: UrbanProblem): string {
-  return problem.type === 'broken-light-pole' ? 'ILUMINAÇÃO' : 'SERVIÇO URBANO';
+  return problem.type === 'broken-light-pole' ? 'ILUMINAÇÃO'
+    : problem.type === 'ev-charger-repair' ? 'MOBILIDADE ELÉTRICA' : 'SERVIÇO URBANO';
 }
 
 export type AnalystTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
@@ -46,6 +49,12 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
   const nextTeam = requiredTeams.find(team => !issue?.dispatchedTeams.includes(team.id));
   const resolved = !!issue && issue.status === 'RESOLVED';
   const activeCount = problems.filter(problem => problem.status !== 'RESOLVED').length;
+  const queuedVehicles = state.phase?.queuedVehicles ?? 0;
+  const waitingPedestrians = state.phase?.waitingPedestrians ?? 0;
+  const peakCongestion = Math.max(0, ...state.roads.filter(road => road.type === 'PRINCIPAL').map(road => road.congestion));
+  const trafficZone: ZoneLevel = queuedVehicles >= 12 || peakCongestion >= .68 ? 'red'
+    : queuedVehicles >= 5 || peakCongestion >= .32 ? 'yellow' : 'green';
+  const pedestrianZone: ZoneLevel = waitingPedestrians >= 5 ? 'red' : waitingPedestrians >= 3 ? 'yellow' : 'green';
   const allDispatched = requiredTeams.length > 0 && requiredTeams.every(team => issue?.dispatchedTeams.includes(team.id));
   const actionLabel = tutorialStep !== undefined && tutorialStep !== null ? (!selectedInGame ? 'CONFIRMAR CHAMADO' : nextTeam ? 'SOLICITAR EQUIPE' : 'EQUIPES ACIONADAS') : resolved ? 'ARQUIVAR CHAMADO - RECEBER XP' : !selected ? 'ANALISAR CHAMADO' : !allDispatched ? 'SOLICITAR REFOR\u00C7O' : 'EQUIPES EM CAMPO';
   const infrastructureDispatched = issue?.dispatchedTeams.includes('infraestrutura') ?? false;
@@ -98,7 +107,10 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
               {ORLA_MAP.rows.flatMap((row, rowIndex) => Array.from(row, (kind, column) => {
                 const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
                 const tileClass = kind === '-' && rowIndex === 8 ? 'sidewalk' : tiles[kind] ?? 'sand';
-                return <div key={`${rowIndex}-${column}`} role="gridcell" className={`map-tile map-row-${rowIndex} map-col-${column} ${tileClass}${issues.length ? ' has-incident' : ''}`}>
+                const trafficZoneTile = kind === 'R' ? ' traffic-zone zone-' + trafficZone : '';
+                const electricLaneTile = kind === 'R' && rowIndex === 9 ? ' electric-lane-map' : '';
+                const pedestrianZoneTile = rowIndex === 8 && column >= 10 && column <= 12 ? ' pedestrian-zone zone-' + pedestrianZone : '';
+                return <div key={rowIndex + '-' + column} role="gridcell" className={'map-tile map-row-' + rowIndex + ' map-col-' + column + ' ' + tileClass + trafficZoneTile + pedestrianZoneTile + electricLaneTile + (issues.length ? ' has-incident' : '')}>
                   {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { analyze(issues[0].id); event.currentTarget.blur(); }}>
                     <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>
                   </button>}
@@ -113,7 +125,15 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
             <div className="tablet-map-compass">N <i>▲</i></div>
             <div className="tablet-map-scale"><i /> 40 m</div>
           </div>
-          <div className="tablet-map-legend"><span><i className="legend-sea" /> MAR</span><span><i className="legend-green" /> CALÇADÃO</span><span><i className="legend-cycle" /> CICLOVIA</span><span><i className="legend-road" /> AVENIDA</span><span><i className="legend-alert">!</i> ALERTA</span></div>
+          <div className="tablet-flow-zones" aria-label="Condições de circulação">
+            <span className={'flow-zone ' + trafficZone} aria-label={'Veículos: ' + queuedVehicles + ' na fila, condição ' + zoneLabel[trafficZone].toLocaleLowerCase('pt-BR')}>
+              <i aria-hidden="true">🚗</i><b>{queuedVehicles}</b><small>CARROS · {zoneLabel[trafficZone]}</small>
+            </span>
+            <span className={'flow-zone ' + pedestrianZone} aria-label={'Pedestres: ' + waitingPedestrians + ' esperando, condição ' + zoneLabel[pedestrianZone].toLocaleLowerCase('pt-BR')}>
+              <i aria-hidden="true">🚶</i><b>{waitingPedestrians}</b><small>PEDESTRES · {zoneLabel[pedestrianZone]}</small>
+            </span>
+          </div>
+          <div className="tablet-map-legend"><span><i className="legend-sea" /> MAR</span><span><i className="legend-green" /> CALÇADÃO</span><span><i className="legend-cycle" /> CICLOVIA</span><span><i className="legend-road" /> AVENIDA</span><span><i className="legend-electric" /> AVENIDA VERDE</span><span><i className="legend-alert">!</i> ALERTA</span></div>
           <div className="tablet-map-callout"><span className="callout-dot" /> {String(activeCount).padStart(2, '0')} {activeCount === 1 ? 'OCORRÊNCIA ATIVA' : 'OCORRÊNCIAS ATIVAS'}</div>
         </div>
 
@@ -126,17 +146,19 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
           </div>
           <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
             {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { analyze(problem.id); event.currentTarget.blur(); }}>
-              <span className="incident-icon">{problem.type === 'broken-light-pole' ? 'ϟ' : '!'}</span>
-              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : 'Setor Orla'} · {problem.dispatchedTeams.length}/{problem.requiredTeams?.length ?? 2} equipes</em></span>
+              <span className="incident-icon">{problem.type === 'broken-light-pole' || problem.type === 'ev-charger-repair' ? 'ϟ' : '!'}</span>
+              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : problem.type === 'ev-charger-repair' ? 'Avenida Verde' : 'Setor Orla'} · {problem.dispatchedTeams.length}/{problem.requiredTeams?.length ?? 2} equipes</em></span>
               <span className="incident-chevron">›</span>
             </button>)}
             {!problems.length && <div className="tablet-empty-list">A central está monitorando. O próximo chamado chega no horário previsto.</div>}
           </div>
           <div className={`tablet-detail-card${!selected || !issue ? ' is-unselected' : ''}`}>
             <div className="tablet-detail-heading"><span className="detail-alert">!</span><div><small>RELATÓRIO DE CAMPO</small><b>{selected && issue ? problemTitle(issue) : 'Selecione uma ocorrência'}</b></div></div>
-            <p>{selected && issue ? issue.instruction ?? (issue.type === 'broken-light-pole'
-              ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
-              : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
+            <p>{selected && issue ? resolved && issue.type === 'broken-light-pole'
+              ? 'Reparo concluído. Troque para Mobilidade e use 1 para reabrir a via principal.'
+              : issue.instruction ?? (issue.type === 'broken-light-pole'
+                ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
+                : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
               : 'Escolha um alerta na lista ou no mapa para abrir os detalhes e preparar o atendimento.'}</p>
             {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : 'RISCO EM ANÁLISE'}</span><span>{issue.dispatchedTeams.length}/{requiredTeams.length} EQUIPES ACIONADAS</span></div>}
           </div>
@@ -144,8 +166,11 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
           <div className="tablet-teams">
             {requiredTeams.map(team => {
               const dispatched = issue?.dispatchedTeams.includes(team.id) ?? false;
+              const taskLabel = issue?.id === 'ev-charger-repair'
+                ? team.id === 'mobilidade' ? 'DESVIAR ELÉTRICOS' : 'REPARAR CARREGADOR'
+                : team.short;
               return <div className={`tablet-team ${team.color}${dispatched ? ' is-dispatched' : ''}`} key={team.id}>
-                <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : team.short}</small></span>
+                <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : taskLabel}</small></span>
               </div>;
             })}
           </div>

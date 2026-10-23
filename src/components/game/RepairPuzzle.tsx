@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
-import { CollisionSafetyPuzzle, SignalCheckPuzzle } from './RepairPuzzleVariants';
+import { ChargerRepairPuzzle, CollisionSafetyPuzzle, SignalCheckPuzzle } from './RepairPuzzleVariants';
 
 type Direction = 0 | 1 | 2 | 3;
 type WireTile = { id: string; row: number; column: number; kind: 'straight' | 'corner'; rotation: number };
@@ -389,5 +389,6 @@ export default function RepairPuzzle({ onComplete, paused = false, type = 'pole'
   if (type === 'sensor') return <SensorSyncPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
   if (type === 'car') return <CollisionSafetyPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
   if (type === 'signal-check') return <SignalCheckPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+  if (type === 'charger') return <ChargerRepairPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
   return <PoleRepairPuzzle onComplete={onComplete} paused={paused} onCancel={onCancel} />;
 }

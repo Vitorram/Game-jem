@@ -115,6 +115,7 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   advancePhase(elapsedMs: number): void { this.phase?.advance(elapsedMs); }
+  expirePhaseOrder(id: string, continuePhase = true): void { this.phase?.expireOrder(id, continuePhase); }
   phaseIsCinematic(): boolean { return this.phase?.isCinematicActive() ?? false; }
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
@@ -279,7 +280,7 @@ export class Fase1OrlaScene implements GameScene {
     const approach = pole ? this.traffic.getWorkZoneApproachPosition(pole.position) : null;
     const placedCones = state.roads.filter(road => road.type === 'PRINCIPAL' && road.conesActive).length;
     const principalRoads = state.roads.filter(road => road.type === 'PRINCIPAL');
-    const escapeRoad = state.roads.find(road => road.type === 'ESCAPE');
+    const greenRoad = state.roads.find(road => road.type === 'GREEN');
     const crateCell = this.items.tileInFront(2, position);
     return {
       holdingCone: this.items.heldBy(2) === 'cone',
@@ -289,7 +290,7 @@ export class Fase1OrlaScene implements GameScene {
         && Math.hypot(position.x - approach.x, position.z - approach.z) <= 1.6,
       normalFlow: principalRoads.length > 0
         && principalRoads.every(road => road.status === 'open' && road.direction === 'NORMAL')
-        && escapeRoad?.status === 'blocked',
+        && greenRoad?.redirected === false,
     };
   }
 
@@ -307,7 +308,7 @@ export class Fase1OrlaScene implements GameScene {
   useMobilityHotkey(key: string): boolean {
     if (this.disposed || this.player.role !== 'mobilidade') return false;
     if (this.phase) {
-      const actions: Record<string, MobilityRoadAction> = { Digit1: 'release', Digit2: 'block', Digit3: 'blockAll', Digit4: 'escape' };
+      const actions: Record<string, MobilityRoadAction> = { Digit1: 'release', Digit2: 'block', Digit3: 'blockAll', Digit4: 'electricDetour' };
       return actions[key] ? this.phase.mobilityAction(this.player, actions[key]) : false;
     }
     const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
@@ -315,7 +316,7 @@ export class Fase1OrlaScene implements GameScene {
     const roadId = this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z);
     if (!roadId) return false;
     const actions: Record<string, MobilityRoadAction> = {
-      Digit1: 'release', Digit2: 'block', Digit3: 'blockAll', Digit4: 'escape',
+      Digit1: 'release', Digit2: 'block', Digit3: 'blockAll', Digit4: 'electricDetour',
     };
     const action = actions[key];
     if (!action) return false;

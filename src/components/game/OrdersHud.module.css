@@ -46,9 +46,7 @@
 }
 
 .focus { padding: 4px 6px; background: #213e35; color: #fff4d6; border-radius: 5px; font-size: 10px; }
-.phaseStatus { position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100vw - 32px); padding: 6px 12px; border-radius: 8px; background: #10211de8; color: #e4f7e8; text-align: center; font: 11px/1.5 system-ui, sans-serif; }
-.phaseStatus span { display: block; color: #ffd884; }
-@media (max-width: 600px) { .strip { gap: 5px; } .tickets { max-width: calc(100vw - 165px); } .ticket { width: 135px; } .coin, .clock { padding: 5px 7px; font-size: 14px; } .coinFace { display: none; } .phaseStatus { font-size: 10px; } }
+@media (max-width: 600px) { .strip { gap: 5px; } .tickets { max-width: calc(100vw - 165px); } .ticket { width: 135px; } .coin, .clock { padding: 5px 7px; font-size: 14px; } .coinFace { display: none; } }
 
 .ticket[data-queued] {
   opacity: 0.8;
@@ -190,6 +188,7 @@
   z-index: 20;
   display: grid;
   place-items: center;
+  overflow-y: auto;
   padding: 16px;
   background: rgba(40, 25, 10, 0.55);
   font-family: ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
@@ -207,6 +206,34 @@
   color: #4a311c;
   text-align: center;
   box-shadow: 0 8px 0 rgba(58, 38, 22, 0.4);
+}
+
+.farewellCard {
+  width: min(500px, 100%);
+  gap: 14px;
+}
+
+.farewellIllustration {
+  display: block;
+  width: min(100%, 360px);
+  height: auto;
+  overflow: visible;
+}
+
+.farewellVerdict {
+  max-width: 48ch;
+  line-height: 1.45;
+}
+
+.farewellWaveHand {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: farewell-wave 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes farewell-wave {
+  from { transform: rotate(-14deg); }
+  to { transform: rotate(16deg); }
 }
 
 .card h2 {
@@ -289,6 +316,55 @@
   outline-offset: 3px;
 }
 
+.penaltyOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(21, 27, 25, 0.82);
+  pointer-events: auto;
+  font-family: ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+}
+
+.penaltyCard {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: min(440px, 100%);
+  padding: 26px;
+  border: 4px solid #4a311c;
+  border-radius: 20px;
+  background: var(--paper, #fff4d6);
+  color: var(--ink, #4a311c);
+  text-align: center;
+  box-shadow: 0 8px 0 rgba(58, 38, 22, 0.4);
+}
+
+.penaltyEyebrow {
+  color: #9b4c16;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.penaltyCard h2 {
+  margin: 0;
+  font-size: clamp(1.55rem, 6vw, 2.1rem);
+}
+
+.penaltyCard p {
+  max-width: 38ch;
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.penaltyExtra {
+  color: #a63330;
+}
+
 /* Botão só de teste (some no build de produção). */
 .debug {
   position: fixed;
@@ -316,11 +392,13 @@
   .ticket {
     width: 132px;
   }
+  .farewellCard { padding: 18px 16px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .step[data-state='next'],
-  .clock[data-urgent] {
+  .clock[data-urgent],
+  .farewellWaveHand {
     animation: none;
   }
 }
@@ -333,7 +411,6 @@
 .ticket .hint { font-size: 10px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .ticket .step { width: 20px; height: 20px; font-size: 11px; }
 .ticket .bar { height: 5px; }
-.phaseStatus { position: static; grid-column: 1 / -1; transform: none; width: auto; max-width: none; }
 @media (max-width: 700px) {
   .strip { top: 12px; left: 10px; width: calc(100vw - 20px); gap: 5px; grid-template-columns: auto auto 1fr; }
   .coin, .clock { font-size: 0.85rem; padding: 5px 8px; }
@@ -342,10 +419,8 @@
   .tickets { position: static; grid-column: 1 / -1; grid-row: 2; order: initial; }
   .ticket { width: 190px; }
   .steps { gap: 3px; }
-  .phaseStatus { grid-row: 3; padding: 4px 8px; font-size: 10px; }
 }
 @media (max-height: 500px) {
   .ticket .steps, .ticket .hint:first-of-type { display: none; }
   .ticket { width: 170px; }
-  .phaseStatus { font-size: 9px; padding: 3px 6px; }
 }

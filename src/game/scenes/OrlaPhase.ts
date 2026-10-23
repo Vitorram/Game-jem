@@ -1,4 +1,4 @@
-import { BoxGeometry, CanvasTexture, CylinderGeometry, Group, Mesh, MeshStandardMaterial, RingGeometry, SphereGeometry, Sprite, SpriteMaterial } from 'three';
+import { BoxGeometry, CanvasTexture, ConeGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, RingGeometry, SphereGeometry, Sprite, SpriteMaterial } from 'three';
 import { suburbanGameState, type UrbanProblem } from '../core/GameState';
 import type { Player } from '../entities/Player';
 import type { GridMap } from '../map/GridMap';
@@ -21,10 +21,13 @@ export class OrlaPhase {
   private dispatchStartedAt: number | null = null;
   private readonly completedSteps = new Set<number>();
   private crossingBaseline = 0;
+  private crossingTarget = 0;
   private crossingProtected = false;
   private signalRepairCompleted = false;
   private rescueProtected = false;
   private rushFlowSeconds = 0;
+  private rescueBaseline = 0;
+  private rescueTarget = 0;
   private service: { id: string; elapsed: number } | null = null;
   isServicing(player: Player): boolean {
     const problem = this.service ? this.problem(this.service.id) : undefined;
@@ -38,6 +41,9 @@ export class OrlaPhase {
   private readonly markerMaterials: MeshStandardMaterial[] = [];
   private readonly markers = new Map<string, Mesh>();
   private readonly sensor = new Group();
+  private readonly bikeLaneCone = new Group();
+  private readonly bikeConeMaterial = new MeshStandardMaterial({ color: '#f28353', roughness: .75 });
+  private readonly bikeConeBandMaterial = new MeshStandardMaterial({ color: '#fff0c4', roughness: .45 });
   private readonly signalFx = new Group();
   private readonly signalSparks: Mesh[] = [];
   private readonly signalBubble: Sprite | null;
@@ -77,6 +83,16 @@ export class OrlaPhase {
       this.markers.set(event.id, ring);
       this.group.add(ring);
     }
+    const bikeCone = new Mesh(new ConeGeometry(.24, .62, 8), this.bikeConeMaterial);
+    bikeCone.position.y = .36;
+    const bikeConeBase = new Mesh(new CylinderGeometry(.31, .31, .08, 8), this.bikeConeMaterial);
+    bikeConeBase.position.y = .04;
+    const bikeConeBand = new Mesh(new CylinderGeometry(.145, .18, .08, 8, 1, true), this.bikeConeBandMaterial);
+    bikeConeBand.position.y = .39;
+    this.bikeLaneCone.add(bikeCone, bikeConeBase, bikeConeBand);
+    this.bikeLaneCone.position.set(-12, 0, 2.4);
+    this.bikeLaneCone.visible = false;
+    this.group.add(this.bikeLaneCone);
     const sensorPosition = ORLA_EVENTS.find(event => event.id === 'sensor-failure')!.position;
     this.sensor.position.set(sensorPosition.x, 0, sensorPosition.z + 0.88);
     const box = new Mesh(this.boxGeometry, this.sensorMaterial);
@@ -106,8 +122,8 @@ export class OrlaPhase {
     this.crash.add(secondCar.group);
     this.crashBubble = this.createBubble('BATIDA LEVE');
     if (this.crashBubble) { this.crashBubble.position.set(0, 2.8, 0); this.crashBubble.scale.set(3.3, .95, 1); this.crash.add(this.crashBubble); }
-    this.rescueBubble = this.createBubble('VOCÊ AJUDOU UM TRABALHADOR!');
-    if (this.rescueBubble) { this.rescueBubble.visible = false; this.rescueBubble.scale.set(4.7, 1.35, 1); this.group.add(this.rescueBubble); }
+    this.rescueBubble = this.createBubble('ENTREGADOR RESGATADO!');
+    if (this.rescueBubble) { this.rescueBubble.visible = false; this.rescueBubble.scale.set(3.6, 1.02, 1); this.group.add(this.rescueBubble); }
     for (let i = 0; i < 4; i++) {
       const puff = new Mesh(this.smokeGeometry, this.smokeMaterial);
       puff.position.set(i % 2 ? .72 : -.52, 1.1 + (i % 2) * .24, i < 2 ? -.12 : .43);
@@ -141,12 +157,39 @@ export class OrlaPhase {
     return true;
   }
 
+  expireOrder(id: string, continuePhase = true): void {
+    const event = ORLA_EVENTS[this.eventIndex];
+    if (!event || event.id !== id) return;
+    if (id === 'traffic-signal-failure') {
+      this.traffic.setCrossingGuarded(false);
+      this.traffic.setUnsafeCrossing(false);
+      this.traffic.setSignalFailure(false);
+      this.pedestrians.setCrossingIncident(false);
+      this.pedestrians.setRoadBatchHold(false);
+      this.crossingProtected = false;
+    } else if (id === 'cyclist-assist') {
+      this.traffic.setCrossingGuarded(false);
+      this.pedestrians.cancelWorkerRescue();
+      this.pedestrians.setRoadBatchHold(false);
+      this.rescueProtected = false;
+    } else if (id === 'ev-charger-repair') {
+      this.traffic.setElectricChargerBroken(false);
+    }
+    suburbanGameState.setProblems(suburbanGameState.snapshot().problems.filter(item => item.id !== id));
+    suburbanGameState.selectProblem(null);
+    if (this.items.heldBy(2) === 'cone') this.items.consume(2, 'cone');
+    this.eventIndex++;
+    this.dispatchStartedAt = null;
+    if (continuePhase) this.issueNext();
+  }
+
   private issueNext(): void {
     const event = ORLA_EVENTS[this.eventIndex];
     if (!event || this.elapsedMs < event.atMs || suburbanGameState.snapshot().problems.length > 0) return;
+    const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition() : event.position;
     suburbanGameState.setProblems([{ id: event.id,
       type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
-      label: event.title, position: { ...event.position }, status: 'ACTIVE', stage: 'warning',
+      label: event.title, position: { ...position }, status: 'ACTIVE', stage: 'warning',
       requiredTeams: [...event.teams], dispatchedTeams: [],
       instruction: 'Novo chamado recebido. Analista: confira o relatório e acione a equipe indicada.' }]);
     suburbanGameState.selectProblem(null);
@@ -162,6 +205,10 @@ export class OrlaPhase {
     if (event.id === 'cyclist-assist') {
       this.pedestrians.beginWorkerRescue();
       this.beginCinematic(event.position, .85, 2.5);
+    }
+    if (event.id === 'ev-charger-repair') {
+      this.traffic.setElectricChargerBroken(true);
+      this.beginCinematic(position, .72, 2.5);
     }
   }
 
@@ -207,12 +254,13 @@ export class OrlaPhase {
     const crossing = this.problem('traffic-signal-failure');
     const progress = this.pedestrians.getCrossingProgress();
     if (crossing?.stage === 'active' && crossing.status !== 'RESOLVED' && this.crossingProtected
-      && progress.crossed >= this.crossingBaseline + 3 && !progress.occupied) {
+      && progress.crossed >= this.crossingBaseline + this.crossingTarget && !progress.occupied) {
       this.step(crossing.id, 201);
       // O reparo pode terminar antes da travessia. Reporte os passos na ordem
       // da missão assim que ambos estiverem prontos, independentemente da ordem real.
       if (this.signalRepairCompleted) this.step(crossing.id, 601);
       this.pedestrians.setRoadBatchHold(true);
+      this.pedestrians.setCrossingIncident(false);
       this.patch(crossing.id, { instruction: this.crossingInstruction() });
     }
     const rescue = this.problem('cyclist-assist');
@@ -226,18 +274,23 @@ export class OrlaPhase {
     if (rush?.stage === 'active' && rush.status === 'ACTIVE') {
       const roads = this.traffic.getRoadStates();
       const flowing = roads.filter(road => road.type === 'PRINCIPAL').every(road => road.status === 'open')
-        && roads.some(road => road.type === 'ESCAPE' && road.status === 'open') && !this.traffic.isCrossingGuarded()
+        && !this.traffic.isCrossingGuarded()
         && this.traffic.getMovingVehicleCount() > 0;
       this.rushFlowSeconds = flowing ? this.rushFlowSeconds + dt : 0;
       this.patch(rush.id, { instruction: flowing
-        ? `Desvio aberto. Mantenha as faixas livres: ${Math.min(8, Math.floor(this.rushFlowSeconds))}/8 s.`
+        ? `Faixas fluindo. Mantenha a circulação: ${Math.min(8, Math.floor(this.rushFlowSeconds))}/8 s.`
       : ORLA_EVENTS.find(event => event.id === 'rush-hour')!.instruction });
       if (this.rushFlowSeconds >= 8 && !this.completedSteps.has(301)) this.resolve(rush.id, 301);
+    }
+    const chargerIssue = this.problem('ev-charger-repair');
+    if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE' && !this.completedSteps.has(901)) {
+      const waiting = this.traffic.getElectricQueueCount();
+      if (waiting > 0) this.patch(chargerIssue.id, { instruction: `${waiting} carro${waiting === 1 ? '' : 's'} elétrico${waiting === 1 ? '' : 's'} na fila. Mobilidade: use 4 para desviá-los para a rua normal.` });
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status === 'ACTIVE' && this.traffic.isIncidentProtected()) {
       this.step(collision.id, 501);
-      if (!this.service) this.patch(collision.id, { instruction: 'Trecho isolado e desvio aberto. Infraestrutura: use E junto ao veículo para liberar a faixa.' });
+      if (!this.service) this.patch(collision.id, { instruction: 'Trecho isolado. Infraestrutura: use E junto ao veículo para liberar a faixa.' });
     }
     if (this.service) {
       const problem = this.problem(this.service.id);
@@ -245,12 +298,16 @@ export class OrlaPhase {
         && (problem.id !== 'minor-collision' || this.traffic.isIncidentProtected());
       if (safe && problem) {
         this.service.elapsed += dt;
-        const duration = problem.id === 'sensor-failure' ? 1.25 : 1.5;
-        this.patch(problem.id, { instruction: `${problem.id === 'sensor-failure' ? 'Instalando sensor' : 'Liberando veículo'}: ${Math.min(100, Math.floor(this.service.elapsed / duration * 100))}%. Permaneça no local.` });
+        const duration = problem.id === 'sensor-failure' ? 1.25 : problem.id === 'ev-charger-repair' ? 1.2 : 1.5;
+        const serviceLabel = problem.id === 'sensor-failure' ? 'Instalando sensor'
+          : problem.id === 'ev-charger-repair' ? 'Preparando reparo do carregador' : 'Liberando veículo';
+        this.patch(problem.id, { instruction: `${serviceLabel}: ${Math.min(100, Math.floor(this.service.elapsed / duration * 100))}%. Permaneça no local.` });
         if (this.service.elapsed >= duration) {
           this.patch(problem.id, { instruction: problem.id === 'sensor-failure'
-            ? 'Sensor preparado. Calibre o equipamento.' : 'Veículo isolado. Reconecte os sistemas para liberar a faixa.' });
-          this.openRepair(problem.id === 'sensor-failure' ? 'sensor' : 'car');
+            ? 'Sensor preparado. Calibre o equipamento.' : problem.id === 'ev-charger-repair'
+              ? 'Carregador isolado. Reconecte os cabos e rearme o disjuntor.'
+              : 'Veículo isolado. Reconecte os sistemas para liberar a faixa.' });
+          this.openRepair(problem.id === 'sensor-failure' ? 'sensor' : problem.id === 'ev-charger-repair' ? 'charger' : 'car');
           this.service = null;
         }
       } else if (problem) {
@@ -289,6 +346,20 @@ export class OrlaPhase {
       }
       const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
       const held = this.items.heldBy(2);
+      const coneTask = this.problem('bike-lane-cone');
+      if (coneTask?.stage === 'active' && coneTask.status === 'ACTIVE') {
+        if (held === 'cone' && distance(position, crate) <= 2.3) {
+          this.items.consume(2, 'cone');
+          this.resolve(coneTask.id, 803);
+          this.patch(coneTask.id, { instruction: 'Cone guardado na caixa. Ciclovia liberada!' });
+          return;
+        }
+        if (held === null && distance(position, coneTask.position) <= 1.8 && this.items.give(2, 'cone')) {
+          this.bikeLaneCone.visible = false;
+          this.patch(coneTask.id, { instruction: 'Cone recolhido. Leve até a caixa de cones e use E para guardar.' });
+          return;
+        }
+      }
       // Distância física evita depender do texto ou da célula de orientação do tutorial.
       if (distance(position, crate) <= 2.3) {
         if (held === 'cone') this.items.consume(2, 'cone');
@@ -324,6 +395,12 @@ export class OrlaPhase {
       this.openRepair('signal-check');
     } else if (nearby.id === 'minor-collision' && this.traffic.isIncidentProtected()) {
       this.beginService(nearby.id);
+    } else if (nearby.id === 'ev-charger-repair') {
+      if (!this.completedSteps.has(901) || !this.traffic.isElectricDiversionActive()) {
+        this.patch(nearby.id, { instruction: 'Mobilidade precisa usar 4 para desviar os carros elétricos antes do reparo.' });
+        return;
+      }
+      this.beginService(nearby.id);
     }
   }
 
@@ -338,6 +415,7 @@ export class OrlaPhase {
       sensor: { id: 'sensor-failure', step: 401 },
       car: { id: 'minor-collision', step: 502 },
       'signal-check': { id: 'signal-check', step: 801 },
+      charger: { id: 'ev-charger-repair', step: 902 },
     };
     const target = targets[type];
     if (!target) return;
@@ -349,6 +427,7 @@ export class OrlaPhase {
       if (signal) this.patch(signal.id, { instruction: this.crossingInstruction() });
       return;
     }
+    if (type === 'charger') this.traffic.setElectricChargerBroken(false);
     if (type === 'car') this.traffic.clearCollision();
     this.resolve(target.id, target.step);
   }
@@ -363,18 +442,25 @@ export class OrlaPhase {
         ?? (player.position.z >= 4 ? 'orla-eastbound' : null);
       if (!roadId) return true;
       if (action === 'blockAll' && !this.rescueProtected) {
+        const progress = this.pedestrians.getCrossingProgress();
+        this.rescueBaseline = progress.crossed;
+        this.rescueTarget = progress.pending;
         this.traffic.applyMobilityAction(roadId, 'release');
         this.traffic.setCrossingGuarded(true);
+        this.pedestrians.setRoadBatchHold(false);
         this.rescueProtected = true;
         this.pedestrians.startWorkerCrossing();
-        this.patch(rescue.id, { instruction: 'Trânsito retido. Aguarde o entregador atravessar com a bicicleta.' });
+        this.patch(rescue.id, { instruction: 'Trânsito retido. O entregador e os pedestres vão atravessar; aguarde todos chegarem à calçada.' });
         return true;
       }
       if (action === 'release') {
         const workerPosition = this.pedestrians.getWorkerRescuePosition();
-        if (this.completedSteps.has(701) && this.pedestrians.getWorkerRescueState() === 'safe' && workerPosition) {
+        const progress = this.pedestrians.getCrossingProgress();
+        const pedestriansSafe = progress.crossed >= this.rescueBaseline + this.rescueTarget && !progress.occupied && progress.waiting === 0;
+        if (this.completedSteps.has(701) && this.pedestrians.getWorkerRescueState() === 'safe' && workerPosition && pedestriansSafe) {
           this.traffic.setCrossingGuarded(false);
           this.traffic.setAssistedCrossingRequested(false);
+          this.pedestrians.setRoadBatchHold(true);
           this.traffic.applyMobilityAction(roadId, 'release');
           this.resolve(rescue.id, 702);
           if (this.rescueBubble) {
@@ -383,6 +469,8 @@ export class OrlaPhase {
             this.rescueBubbleUntilMs = this.elapsedMs + 4_200;
           }
           this.beginCinematic(workerPosition, .8, 4.2);
+        } else if (this.pedestrians.getWorkerRescueState() === 'safe' && !pedestriansSafe) {
+          this.patch(rescue.id, { instruction: 'O entregador chegou à calçada. Mantenha os carros parados até todos os pedestres terminarem a travessia.' });
         }
         return true;
       }
@@ -397,7 +485,11 @@ export class OrlaPhase {
     if (crossingActive && crossing) {
       if (action === 'blockAll') {
         if (this.completedSteps.has(201)) return true;
-        if (!this.crossingProtected) this.crossingBaseline = this.pedestrians.getCrossingProgress().crossed;
+        if (!this.crossingProtected) {
+          const progress = this.pedestrians.getCrossingProgress();
+          this.crossingBaseline = progress.crossed;
+          this.crossingTarget = progress.pending;
+        }
         this.crossingProtected = true;
         this.traffic.applyMobilityAction(roadId, 'release');
         this.traffic.setCrossingGuarded(true);
@@ -423,7 +515,26 @@ export class OrlaPhase {
       this.traffic.setCrossingGuarded(false);
       this.crossingProtected = false;
     }
-    this.traffic.applyMobilityAction(roadId === 'orla-escape' ? 'orla-eastbound' : roadId, action);
+    const chargerIssue = this.problem('ev-charger-repair');
+    if (action === 'electricDetour' && chargerIssue?.status === 'ACTIVE' && chargerIssue.stage === 'warning') {
+      this.patch(chargerIssue.id, { instruction: 'Aguarde o chamado ser liberado pelas equipes antes de desviar os elétricos.' });
+      return true;
+    }
+    if (action === 'electricDetour' && chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
+      && this.completedSteps.has(901) && this.traffic.isElectricDiversionActive()) {
+      this.patch(chargerIssue.id, { instruction: 'Desvio mantido. Infraestrutura: repare o carregador para liberar a avenida verde.' });
+      return true;
+    }
+    this.traffic.applyMobilityAction(roadId, action);
+    if (action === 'electricDetour') {
+      if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
+        && this.traffic.isElectricChargerBroken() && this.traffic.isElectricDiversionActive()) {
+        this.step(chargerIssue.id, 901);
+        this.patch(chargerIssue.id, { instruction: 'Elétricos desviados para as vias comuns. Infraestrutura: aproxime-se do carregador e use E para iniciar o reparo.' });
+      } else if (chargerIssue?.stage === 'active' && this.traffic.isElectricChargerBroken()) {
+        this.patch(chargerIssue.id, { instruction: 'Mantenha o desvio dos elétricos ativo com a tecla 4 enquanto o carregador estiver quebrado.' });
+      }
+    }
     return true;
   }
 
@@ -456,8 +567,16 @@ export class OrlaPhase {
               : 'TRAVESSIA SEGURA · AGUARDE O GRUPO ATRAVESSAR';
       return { target: this.targetFor(player, problem), prompt };
     }
+    const chargerIssue = player.id === 2 ? this.problem('ev-charger-repair') : undefined;
+    if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
+      && distance(player.position, chargerIssue.position) <= 5) {
+      const prompt = this.traffic.isElectricDiversionActive()
+        ? 'DESVIO DOS ELÉTRICOS ATIVO · INFRA VAI REPARAR O CARREGADOR'
+        : 'USE 4 PARA DESVIAR OS ELÉTRICOS PARA A RUA NORMAL';
+      return { target: this.targetFor(player, problem), prompt };
+    }
     const bikeTask = player.id === 2 ? suburbanGameState.snapshot().problems.find(item =>
-      ['cyclist-assist', 'bike-lane-cleanup'].includes(item.id) && item.status === 'ACTIVE') : undefined;
+      ['cyclist-assist', 'bike-lane-cleanup', 'bike-lane-cone'].includes(item.id) && item.status === 'ACTIVE') : undefined;
     if (bikeTask && distance(player.position, bikeTask.position) <= (bikeTask.id === 'cyclist-assist' ? 4 : 1.8)) {
       if (bikeTask.id === 'cyclist-assist') {
         const state = this.pedestrians.getWorkerRescueState();
@@ -467,6 +586,10 @@ export class OrlaPhase {
               : 'TRÂNSITO PARADO · AGUARDE A TRAVESSIA SEGURA';
         return { target: this.targetFor(player, problem), prompt };
       }
+      if (bikeTask.id === 'bike-lane-cone' && held) {
+        return { target: this.targetFor(player, problem), prompt: distance(player.position, crate) <= 2.3 ? 'GUARDAR CONE NA CAIXA' : null };
+      }
+      if (bikeTask.id === 'bike-lane-cone') return { target: this.targetFor(player, problem), prompt: 'RECOLHER CONE E LEVAR À CAIXA' };
       return { target: this.targetFor(player, problem), prompt: 'LIBERAR CICLOVIA' };
     }
     if (player.id === 2 && distance(player.position, crate) <= 2.3) {
@@ -486,7 +609,8 @@ export class OrlaPhase {
       : near.id === 'sensor-failure' ? 'INSTALAR SENSOR'
         : near.id === 'traffic-signal-failure' ? 'SINCRONIZAR SEMÁFORO'
           : near.id === 'signal-check' ? 'CHECAR SEMÁFORO'
-        : this.traffic.isIncidentProtected() ? 'LIBERAR VEÍCULO' : 'AGUARDE CONE E DESVIO DA MOBILIDADE' : null;
+            : near.id === 'ev-charger-repair' ? this.completedSteps.has(901) ? 'REPARAR CARREGADOR' : 'AGUARDE O DESVIO DA MOBILIDADE'
+              : this.traffic.isIncidentProtected() ? 'LIBERAR VEÍCULO' : 'AGUARDE CONE E BLOQUEIO DA MOBILIDADE' : null;
     return { target: this.targetFor(player, problem), prompt };
   }
 
@@ -505,6 +629,9 @@ export class OrlaPhase {
       if (!this.items.heldBy(2) && !this.traffic.getNearestConePosition(problem.position)) return this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
       return this.traffic.getIncidentConeTarget();
     }
+    if (problem?.id === 'bike-lane-cone' && this.items.heldBy(2) === 'cone') {
+      return this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
+    }
     if (problem) return problem.position;
     const cone = this.traffic.getNearestConePosition(player.position);
     return this.items.heldBy(2) === 'cone' ? this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row) : cone;
@@ -512,7 +639,8 @@ export class OrlaPhase {
 
   private serviceTarget(problem: UrbanProblem): Point {
     // Trabalhar ao lado do veículo permite chegar sem atravessar sua colisão física.
-    return problem.id === 'minor-collision' ? { x: problem.position.x, z: problem.position.z - 1.1 } : problem.position;
+    return problem.id === 'minor-collision' ? { x: problem.position.x, z: problem.position.z - 1.1 }
+      : problem.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition() : problem.position;
   }
 
   private beginService(id: string): void {
@@ -527,7 +655,7 @@ export class OrlaPhase {
   private crossingInstruction(): string {
     const crossed = this.completedSteps.has(201);
     const repaired = this.signalRepairCompleted;
-    if (crossed && repaired) return 'Travessia concluída e semáforo reparado. Mobilidade: use 1 junto à faixa para liberar a via.';
+    if (crossed && repaired) return 'Travessia concluída e semáforo reparado. Troque para Mobilidade e use 1 junto à faixa para reabrir as pistas e normalizar o trânsito.';
     if (crossed) return 'Pedestres atravessaram. Mantenha a via protegida enquanto Infraestrutura termina o semáforo.';
     if (repaired) return 'Semáforo reparado. Mobilidade: use 3 para proteger a faixa e aguarde o grupo atravessar.';
     return 'Mobilidade: use 3 junto à faixa. Quando os pedestres entrarem na travessia, troque para Infraestrutura e conserte o semáforo. Depois, Mobilidade usa 1 para liberar a via.';
@@ -576,6 +704,10 @@ export class OrlaPhase {
       (marker.material as MeshStandardMaterial).color.set(problem.stage === 'warning' ? '#ffbe46'
         : this.elapsedMs - (problem.startedAtMs ?? 0) > 35_000 ? '#ff6559' : '#ffc85e');
     }
+    const coneTask = this.problem('bike-lane-cone');
+    this.bikeLaneCone.visible = !!coneTask && coneTask.stage === 'active' && coneTask.status === 'ACTIVE'
+      && this.items.heldBy(2) !== 'cone';
+    if (coneTask) this.bikeLaneCone.position.set(coneTask.position.x, 0, coneTask.position.z);
     const sensor = this.problem('sensor-failure');
     this.sensorMaterial.color.set(!sensor || sensor.status === 'RESOLVED' ? '#69dfb0'
       : sensor.stage === 'warning' && Math.floor(this.elapsedMs / 220) % 2 === 0 ? '#ffc85e' : '#ed675a');
@@ -627,7 +759,8 @@ export class OrlaPhase {
     this.pedestrians.setRoadBatchHold(false);
     this.traffic.setAssistedCrossingRequested(false);
     this.ringGeometry.dispose(); this.boxGeometry.dispose(); this.antennaGeometry.dispose();
-    this.warningMaterial.dispose(); this.sensorMaterial.dispose();
+    this.warningMaterial.dispose(); this.sensorMaterial.dispose(); this.bikeConeMaterial.dispose(); this.bikeConeBandMaterial.dispose();
+    this.bikeLaneCone.traverse(object => { if (object instanceof Mesh) object.geometry.dispose(); });
     this.markerMaterials.forEach(material => material.dispose());
     this.signalFx.traverse(object => { if (object instanceof Mesh) (object.material as MeshStandardMaterial).dispose(); });
     if (this.signalBubble) { (this.signalBubble.material as SpriteMaterial).map?.dispose(); (this.signalBubble.material as SpriteMaterial).dispose(); }

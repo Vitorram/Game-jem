@@ -145,7 +145,9 @@ export class Game {
       const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, type => this.openRepairPuzzle(type), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
       this.scenes.setScene(orla);
       this.session = new GameSession(ORLA_SESSION_CONFIG);
-      sessionStore.bind(this.session, () => this.restartPhase());
+      sessionStore.bind(this.session, () => this.restartPhase(), (id, continuePhase) => orla.expirePhaseOrder(id, continuePhase), () => {
+        if (this.status === 'playing') this.togglePause();
+      });
       sessionStore.start();
       if (this.mandatoryTutorialActive) sessionStore.setPaused(true);
       else {
@@ -459,7 +461,13 @@ export class Game {
 
   private onKeyDown = (event: KeyboardEvent) => {
     if (event.repeat) return;
-    if (event.code === 'Escape') { event.preventDefault(); this.togglePause(); return; }
+    if (event.code === 'Escape') {
+      event.preventDefault();
+      const feedback = sessionStore.getSnapshot().feedback?.event;
+      if (feedback?.type === 'order-expired' || feedback?.type === 'xp-penalty') return;
+      this.togglePause();
+      return;
+    }
     if (this.status === 'playing' && this.mandatoryTutorialActive && !this.repairPuzzleOpen
       && ['KeyE', 'Enter', 'Space'].includes(event.code)) {
       const tutorialTarget = document.querySelector<HTMLElement>('[data-tutorial-target="true"]');

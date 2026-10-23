@@ -77,11 +77,12 @@ Assim, o tutorial pratica ações isoladas e a partida usa essas mesmas ações 
 
 ## Módulo de partida e pedidos
 
-`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. A Orla usa uma agenda finita em `orlaEvents.ts`: nove eventos encadeados em seis minutos, com chamados menores depois do acidente principal. `sessionData.ts` transforma a agenda em pedidos. O modo genérico de catálogo cíclico continua disponível para outros cenários.
+`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. A Orla usa nove eventos em intervalos de 20 segundos, com prazo de 30 segundos por missão e limite de três missões perdidas. `sessionData.ts` transforma a agenda em pedidos. O modo genérico de catálogo cíclico continua disponível para outros cenários.
 
 - Estados: `menu` → `playing` ↔ `paused` → `finished`. `start()` inicia ou reinicia após o fim; `returnToMenu()` limpa a partida. A pausa congela fase, chegadas e prazos. Só `playing` aceita resoluções.
 - Na agenda da Orla, qualquer ocorrência ativa pode receber progresso, seguindo seus passos em ordem. No modo genérico, a fila permanece FIFO. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
-- Concluir rende `basePoints + floor(maxSpeedBonus × tempoRestante / timeLimitMs)`. Etapas isoladas não pontuam. Expirar desconta `expirationPenalty` uma única vez; o total pode ficar negativo.
+- Concluir rende `basePoints + floor(maxSpeedBonus × tempoRestante / timeLimitMs)`. Etapas isoladas não pontuam. Na Orla, cada prazo expirado desconta 200 XP; três missões perdidas encerram a partida com a tela “Você perdeu”.
+- Deixar a via de escape aberta por 10 segundos gera um aviso. Aos 20 segundos, desconta 200 XP; fechar e abrir novamente reinicia a contagem.
 - No prazo exato, o pedido expira. No fim da fase, todas as pendências também expiram com penalidade; nenhuma chegada acontece no instante final. Empates processam expiração antes de chegada.
 - `advance(deltaMs)` recebe milissegundos, inclusive frações, e processa todos os eventos de avanços grandes. Use o tempo real decorrido enquanto jogando, sem o limite de delta usado na física. Avance o relógio antes de registrar uma resolução. Não repasse tempo passado em pausa após retomar.
 - Métodos retornam eventos de mudança; `snapshot()` devolve uma cópia com fila, próximo risco, relógios, placar e contadores. Não há callbacks ou atualizações React por frame, nem recursos de GPU a descartar.
@@ -172,20 +173,21 @@ Definir perspectiva (top-down, terceira pessoa ou outra), controles principais e
 ### Rodada jogável da Orla
 
 Em `/jogo`, conclua o treino guiado. A rodada dura **seis minutos completos**;
-resolver uma ocorrência não encerra a fase. Cada uma vale 100 pontos e até 50 de
-bônus. Pendências só expiram no fim, com desconto de 20 pontos por ocorrência.
+resolver uma ocorrência não encerra a fase. Cada missão vale 100 XP e até 50 de
+bônus, tem 30 segundos para ser concluída e perde 200 XP quando vence o prazo.
+Três missões perdidas encerram a rodada.
 
 | Horário | Evento e resposta |
 | --- | --- |
 | 0:10 | Pane urgente no semáforo, com faíscas, balão e take de câmera; os carros param. **Infraestrutura:** E no semáforo e puzzle de reparo. |
-| 0:40 | Pedestres não conseguem atravessar e a fila cresce. **Mobilidade:** 3 para parar os carros, aguardar o trio e 1 para liberar. |
-| 1:20 | Fluxo intenso; abrir faixas e desvio (1 e 4), mantendo circulação por 8 s. |
-| 2:05 | Ciclista precisa de ajuda. **Mobilidade:** E perto dele para liberar a ciclovia. |
-| 2:50 | Checagem rápida do semáforo. **Infraestrutura:** E para confirmar o controlador. |
-| 4:00 | Batida leve entre dois carros, com fumaça e take de câmera. **Mobilidade:** cone e desvio. **Infraestrutura:** E ao lado dos carros para liberar a faixa. |
-| 4:40 | Falha de sensor. **Infraestrutura:** E no ponto e permanecer durante a instalação. |
-| 5:20 | Poste apagado. **Infraestrutura:** E no poste e puzzle de circuito. |
-| 5:50–6:00 | Objeto bloqueia a ciclovia. **Mobilidade:** E perto do objeto para liberar a passagem. |
+| 0:30 | Fluxo intenso. **Mobilidade:** abrir faixas e desvio (1 e 4), mantendo circulação por 8 s. |
+| 0:50 | Ciclista precisa de ajuda. **Mobilidade:** 3 para parar os carros, aguardar a travessia e 1 para liberar. |
+| 1:10 | Checagem rápida do semáforo. **Infraestrutura:** E para confirmar o controlador. |
+| 1:30 | Objeto bloqueia a ciclovia. **Mobilidade:** E perto dos objetos para iniciar a triagem. |
+| 1:50 | Cone aparece no meio da ciclovia. **Mobilidade:** recolher com E e levar até a caixa de cones. |
+| 2:10 | Batida leve entre dois carros, com fumaça e take de câmera. **Mobilidade:** cone e desvio. **Infraestrutura:** E ao lado dos carros para liberar a faixa. |
+| 2:30 | Falha de sensor. **Infraestrutura:** E no ponto e permanecer durante a instalação. |
+| 2:50 | Poste apagado. **Infraestrutura:** E no poste e puzzle de circuito. |
 
 Entre chamados, Mobilidade e Infraestrutura ficam selecionáveis para circular livremente. A chegada de uma ocorrência abre o tablet; ao acionar o reforço, o controle passa para a equipe responsável.
 

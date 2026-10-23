@@ -10,7 +10,7 @@ import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 type WalkerState = 'approach-cycle' | 'wait-cycle' | 'cross-cycle' | 'approach-road' | 'wait-road' | 'form-road' | 'cross-road' | 'exit';
 type Walker = { slot: number; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1 };
 type Cyclist = { visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1 };
-type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; elapsed: number };
+type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; safeElapsed: number };
 
 const CROSSING_X = ORLA_CROSSING.centerX;
 const SIDEWALK_Y = 0.02;
@@ -18,6 +18,7 @@ const CYCLIST_SAFE_GAP = 1.55;
 const WALKER_SAFE_GAP = 0.85;
 const CYCLIST_YIELD_LOOKAHEAD = 6;
 const CYCLIST_STOP_DISTANCE = 1.05;
+const WORKER_REST_SECONDS = 40;
 
 /** Travessias independentes para a ciclovia e a avenida, sem semaforos. */
 export class ActiveMobilitySystem {
@@ -59,16 +60,22 @@ export class ActiveMobilitySystem {
   private crossingIncident = false;
   private crossedPedestrians = 0;
   private holdRoadBatches = false;
+  private drainRoadQueue = false;
 
-  setRoadBatchHold(hold: boolean): void { this.holdRoadBatches = hold; }
+  setRoadBatchHold(hold: boolean): void {
+    this.holdRoadBatches = hold;
+    this.drainRoadQueue = !hold && this.traffic.isCrossingGuarded();
+  }
 
   setCrossingIncident(active: boolean): void {
     if (active && !this.crossingIncident) this.spawnWalkerTimer = 0;
     this.crossingIncident = active;
+    if (!active) this.drainRoadQueue = false;
   }
 
-  getCrossingProgress(): { waiting: number; crossed: number; occupied: boolean } {
+  getCrossingProgress(): { waiting: number; pending: number; crossed: number; occupied: boolean } {
     return { waiting: this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road').length,
+      pending: this.walkers.filter(walker => walker.state !== 'exit').length,
       crossed: this.crossedPedestrians, occupied: this.roadBatch.some(walker => walker.state === 'cross-road') };
   }
 
@@ -79,13 +86,22 @@ export class ActiveMobilitySystem {
     const x = CROSSING_X - .35, z = this.roadQueueZ;
     mesh.position.set(x, SIDEWALK_Y, z);
     this.group.add(mesh);
-    this.injuredWorker = { visual, mesh, x, z, state: 'waiting', elapsed: 0 };
+    this.injuredWorker = { visual, mesh, x, z, state: 'waiting', safeElapsed: 0 };
   }
 
   startWorkerCrossing(): void {
     if (!this.injuredWorker || this.injuredWorker.state === 'safe') return;
     this.workerRescueRequested = true;
     this.traffic.setAssistedCrossingRequested(true);
+  }
+
+  cancelWorkerRescue(): void {
+    this.workerRescueRequested = false;
+    this.traffic.setAssistedCrossingRequested(false);
+    if (!this.injuredWorker) return;
+    this.group.remove(this.injuredWorker.mesh);
+    this.injuredWorker.visual.dispose();
+    this.injuredWorker = null;
   }
 
   getWorkerRescueState(): 'absent' | 'waiting' | 'crossing' | 'safe' {
@@ -270,8 +286,9 @@ export class ActiveMobilitySystem {
       this.spawnCyclist(startX, dir);
       this.spawnCycleTimer = 3.8 + this.random() * 3.6;
     }
-    this.spawnWalkerTimer -= dt;
-    if (this.spawnWalkerTimer <= 0) {
+    const drainingStoppedQueue = this.drainRoadQueue && this.traffic.isCrossingGuarded();
+    if (!drainingStoppedQueue) this.spawnWalkerTimer -= dt;
+    if (!drainingStoppedQueue && this.spawnWalkerTimer <= 0) {
       this.spawnWalker(this.crossingIncident ? CROSSING_X - 3.2 : this.minX + 0.55);
       this.spawnWalkerTimer = this.crossingIncident ? 2.3 : 5.5 + this.random() * 5.5;
     }
@@ -284,7 +301,16 @@ export class ActiveMobilitySystem {
   private moveInjuredWorker(dt: number): void {
     const worker = this.injuredWorker;
     if (!worker) return;
-    worker.elapsed += dt;
+    if (worker.state === 'safe') {
+      worker.safeElapsed += dt;
+      worker.visual.animate(dt, 0);
+      if (worker.safeElapsed >= WORKER_REST_SECONDS) {
+        this.group.remove(worker.mesh);
+        worker.visual.dispose();
+        this.injuredWorker = null;
+      }
+      return;
+    }
     if (worker.state === 'waiting' && this.workerRescueRequested && this.traffic.isPedestrianCrossingClear()) {
       worker.state = 'crossing';
     }
@@ -297,7 +323,11 @@ export class ActiveMobilitySystem {
     const travel = worker.z - previousZ;
     worker.mesh.position.set(worker.x, worker.z >= this.roadSouthEdgeZ ? 0.036 : SIDEWALK_Y, worker.z);
     worker.visual.animate(dt, travel);
-    if (worker.z >= this.southWalkZ - .001) worker.state = 'safe';
+    if (worker.z >= this.southWalkZ - .001) {
+      worker.state = 'safe';
+      worker.safeElapsed = 0;
+      worker.visual.setSeated?.(true);
+    }
   }
 
   setPlayerPosition(position: { x: number; z: number } | null): void {
@@ -329,9 +359,13 @@ export class ActiveMobilitySystem {
     if (!this.cycleBatch && this.cycleCooldown === 0) {
       this.cycleBatch = this.walkers.filter(w => w.state === 'wait-cycle').sort((a, b) => a.arrived - b.arrived)[0] ?? null;
     }
-    if (!this.holdRoadBatches && !this.roadBatch.length && this.roadCooldown === 0) {
+    const stoppedDrain = this.traffic.areVehiclesStoppedForCrossing();
+    const drain = this.drainRoadQueue || stoppedDrain;
+    if (!this.holdRoadBatches && !this.roadBatch.length && (this.roadCooldown === 0 || drain)) {
       const waiting = this.walkers.filter(w => w.state === 'wait-road').sort((a, b) => a.arrived - b.arrived);
-      if (waiting.length >= CROSSING_RULES.roadGroupSize) {
+      if (drain ? waiting.length > 0 : waiting.length >= CROSSING_RULES.roadGroupSize) {
+        // Even when stopped traffic lets the queue drain continuously, cross
+        // the road in small, single-file groups instead of sending everyone at once.
         this.roadBatch = waiting.slice(0, CROSSING_RULES.roadGroupSize);
         this.groupSpeed = Math.min(...this.roadBatch.map(w => w.speed)) * 1.12;
         this.roadBatch.forEach((walker, index) => { walker.state = 'form-road'; walker.batchIndex = index; });
@@ -341,7 +375,8 @@ export class ActiveMobilitySystem {
   }
 
   private publishCrossing(): void {
-    this.traffic.setPedestrianCrossingState(this.roadBatch.length, this.roadBatch.some(w => w.state === 'cross-road'));
+    const waiting = this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road' || walker.state === 'cross-road').length;
+    this.traffic.setPedestrianCrossingState(waiting, this.roadBatch.some(w => w.state === 'cross-road'));
   }
 
   private moveCyclists(dt: number): void {
@@ -376,7 +411,8 @@ export class ActiveMobilitySystem {
   private isCycleCrossingClear(): boolean {
     return this.cyclists.every(cyclist => {
       const distance = (CROSSING_X - cyclist.x) * cyclist.direction;
-      if (Math.abs(cyclist.x - CROSSING_X) < CROSSING_RULES.cycleConflictHalfWidth) return false;
+      if (Math.abs(cyclist.x - CROSSING_X) < CROSSING_RULES.cycleConflictHalfWidth
+        && cyclist.speed > CROSSING_RULES.stoppedSpeed) return false;
       return distance < 0 || distance > CROSSING_RULES.cycleApproachDistance || cyclist.speed <= CROSSING_RULES.stoppedSpeed;
     });
   }
@@ -388,10 +424,21 @@ export class ActiveMobilitySystem {
     return distance <= step + .000001;
   }
 
+  private roadQueuePosition(batchIndex: number): { x: number; z: number } {
+    return {
+      x: CROSSING_X,
+      z: this.roadQueueZ - batchIndex * .72,
+    };
+  }
+
   private moveWalkers(dt: number): void {
     if (this.cycleBatch?.state === 'wait-cycle' && this.isCycleCrossingClear()) this.cycleBatch.state = 'cross-cycle';
-    const ready = this.roadBatch.length === CROSSING_RULES.roadGroupSize && this.roadBatch.every(w =>
-      w.state === 'form-road' && Math.hypot(w.x - (CROSSING_X + (w.batchIndex - 1) * .48), w.z - this.roadQueueZ) < .001);
+    const ready = this.roadBatch.length > 0
+      && (this.drainRoadQueue || this.traffic.areVehiclesStoppedForCrossing() || this.roadBatch.length === CROSSING_RULES.roadGroupSize)
+      && this.roadBatch.every(w => {
+        const queue = this.roadQueuePosition(w.batchIndex);
+        return w.state === 'form-road' && Math.hypot(w.x - queue.x, w.z - queue.z) < .001;
+      });
     if (ready && this.traffic.isPedestrianCrossingClear()) this.roadBatch.forEach(w => { w.state = 'cross-road'; });
 
     for (const walker of [...this.walkers]) {
@@ -416,7 +463,10 @@ export class ActiveMobilitySystem {
           }
           break;
         case 'form-road':
-          this.moveToward(walker, CROSSING_X + (walker.batchIndex - 1) * .48, this.roadQueueZ, dt);
+          {
+            const queue = this.roadQueuePosition(walker.batchIndex);
+            this.moveToward(walker, queue.x, queue.z, dt);
+          }
           break;
         case 'cross-road':
           if (this.moveToward(walker, walker.x, this.southWalkZ, dt, this.groupSpeed)) {

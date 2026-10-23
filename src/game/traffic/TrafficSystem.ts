@@ -1,5 +1,5 @@
 import {
-  BoxGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry,
+  BoxGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry, TorusGeometry,
 } from 'three';
 import type { GridMap } from '../map/GridMap';
 import { suburbanGameState, type RoadState } from '../core/GameState';
@@ -33,22 +33,18 @@ type Vehicle = {
   lane: Lane;
   homeLane: Lane;
   preferredLane: Lane;
+  kind: VehicleKind;
   speed: number;
   maxSpeed: number;
   laneChangeFromZ: number;
   laneChangeElapsed: number;
-  plannedConnectionId: string | null;
+  chargeTargetIndex: number;
+  chargeElapsed: number;
+  charging: boolean;
+  chargeRing: Group | null;
 };
-type TrafficConnection = {
-  id: string;
-  nodeId: string;
-  fromLaneId: string;
-  toLaneId: string;
-  role: 'ENTRY' | 'EXIT';
-  direction: 1 | -1;
-  x: number;
-};
-export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'reverse' | 'escape' | 'redirect';
+type ElectricCharger = { x: number; z: number; group: Group; statusLight: Mesh; statusMaterial: MeshStandardMaterial; broken: boolean };
+export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'reverse' | 'electricDetour';
 export type WorkZoneReadiness = {
   prepared: boolean;
   reason: 'NEEDS_INTERVENTION' | 'WAITING_FOR_DIVERSION' | 'CARS_IN_WORK_ZONE' | 'ACCESS_TOO_NARROW' | null;
@@ -63,10 +59,7 @@ const SAFE_GAP = 4.2;
 const MIN_BUMPER_GAP = 0.16;
 const LANE_CHANGE_DURATION = 0.7;
 const LANE_CHANGE_LOOKAHEAD = 9;
-const ROUTE_DECISION_THRESHOLD = 0.38;
-const ROUTE_LOOKAHEAD = 8;
-const CONNECTION_APPROACH_DISTANCE = 1.8;
-const ESCAPE_CAPACITY = 30;
+const GREEN_LANE_CAPACITY = 30;
 /** Raio do círculo de trabalho; compartilhado com o ActiveMobilitySystem. */
 export const WORK_ZONE_CLEARANCE = 2.9;
 const CONE_LOOKAHEAD = 9;
@@ -78,36 +71,45 @@ const CROSSING_CLEARING_DISTANCE = 1.8;
 /** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
 const PLAYER_HIT_RADIUS = 0.26;
 
-/** Fluxo de tráfego de protótipo em duas vias principais e uma via de escape paralela. */
+/** Fluxo viário da Orla: avenidas comuns e faixa verde exclusiva para elétricos. */
 export class TrafficSystem {
   readonly group = new Group();
   private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, VEHICLE_WIDTH);
   private readonly cabinGeometry = new BoxGeometry(0.62, 0.3, 0.46);
   private readonly wheelGeometry = new CylinderGeometry(0.1, 0.1, 0.08, 10);
-  private readonly roadGeometry = new BoxGeometry(1, 0.035, 1.78);
-  private readonly connectorGeometry = new BoxGeometry(0.84, 0.045, 1.05);
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.14, 0.84);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
   private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
     .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
   private readonly dark = new MeshStandardMaterial({ color: '#20272c', roughness: 0.9 });
-  private readonly roadMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
-  private readonly connectorMaterial = new MeshStandardMaterial({ color: '#41494d', roughness: 0.95 });
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
+  private readonly chargerBodyMaterial = new MeshStandardMaterial({ color: '#e6f0e7', roughness: 0.55 });
+  private readonly chargerScreenMaterial = new MeshStandardMaterial({ color: '#385b68', emissive: '#16353d', roughness: 0.4 });
+  private readonly chargerCableMaterial = new MeshStandardMaterial({ color: '#27363b', roughness: 0.8 });
+  private readonly chargerBaseGeometry = new BoxGeometry(0.62, 0.1, 0.16);
+  private readonly chargerBodyGeometry = new BoxGeometry(0.28, 0.62, 0.17);
+  private readonly chargerScreenGeometry = new BoxGeometry(0.17, 0.17, 0.025);
+  private readonly chargerStatusGeometry = new CylinderGeometry(0.035, 0.035, 0.025, 10);
+  private readonly chargerPlugGeometry = new BoxGeometry(0.055, 0.13, 0.07);
+  private readonly chargerCableGeometry = new TorusGeometry(0.12, 0.018, 6, 12);
+  private readonly chargeSegmentGeometry = new BoxGeometry(0.085, 0.025, 0.11);
+  private readonly chargeSegmentOnMaterial = new MeshStandardMaterial({ color: '#75edaa', emissive: '#247247', emissiveIntensity: 1.1, roughness: 0.4 });
+  private readonly chargeSegmentOffMaterial = new MeshStandardMaterial({ color: '#38504b', emissive: '#172721', roughness: 0.6 });
   private readonly directionGeometry: ShapeGeometry;
   private readonly directionMaterial = new MeshStandardMaterial({ color: '#d8e3dc', emissive: '#253a35', side: 2, roughness: 0.8 });
-  private readonly escapeDirectionMaterial = new MeshStandardMaterial({ color: '#8ee0b4', emissive: '#1d5038', side: 2, roughness: 0.8 });
+  private readonly greenDirectionMaterial = new MeshStandardMaterial({ color: '#8ee0b4', emissive: '#1d5038', side: 2, roughness: 0.8 });
   private readonly blockedDirectionMaterial = new MeshStandardMaterial({ color: '#ff7668', emissive: '#622016', side: 2, roughness: 0.8 });
   private readonly vehicles: Vehicle[] = [];
   private readonly cones: ConeObstacle[] = [];
   private readonly spawnTimers = new Map<string, number>();
   private readonly lanes: Lane[];
-  private readonly connections: TrafficConnection[];
+  private readonly chargers: ElectricCharger[];
   private readonly minX: number;
   private readonly width: number;
   private running = true;
-  private redirecting = false;
-  private escapeSourceId = 'orla-eastbound';
+  private electricDetour = false;
+  private electricSpawnClock = 7;
+  private electricSpawnIndex = 0;
   private mobilityView = false;
   private pedestrianCrossingRequested = false;
   private waitingPedestrians = 0;
@@ -142,18 +144,17 @@ export class TrafficSystem {
     arrowShape.lineTo(0.42, 0); arrowShape.lineTo(0.05, 0.3); arrowShape.lineTo(0.05, 0.16); arrowShape.lineTo(-0.38, 0.16); arrowShape.closePath();
     this.directionGeometry = new ShapeGeometry(arrowShape);
     const roadLowEdge = map.depth / 2 - map.tileSize * 3;
-    const escapeRoadZ = roadLowEdge + 0.46;
+    const greenRoadZ = roadLowEdge + 0.46;
     this.lanes = [
       this.createLane('orla-eastbound', 1, roadLowEdge + 1.4, 'PRINCIPAL', 100, 1),
       this.createLane('orla-eastbound-2', 1, roadLowEdge + 2.36, 'PRINCIPAL', 100, 1),
       this.createLane('orla-westbound', -1, roadLowEdge + 3.76, 'PRINCIPAL', 100, 1),
       this.createLane('orla-westbound-2', -1, roadLowEdge + 4.72, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-escape', 1, escapeRoadZ, 'ESCAPE', ESCAPE_CAPACITY, 0, 'blocked'),
+      this.createLane('orla-green', 1, greenRoadZ, 'GREEN', GREEN_LANE_CAPACITY, 0),
     ];
-    this.connections = this.createConnections();
-    this.createEscapeConnectors(roadLowEdge + 1.4, escapeRoadZ);
+    this.chargers = this.createChargers(greenRoadZ);
     this.lanes.forEach((lane, laneIndex) => {
-      if (lane.type === 'ESCAPE') return;
+      if (lane.type === 'GREEN') return;
       this.spawnTimers.set(lane.id, 1.4 + laneIndex * 0.65);
       for (let index = 0; index < INITIAL_VEHICLES_PER_LANE; index++) {
         const vehicleIndex = laneIndex * INITIAL_VEHICLES_PER_LANE + index;
@@ -165,35 +166,27 @@ export class TrafficSystem {
         mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
         this.group.add(mesh);
         const maxSpeed = 1.6 + ((vehicleIndex + laneIndex) % 3) * 0.35;
-        this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, speed: maxSpeed, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, plannedConnectionId: null });
+        this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+          speed: maxSpeed, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
+          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
       }
     });
+    const greenLane = this.lanes.find(lane => lane.type === 'GREEN')!;
+    this.spawnElectricVehicle(greenLane, this.minX + 4, 0);
+    this.spawnElectricVehicle(greenLane, this.minX + 13, 1);
+    this.electricSpawnIndex = 2;
     this.setMobilityView(false);
     this.publishRoadState();
-  }
-
-  private createConnections(): TrafficConnection[] {
-    const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
-    const leftNodeX = this.minX + 1.4;
-    const rightNodeX = this.minX + this.width - 1.4;
-    return this.lanes.filter(lane => lane.type === 'PRINCIPAL').flatMap(lane => ([1, -1] as const).flatMap(direction => {
-      const entryX = direction === 1 ? leftNodeX : rightNodeX;
-      const exitX = direction === 1 ? rightNodeX : leftNodeX;
-      return [
-        { id: `${lane.id}-to-escape-${direction}`, nodeId: direction === 1 ? 'west-escape-junction' : 'east-escape-junction', fromLaneId: lane.id, toLaneId: escape.id, role: 'ENTRY' as const, direction, x: entryX },
-        { id: `escape-to-${lane.id}-${direction}`, nodeId: direction === 1 ? 'east-escape-junction' : 'west-escape-junction', fromLaneId: escape.id, toLaneId: lane.id, role: 'EXIT' as const, direction, x: exitX },
-      ];
-    }));
   }
 
   private createLane(id: string, direction: 1 | -1, z: number, type: Lane['type'], capacity: number, priority: number, initialStatus: Lane['status'] = 'open'): Lane {
     const arrows = new Group();
     arrows.name = `direction-markers-${id}`;
-    const count = type === 'ESCAPE' ? 6 : 8;
+    const count = type === 'GREEN' ? 6 : 8;
     for (let i = 0; i < count; i++) {
       const arrowX = this.minX + this.width * (i + 0.5) / count;
       if (Math.abs(arrowX - this.pedestrianCrossingX) < 2.15) continue;
-      const marker = new Mesh(this.directionGeometry, type === 'ESCAPE' ? this.escapeDirectionMaterial : this.directionMaterial);
+      const marker = new Mesh(this.directionGeometry, type === 'GREEN' ? this.greenDirectionMaterial : this.directionMaterial);
       marker.rotation.x = -Math.PI / 2;
       marker.rotation.z = direction === 1 ? 0 : Math.PI;
       marker.position.set(arrowX, 0.055, z);
@@ -201,7 +194,7 @@ export class TrafficSystem {
     }
     this.group.add(arrows);
     const barriers = new Group();
-    if (type === 'ESCAPE') {
+    if (type === 'GREEN' && initialStatus === 'blocked') {
       for (const x of [this.minX + 0.8, -this.minX - 0.8]) {
         const barrier = new Mesh(this.barrierGeometry, this.barrierMaterial);
         barrier.position.set(x, 0.1, z);
@@ -213,26 +206,79 @@ export class TrafficSystem {
     coneGroup.name = `cones-${id}`;
     this.group.add(coneGroup);
     const lane: Lane = { id, direction, normalDirection: direction, z, type, capacity, priority, status: initialStatus, arrows, barriers, coneGroup };
-    if (type === 'ESCAPE') {
+    if (type === 'GREEN') {
       arrows.children.forEach(marker => { (marker as Mesh).position.y = 0.055; });
     }
     this.syncLaneVisual(lane);
     return lane;
   }
 
-  private createEscapeConnectors(mainZ: number, escapeZ: number): void {
-    for (const x of [this.minX + 1.4, -this.minX - 1.4]) {
-      const connector = new Mesh(this.connectorGeometry, this.connectorMaterial);
-      connector.position.set(x, 0.012, (mainZ + escapeZ) / 2);
-      this.group.add(connector);
-    }
-    // Faixa de escape com largura proporcional às faixas principais (0.92m).
-    const road = new Mesh(this.roadGeometry, this.roadMaterial);
-    road.scale.x = this.width;
-    road.scale.z = 0.92 / 1.78;
-    road.position.set(0, 0, escapeZ);
-    this.group.add(road);
+  private createChargers(greenLaneZ: number): ElectricCharger[] {
+    const xPositions = [this.minX + 8, this.minX + this.width * 0.44, this.minX + this.width - 8];
+    return xPositions.map((x, index) => {
+      // Posições junto ao bordo sul da faixa verde, no intervalo antes da pista comum.
+      const z = greenLaneZ + 0.52;
+      const group = new Group();
+      group.name = `electric-charger-${index + 1}`;
+      group.position.set(x, 0, z);
+      const base = new Mesh(this.chargerBaseGeometry, this.chargerCableMaterial);
+      base.position.y = 0.07;
+      const body = new Mesh(this.chargerBodyGeometry, this.chargerBodyMaterial);
+      body.position.set(0, 0.4, 0);
+      const screen = new Mesh(this.chargerScreenGeometry, this.chargerScreenMaterial);
+      screen.position.set(0, 0.52, 0.1);
+      const statusMaterial = new MeshStandardMaterial({ color: '#7ee6a5', emissive: '#246b42', emissiveIntensity: 1.1 });
+      const statusLight = new Mesh(this.chargerStatusGeometry, statusMaterial);
+      statusLight.rotation.x = Math.PI / 2;
+      statusLight.position.set(0, 0.68, 0.1);
+      const cable = new Mesh(this.chargerCableGeometry, this.chargerCableMaterial);
+      cable.rotation.x = Math.PI / 2;
+      cable.position.set(0.19, 0.28, 0.04);
+      const plug = new Mesh(this.chargerPlugGeometry, this.chargerScreenMaterial);
+      plug.position.set(0.2, 0.19, 0.1);
+      for (const mesh of [base, body, screen, statusLight, cable, plug]) {
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+      this.group.add(group);
+      return { x, z, group, statusLight, statusMaterial, broken: false };
+    });
   }
+
+  getElectricChargerPosition(): { x: number; z: number } {
+    const charger = this.chargers[Math.floor(this.chargers.length / 2)];
+    return { x: charger.x, z: charger.z };
+  }
+
+  setElectricChargerBroken(broken: boolean): void {
+    const charger = this.chargers[Math.floor(this.chargers.length / 2)];
+    charger.broken = broken;
+    charger.statusMaterial.color.set(broken ? '#ff665b' : '#7ee6a5');
+    charger.statusMaterial.emissive.set(broken ? '#7a201a' : '#246b42');
+    charger.statusMaterial.emissiveIntensity = broken ? 1.8 : 1.1;
+    this.electricDetour = false;
+    this.publishRoadState();
+  }
+
+  isElectricChargerBroken(): boolean {
+    return this.chargers[Math.floor(this.chargers.length / 2)].broken;
+  }
+
+  getElectricQueueCount(): number {
+    const chargerIndex = Math.floor(this.chargers.length / 2);
+    const charger = this.chargers[chargerIndex];
+    return this.vehicles.filter(vehicle => this.isElectricVehicle(vehicle.kind)
+      && vehicle.lane.type === 'GREEN' && vehicle.chargeTargetIndex === chargerIndex
+      && vehicle.mesh.position.x >= charger.x - 5 && vehicle.speed < 0.25).length;
+  }
+
+  setElectricDiversion(enabled: boolean): void {
+    this.electricDetour = enabled;
+    this.publishRoadState();
+  }
+
+  isElectricDiversionActive(): boolean { return this.electricDetour; }
 
   private syncLaneVisual(lane: Lane): void {
     lane.barriers.visible = lane.status === 'blocked';
@@ -241,7 +287,7 @@ export class TrafficSystem {
       const mesh = marker as Mesh;
       mesh.rotation.z = lane.direction === 1 ? 0 : Math.PI;
       if (lane.status === 'blocked') mesh.material = this.blockedDirectionMaterial;
-      else if (lane.type === 'ESCAPE') mesh.material = this.escapeDirectionMaterial;
+      else if (lane.type === 'GREEN') mesh.material = this.greenDirectionMaterial;
       else mesh.material = this.directionMaterial;
     });
   }
@@ -288,7 +334,6 @@ export class TrafficSystem {
     }
     if (!vehicle) return;
     this.collisionWarningVehicle = vehicle;
-    vehicle.plannedConnectionId = null;
     vehicle.laneChangeElapsed = LANE_CHANGE_DURATION;
     vehicle.mesh.position.z = lane.z;
     for (const x of [-0.8, 0.8]) {
@@ -324,7 +369,7 @@ export class TrafficSystem {
     const cone = this.cones.some(item => item.lane === vehicle.lane
       && (vehicle.mesh.position.x - item.x) * vehicle.lane.direction >= 1.5
       && (vehicle.mesh.position.x - item.x) * vehicle.lane.direction <= 5);
-    return cone && this.lanes.some(lane => lane.type === 'ESCAPE' && lane.status === 'open');
+    return cone && vehicle.lane.status === 'blocked';
   }
 
   getIncidentConeTarget(): { x: number; z: number } | null {
@@ -409,8 +454,7 @@ export class TrafficSystem {
 
   getActiveInterventionPosition(reference: { x: number; z: number }): { x: number; z: number } | null {
     const affected = this.lanes.filter(lane => lane.type === 'PRINCIPAL'
-      ? lane.status === 'blocked' || this.cones.some(cone => cone.lane === lane) || lane.direction !== lane.normalDirection
-      : lane.type === 'ESCAPE' && lane.status === 'open');
+      && (lane.status === 'blocked' || this.cones.some(cone => cone.lane === lane) || lane.direction !== lane.normalDirection));
     const lane = affected.sort((a, b) => Math.abs(a.z - reference.z) - Math.abs(b.z - reference.z))[0];
     if (!lane) return null;
     const cone = this.cones.filter(item => item.lane === lane)
@@ -430,7 +474,8 @@ export class TrafficSystem {
         type: lane.type,
         capacity: this.getEffectiveLaneCapacity(lane),
         priority: lane.priority,
-        redirected: lane.type === 'ESCAPE' ? vehicles.length > 0 || (this.redirecting && lane.status === 'open') : this.vehicles.some(vehicle => vehicle.lane.type === 'ESCAPE' && vehicle.homeLane === lane) || (this.redirecting && lane.id === this.escapeSourceId),
+        redirected: lane.type === 'GREEN' ? this.electricDetour
+          : this.vehicles.some(vehicle => this.isElectricVehicle(vehicle.kind) && vehicle.lane === lane && vehicle.homeLane.type === 'GREEN'),
         vehicleCount: vehicles.length,
         congestion: lane.status === 'blocked' && vehicles.length ? 1 : congestion,
         conesActive: this.cones.some(cone => cone.lane === lane),
@@ -447,12 +492,8 @@ export class TrafficSystem {
     const principalLanes = this.lanes.filter(lane => lane.type === 'PRINCIPAL');
     const workLane = principalLanes.reduce((nearest, lane) => Math.abs(lane.z - position.z) < Math.abs(nearest.z - position.z) ? lane : nearest);
     const approachSpace = Math.abs(workLane.z - position.z) - VEHICLE_WIDTH / 2;
-    const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
-    const escapeOpen = escape.status === 'open';
     const workCones = this.cones.filter(cone => cone.lane === workLane && Math.abs(cone.x - position.x) <= 3.2);
     const coneIntervention = workCones.length > 0;
-    const escapeIntervention = escapeOpen
-      && this.vehicles.some(vehicle => vehicle.lane === escape && vehicle.homeLane.direction === workLane.direction);
     const blockIntervention = workLane.status === 'blocked';
     const nearbyVehicles = this.vehicles.filter(vehicle =>
       Math.hypot(vehicle.mesh.position.x - position.x, vehicle.mesh.position.z - position.z) <= WORK_ZONE_CLEARANCE).length
@@ -460,12 +501,11 @@ export class TrafficSystem {
     const vehiclesRespectingCones = !coneIntervention || !this.vehicles.some(vehicle => workCones.some(cone =>
       Math.abs(vehicle.mesh.position.x - cone.x) < VEHICLE_LENGTH && Math.abs(vehicle.mesh.position.z - cone.lane.z) < 0.72));
     const spaceAvailable = approachSpace >= 0.9;
-    const intervened = coneIntervention || escapeIntervention || blockIntervention;
+    const intervened = coneIntervention || blockIntervention;
     const prepared = intervened && vehiclesRespectingCones && nearbyVehicles === 0 && spaceAvailable;
     const reason: WorkZoneReadiness['reason'] = prepared ? null
       : !spaceAvailable ? 'ACCESS_TOO_NARROW'
-        : !intervened && escapeOpen ? 'WAITING_FOR_DIVERSION'
-          : !intervened ? 'NEEDS_INTERVENTION'
+        : !intervened ? 'NEEDS_INTERVENTION'
           : 'CARS_IN_WORK_ZONE';
     return { prepared, reason, nearbyVehicles };
   }
@@ -502,14 +542,11 @@ export class TrafficSystem {
   applyMobilityAction(roadId: string, action: MobilityRoadAction): void {
     const lane = this.lanes.find(candidate => candidate.id === roadId);
     if (!lane) return;
-    const escape = this.lanes.find(candidate => candidate.type === 'ESCAPE')!;
-    if (lane.type === 'PRINCIPAL' && (action === 'block' || action === 'blockAll' || action === 'redirect' || action === 'escape')) this.escapeSourceId = lane.id;
     if (action === 'release') {
       // Libera a faixa e, junto com ela, qualquer outra do mesmo sentido fechada antes.
       this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
         .forEach(candidate => { candidate.status = 'open'; });
-      escape.status = 'blocked';
-      this.redirecting = false;
+      if (!this.isElectricChargerBroken()) this.electricDetour = false;
     }
     if (action === 'block') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL' && candidate.direction === lane.direction).forEach(candidate => { candidate.status = 'blocked'; });
     if (action === 'blockAll') {
@@ -517,17 +554,14 @@ export class TrafficSystem {
         .forEach(candidate => { candidate.status = 'blocked'; });
     }
     if (action === 'reverse') {
-      const directionLane = lane.type === 'ESCAPE' ? this.lanes.find(candidate => candidate.id === this.escapeSourceId)! : lane;
-      directionLane.direction = directionLane.direction === directionLane.normalDirection ? -directionLane.normalDirection as 1 | -1 : directionLane.normalDirection;
-      directionLane.arrows.children.forEach(marker => { (marker as Mesh).rotation.z = directionLane.direction === 1 ? 0 : Math.PI; });
-      this.vehicles.filter(vehicle => vehicle.lane === directionLane).forEach(vehicle => { vehicle.mesh.rotation.y = directionLane.direction === 1 ? 0 : Math.PI; });
+      const directionLane = lane.type === 'GREEN' ? null : lane;
+      if (directionLane) {
+        directionLane.direction = directionLane.direction === directionLane.normalDirection ? -directionLane.normalDirection as 1 | -1 : directionLane.normalDirection;
+        directionLane.arrows.children.forEach(marker => { (marker as Mesh).rotation.z = directionLane.direction === 1 ? 0 : Math.PI; });
+        this.vehicles.filter(vehicle => vehicle.lane === directionLane).forEach(vehicle => { vehicle.mesh.rotation.y = directionLane.direction === 1 ? 0 : Math.PI; });
+      }
     }
-    if (action === 'escape') {
-      const opening = escape.status !== 'open';
-      escape.status = opening ? 'open' : 'blocked';
-      this.redirecting = opening;
-    }
-    if (action === 'redirect') this.redirecting = !this.redirecting;
+    if (action === 'electricDetour') this.electricDetour = !this.electricDetour;
     this.lanes.forEach(candidate => this.syncLaneVisual(candidate));
     this.publishRoadState();
   }
@@ -561,8 +595,15 @@ export class TrafficSystem {
 
   isPedestrianCrossingClear(): boolean {
     if (this.unsafeCrossing && !this.guardedCrossing) return false;
-    if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize && !this.assistedCrossingRequested) return false;
-    if (this.crossingSignalPhase !== 'red') return false;
+    const vehiclesStopped = this.areVehiclesStoppedForCrossing();
+    if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize && !this.assistedCrossingRequested
+      && !this.guardedCrossing && !vehiclesStopped) return false;
+    // A stopped approach is the clearance condition; don't keep people at the
+    // curb waiting for a signal phase that can be delayed by traffic incidents.
+    return vehiclesStopped;
+  }
+
+  areVehiclesStoppedForCrossing(): boolean {
     return this.vehicles.every(vehicle => {
       const distance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
       // A falha do semáforo pode congelar um carro em cima da faixa. Um carro
@@ -575,7 +616,7 @@ export class TrafficSystem {
   }
 
   private updateCrossingSignal(dt: number): void {
-    if (this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize)) {
+    if (this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians > 0)) {
       if (this.crossingSignalPhase === 'green') {
         this.crossingSignalPhase = 'yellow';
         this.crossingSignalTimer = 1.25;
@@ -607,13 +648,21 @@ export class TrafficSystem {
         : 9 - this.demandLevel * 7.6 + this.randomTraffic() * 0.4;
       this.spawnTimers.set(lane.id, interval);
     }
+    this.electricSpawnClock -= dt;
+    if (this.electricSpawnClock <= 0) {
+      const greenLane = this.lanes.find(lane => lane.type === 'GREEN')!;
+      const spawnLane = this.electricDetour
+        ? this.lanes.find(lane => lane.type === 'PRINCIPAL' && lane.direction === 1)!
+        : greenLane;
+      if (this.spawnElectricVehicle(spawnLane)) this.electricSpawnClock = 7.2 + this.randomTraffic() * 2.3;
+    }
   }
 
   private trySpawnVehicle(lane: Lane, spawnX?: number): boolean {
     if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= MAX_VEHICLES_PER_LANE) return false;
     const entryX = spawnX ?? (lane.direction === 1 ? this.minX + VEHICLE_LENGTH / 2 : this.minX + this.width - VEHICLE_LENGTH / 2);
     const entryIsClear = this.vehicles.every(vehicle => {
-      if (Math.abs(vehicle.mesh.position.z - lane.z) >= 1.02) return true;
+      if (Math.abs(vehicle.mesh.position.z - lane.z) >= 0.72) return true;
       return Math.abs(vehicle.mesh.position.x - entryX) >= SAFE_GAP;
     });
     if (!entryIsClear) return false;
@@ -624,8 +673,51 @@ export class TrafficSystem {
     mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
     this.group.add(mesh);
     const maxSpeed = 1.6 + this.randomTraffic() * 0.7;
-    this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, speed: 0, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, plannedConnectionId: null });
+    this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+      speed: 0, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
+      chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
     return true;
+  }
+
+  private spawnElectricVehicle(lane: Lane, spawnX?: number, targetIndex?: number): boolean {
+    if (lane.type !== 'GREEN' && lane.type !== 'PRINCIPAL') return false;
+    if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= (lane.type === 'GREEN' ? 6 : MAX_VEHICLES_PER_LANE)) return false;
+    const entryX = spawnX ?? (lane.direction === 1 ? this.minX + VEHICLE_LENGTH / 2 : this.minX + this.width - VEHICLE_LENGTH / 2);
+    if (!this.vehicles.every(vehicle => Math.abs(vehicle.mesh.position.z - lane.z) >= 0.72
+      || Math.abs(vehicle.mesh.position.x - entryX) >= SAFE_GAP)) return false;
+    const sequence = this.electricSpawnIndex++;
+    const kind: VehicleKind = sequence % 2 === 0 ? 'ev-sedan' : 'ev-crossover';
+    const colors = ['#f2f1e8', '#86c4b0'] as const;
+    const mesh = this.makeVehicle(this.materials[sequence % this.materials.length], kind, colors[sequence % colors.length]);
+    const greenLane = this.lanes.find(candidate => candidate.type === 'GREEN')!;
+    const chargeTargetIndex = targetIndex ?? sequence % this.chargers.length;
+    mesh.position.set(entryX, 0.27, lane.z);
+    mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
+    this.group.add(mesh);
+    const maxSpeed = 1.7 + this.randomTraffic() * 0.4;
+    const chargeRing = this.createChargeRing();
+    mesh.add(chargeRing);
+    this.vehicles.push({ mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, maxSpeed,
+      laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, chargeTargetIndex,
+      chargeElapsed: 0, charging: false, chargeRing });
+    return true;
+  }
+
+  private createChargeRing(): Group {
+    const ring = new Group();
+    ring.name = 'electric-charge-progress';
+    ring.position.y = -0.23;
+    ring.visible = false;
+    const segments = 28;
+    for (let index = 0; index < segments; index++) {
+      const angle = index / segments * Math.PI * 2;
+      const marker = new Mesh(this.chargeSegmentGeometry, this.chargeSegmentOffMaterial);
+      marker.position.set(Math.cos(angle) * 0.69, 0, Math.sin(angle) * 0.69);
+      marker.rotation.y = -angle;
+      marker.renderOrder = 3;
+      ring.add(marker);
+    }
+    return ring;
   }
 
   private randomTraffic(): number {
@@ -649,7 +741,8 @@ export class TrafficSystem {
     this.incidentLights.visible = Math.floor(this.incidentTime * 3) % 2 === 0;
     for (const vehicle of [...this.vehicles]) {
       if (vehicle === this.incidentVehicle) continue;
-      const connectionDistance = vehicle === this.collisionWarningVehicle ? null : this.updateRouteDecision(vehicle);
+      this.updateElectricRoute(vehicle);
+      const charging = this.updateElectricCharging(vehicle, dt);
       const obstructionDistance = this.distanceToCone(vehicle);
       const ahead = this.distanceToVehicleAhead(vehicle);
       const gap = ahead - VEHICLE_LENGTH;
@@ -663,7 +756,7 @@ export class TrafficSystem {
         ? MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1) : 1;
       const crossingDistance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
       const carsYield = this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied
-        || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize);
+        || (!this.unsafeCrossing && this.waitingPedestrians > 0);
       const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
       const clearingCrosswalk = crossingDistance <= CROSSING_CLEARING_DISTANCE;
@@ -672,16 +765,14 @@ export class TrafficSystem {
       const atCrossingStopLine = carsYield && this.crossingSignalPhase !== 'green' && !clearingCrosswalk
         && crossingDistance <= CROSSING_STOP_DISTANCE;
       const playerBrake = this.getPlayerBrake(vehicle);
-      const approachingConnection = connectionDistance !== null && connectionDistance <= CONNECTION_APPROACH_DISTANCE;
-      const connectionBrake = approachingConnection && vehicle.laneChangeElapsed >= LANE_CHANGE_DURATION ? 0 : 1;
-      const mayLeaveBlockedLane = vehicle.plannedConnectionId !== null;
-      const mayExitClosedEscape = vehicle.lane.type === 'ESCAPE' && vehicle.homeLane !== vehicle.lane;
-      const laneAvailable = vehicle.lane.status === 'open' || mayLeaveBlockedLane || mayExitClosedEscape;
-      let targetSpeed = this.running && laneAvailable && !this.signalFailure ? vehicle.maxSpeed * following * coneBrake * connectionBrake * playerBrake : 0;
+      const laneAvailable = vehicle.lane.status === 'open';
+      let targetSpeed = this.running && laneAvailable && !this.signalFailure && !charging.stopped
+        ? vehicle.maxSpeed * following * coneBrake * playerBrake * charging.brake : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
-      const room = Math.min(crossingRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity);
+      const room = Math.min(crossingRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity,
+        charging.stopDistance);
       const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
@@ -718,65 +809,86 @@ export class TrafficSystem {
     return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
   }
 
-  private updateRouteDecision(vehicle: Vehicle): number | null {
-    if (vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) return null;
-    const escape = this.lanes.find(lane => lane.type === 'ESCAPE')!;
-    if (vehicle.plannedConnectionId && escape.status !== 'open') vehicle.plannedConnectionId = null;
-
-    if (vehicle.lane.type === 'ESCAPE') {
-      const connection = this.connections.find(item => item.role === 'EXIT'
-        && item.fromLaneId === escape.id && item.toLaneId === vehicle.homeLane.id
-        && item.direction === escape.direction);
-      if (!connection) return null;
-      const distance = this.distanceToPoint(vehicle.mesh.position.x, connection.x, connection.direction);
-      if (distance <= CONNECTION_APPROACH_DISTANCE && vehicle.laneChangeElapsed >= LANE_CHANGE_DURATION
-        && this.hasSafeSpaceAt(vehicle.homeLane, connection.x, connection.direction, vehicle)) {
-        this.startLaneTransition(vehicle, vehicle.homeLane);
-      }
-      return distance;
-    }
-
-    let connection = this.connections.find(item => item.role === 'ENTRY'
-      && item.fromLaneId === vehicle.lane.id && item.direction === vehicle.lane.direction);
-    if (!connection) return null;
-    const distance = this.distanceToPoint(vehicle.mesh.position.x, connection.x, connection.direction);
-    if (!vehicle.plannedConnectionId && distance <= ROUTE_LOOKAHEAD && this.shouldUseEscape(vehicle, escape)) {
-      vehicle.plannedConnectionId = connection.id;
-      const users = this.vehicles.filter(other => other.lane === escape || other.plannedConnectionId !== null);
-      if (users.length === 0) {
-        escape.direction = vehicle.lane.direction;
-        this.syncLaneVisual(escape);
-        vehicle.mesh.rotation.y = escape.direction === 1 ? 0 : Math.PI;
-      }
-    }
-    if (!vehicle.plannedConnectionId) return null;
-    if (vehicle.plannedConnectionId) {
-      connection = this.connections.find(item => item.id === vehicle.plannedConnectionId) ?? connection;
-      const escapeHasCapacity = this.vehicles.filter(other => other.lane === escape || other.plannedConnectionId !== null).length
-        <= Math.max(1, Math.floor(escape.capacity / 15));
-      const safeGap = this.hasSafeSpaceAt(escape, connection.x, connection.direction, vehicle);
-      if (distance <= CONNECTION_APPROACH_DISTANCE && vehicle.laneChangeElapsed >= LANE_CHANGE_DURATION && escapeHasCapacity && safeGap) {
-        vehicle.homeLane = vehicle.lane;
-        this.startLaneTransition(vehicle, escape);
-        vehicle.plannedConnectionId = null;
-      }
-    }
-    return distance;
+  private isElectricVehicle(kind: VehicleKind): boolean {
+    return kind === 'ev-sedan' || kind === 'ev-crossover';
   }
 
-  private shouldUseEscape(vehicle: Vehicle, escape: Lane): boolean {
-    if (escape.status !== 'open') return false;
-    const escapeUsers = this.vehicles.filter(other => other.lane === escape || other.plannedConnectionId !== null);
-    if (escapeUsers.length >= Math.max(1, Math.floor(escape.capacity / 15))) return false;
-    if (escapeUsers.some(other => {
-      const reservedDirection = other.plannedConnectionId
-        ? this.connections.find(connection => connection.id === other.plannedConnectionId)?.direction
-        : other.lane === escape ? escape.direction : undefined;
-      return reservedDirection !== undefined && reservedDirection !== vehicle.lane.direction;
-    })) return false;
-    return vehicle.lane.status === 'blocked'
-      || (this.redirecting && vehicle.lane.id === this.escapeSourceId)
-      || this.getLaneCongestion(vehicle.lane) >= ROUTE_DECISION_THRESHOLD;
+  private updateElectricRoute(vehicle: Vehicle): void {
+    if (!this.isElectricVehicle(vehicle.kind) || vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) return;
+    const greenLane = this.lanes.find(lane => lane.type === 'GREEN')!;
+    if (this.electricDetour && vehicle.lane === greenLane) {
+      const destination = this.lanes.filter(lane => lane.type === 'PRINCIPAL' && lane.direction === greenLane.direction && lane.status === 'open')
+        .filter(lane => this.hasSafeSpaceAt(lane, vehicle.mesh.position.x, lane.direction, vehicle))
+        .sort((a, b) => this.getLaneCongestion(a) - this.getLaneCongestion(b))[0];
+      if (destination) this.startLaneTransition(vehicle, destination);
+      return;
+    }
+    if (!this.electricDetour && vehicle.lane.type === 'PRINCIPAL' && vehicle.homeLane === greenLane) {
+      this.tryReturnToPreferredLane(vehicle);
+    }
+  }
+
+  private updateElectricCharging(vehicle: Vehicle, dt: number): { brake: number; stopped: boolean; stopDistance: number } {
+    if (!this.isElectricVehicle(vehicle.kind) || vehicle.lane.type !== 'GREEN' || this.electricDetour) {
+      if (vehicle.chargeRing) vehicle.chargeRing.visible = false;
+      vehicle.charging = false;
+      return { brake: 1, stopped: false, stopDistance: Infinity };
+    }
+    if (vehicle.chargeTargetIndex >= this.chargers.length) return { brake: 1, stopped: false, stopDistance: Infinity };
+    let charger = this.chargers[vehicle.chargeTargetIndex];
+    let distanceToCharger = (charger.x - vehicle.mesh.position.x) * vehicle.lane.direction;
+    if (!vehicle.charging && distanceToCharger < -0.1) {
+      const nextIndex = this.chargers.findIndex((candidate, index) => index > vehicle.chargeTargetIndex
+        && (candidate.x - vehicle.mesh.position.x) * vehicle.lane.direction > 0.5);
+      vehicle.chargeTargetIndex = nextIndex < 0 ? this.chargers.length : nextIndex;
+      if (vehicle.chargeTargetIndex >= this.chargers.length) return { brake: 1, stopped: false, stopDistance: Infinity };
+      charger = this.chargers[vehicle.chargeTargetIndex];
+      distanceToCharger = (charger.x - vehicle.mesh.position.x) * vehicle.lane.direction;
+    }
+    if (vehicle.charging) {
+      if (charger.broken) {
+        vehicle.charging = false;
+        vehicle.chargeElapsed = 0;
+        if (vehicle.chargeRing) vehicle.chargeRing.visible = false;
+      } else {
+        vehicle.speed = 0;
+        vehicle.chargeElapsed += dt;
+        this.updateChargeRing(vehicle, Math.min(1, vehicle.chargeElapsed / 4.5));
+        if (vehicle.chargeElapsed >= 4.5) {
+          vehicle.charging = false;
+          vehicle.chargeElapsed = 0;
+          vehicle.chargeTargetIndex += 1;
+          if (vehicle.chargeRing) vehicle.chargeRing.visible = false;
+        }
+        return { brake: 1, stopped: true, stopDistance: 0 };
+      }
+    }
+    if (charger.broken) {
+      const distanceToQueueStop = distanceToCharger - 0.92;
+      return { brake: distanceToCharger <= 3.2 ? MathUtils.clamp(distanceToQueueStop / 2.3, 0, 1) : 1,
+        stopped: distanceToCharger <= 0.95 && distanceToCharger >= -0.1,
+        stopDistance: Math.max(0, distanceToQueueStop) };
+    }
+    const distanceToChargeStop = distanceToCharger - 0.44;
+    const brake = distanceToCharger <= 3.1 ? MathUtils.clamp(distanceToChargeStop / 2.65, 0, 1) : 1;
+    if (distanceToCharger <= 0.5 && distanceToCharger >= -0.1) {
+      vehicle.mesh.position.x = charger.x - vehicle.lane.direction * 0.44;
+      vehicle.speed = 0;
+      vehicle.charging = true;
+      vehicle.chargeElapsed = 0;
+      if (vehicle.chargeRing) vehicle.chargeRing.visible = true;
+      this.updateChargeRing(vehicle, 0);
+      return { brake: 1, stopped: true, stopDistance: 0 };
+    }
+    return { brake, stopped: false, stopDistance: Math.max(0, distanceToChargeStop) };
+  }
+
+  private updateChargeRing(vehicle: Vehicle, progress: number): void {
+    if (!vehicle.chargeRing) return;
+    const litCount = Math.ceil(vehicle.chargeRing.children.length * progress);
+    vehicle.chargeRing.children.forEach((segment, index) => {
+      (segment as Mesh).material = index < litCount ? this.chargeSegmentOnMaterial : this.chargeSegmentOffMaterial;
+    });
   }
 
   private startLaneTransition(vehicle: Vehicle, target: Lane): void {
@@ -787,6 +899,7 @@ export class TrafficSystem {
 
   private tryReturnToPreferredLane(vehicle: Vehicle): void {
     const preferred = vehicle.preferredLane;
+    if (this.isElectricVehicle(vehicle.kind) && this.electricDetour) return;
     if (vehicle.lane.type !== 'PRINCIPAL' || vehicle.lane === preferred || preferred.status !== 'open'
       || this.hasConeNearLane(preferred, vehicle.mesh.position.x, LANE_CHANGE_LOOKAHEAD) || preferred.direction !== vehicle.lane.direction
       || vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) return;
@@ -853,7 +966,6 @@ export class TrafficSystem {
     vehicle.laneChangeFromZ = vehicle.mesh.position.z;
     vehicle.laneChangeElapsed = 0;
     vehicle.lane = target;
-    vehicle.plannedConnectionId = null;
   }
 
   private directionalDistance(from: Vehicle, to: Vehicle): number {
@@ -865,7 +977,7 @@ export class TrafficSystem {
     let nearest = this.width;
     for (const other of this.vehicles) {
       if (other === vehicle) continue;
-      const lateralOverlap = Math.abs(other.mesh.position.z - vehicle.mesh.position.z) < 1.02;
+      const lateralOverlap = Math.abs(other.mesh.position.z - vehicle.mesh.position.z) < 0.72;
       if (other.lane !== vehicle.lane && !lateralOverlap) continue;
       const distance = (other.mesh.position.x - vehicle.mesh.position.x) * vehicle.lane.direction;
       if (distance > 0.001) nearest = Math.min(nearest, distance);
@@ -873,13 +985,14 @@ export class TrafficSystem {
     return nearest;
   }
 
-  private makeVehicle(bodyMaterial: MeshStandardMaterial): Group {
+  private makeVehicle(bodyMaterial: MeshStandardMaterial, requestedKind?: VehicleKind, requestedColor?: string): Group {
     const vehicle = new Group();
     vehicle.name = 'traffic-vehicle';
     const seqIndex = this.spawnedCount++;
-    const kind = FLEET_SEQUENCE[seqIndex % FLEET_SEQUENCE.length];
-    const color = FLEET_COLORS[seqIndex % FLEET_COLORS.length];
+    const kind = requestedKind ?? FLEET_SEQUENCE[seqIndex % FLEET_SEQUENCE.length];
+    const color = requestedColor ?? FLEET_COLORS[seqIndex % FLEET_COLORS.length];
     const model = this.vehicleModels.create(kind, color);
+    vehicle.userData.vehicleKind = kind;
     model.group.rotation.y = Math.PI / 2;
     model.group.scale.setScalar(VEHICLE_VISUAL_SCALE[kind]);
     model.group.position.y = -0.27;
@@ -908,8 +1021,13 @@ export class TrafficSystem {
     if (this.disposed) return;
     this.disposed = true;
     this.vehicleModels.dispose();
-    [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.roadGeometry, this.connectorGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry].forEach(geometry => geometry.dispose());
-    [...this.materials, this.dark, this.roadMaterial, this.connectorMaterial, this.barrierMaterial, this.directionMaterial, this.escapeDirectionMaterial, this.blockedDirectionMaterial].forEach(material => material.dispose());
+    [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry,
+      this.chargerBaseGeometry, this.chargerBodyGeometry, this.chargerScreenGeometry, this.chargerStatusGeometry, this.chargerPlugGeometry,
+      this.chargerCableGeometry, this.chargeSegmentGeometry].forEach(geometry => geometry.dispose());
+    [...this.materials, this.dark, this.barrierMaterial, this.chargerBodyMaterial, this.chargerScreenMaterial, this.chargerCableMaterial,
+      this.chargeSegmentOnMaterial, this.chargeSegmentOffMaterial, this.directionMaterial, this.greenDirectionMaterial, this.blockedDirectionMaterial]
+      .forEach(material => material.dispose());
+    this.chargers.forEach(charger => charger.statusMaterial.dispose());
     this.group.clear();
     suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
   }

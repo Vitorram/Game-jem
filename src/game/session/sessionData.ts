@@ -7,11 +7,12 @@ export const ORLA_SESSION_CONFIG = {
   orderIntervalMs: 55_000,
   firstOrderDelayMs: ORLA_EVENTS[0].atMs,
   scheduledAtMs: ORLA_EVENTS.map(event => event.atMs),
+  maxExpiredOrders: 3,
   sequential: true,
   orders: ORLA_EVENTS.map(event => ({
     id: event.id, title: event.title, riskIds: event.steps,
-    timeLimitMs: ORLA_DURATION_MS - event.atMs,
-    basePoints: 100, maxSpeedBonus: 50, expirationPenalty: 20,
+    timeLimitMs: 60_000,
+    basePoints: 100, maxSpeedBonus: 50, expirationPenalty: 200,
   })),
 } as const satisfies SessionConfig;
 

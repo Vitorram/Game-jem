@@ -21,6 +21,8 @@ export type SessionConfig = {
   scheduledAtMs?: readonly number[];
   /** Em campanhas guiadas, só há um chamado e o próximo espera o arquivamento. */
   sequential?: boolean;
+  /** Encerra a partida após este número de pedidos expirados. */
+  maxExpiredOrders?: number;
 };
 
 export type ActiveOrder = {
@@ -52,7 +54,9 @@ export type SessionEvent =
   | { type: 'order-arrived'; order: ActiveOrder }
   | { type: 'risk-resolved'; orderId: number; riskId: number }
   | { type: 'order-completed'; orderId: number; basePoints: number; speedBonus: number; points: number }
-  | { type: 'order-expired'; orderId: number; penalty: number; reason: 'deadline' | 'phase-ended' };
+  | { type: 'order-expired'; orderId: number; penalty: number; reason: 'deadline' | 'phase-ended' }
+  | { type: 'xp-penalty'; amount: number; reason: string }
+  | { type: 'xp-warning'; message: string };
 
 /** Relógio simulado: sem Three, DOM, Date, timers, callbacks ou recursos a descartar. */
 export class GameSession {
@@ -125,7 +129,7 @@ export class GameSession {
   /**
    * Recebe tempo decorrido em milissegundos (inclusive frações). Não limite o delta
    * com o teto da física: avanços grandes processam todas as chegadas/expirações.
-   * Empates: expiração, fim da fase, chegada. No prazo exato, o pedido já expirou.
+    * No prazo exato, a tarefa expira; pedidos ativos mantêm o próprio prazo no acréscimo.
    */
   advance(deltaMs: number): SessionEvent[] {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) throw new Error('Delta de tempo inválido.');
@@ -133,16 +137,28 @@ export class GameSession {
     if (this.config.sequential) {
       const events: SessionEvent[] = [];
       const target = this.elapsedMs + deltaMs;
-      if (this.orders.length === 0 && this.issuedOrders < this.config.orders.length
-        && this.nextArrival() <= target) {
-        this.elapsedMs = Math.max(this.elapsedMs, this.nextArrival());
-        this.issueOrder(events);
-      }
-      this.elapsedMs = target;
-      if (this.elapsedMs >= this.config.phaseDurationMs
-        && this.issuedOrders === this.config.orders.length && this.orders.length === 0) {
-        this.status = 'finished';
-        events.push({ type: 'status', status: this.status });
+      while (this.elapsedMs < target && this.status === 'playing') {
+        const deadline = this.orders[0]?.expiresAtMs ?? Infinity;
+        const arrival = this.orders.length === 0 && this.issuedOrders < this.config.orders.length
+          ? Math.max(this.elapsedMs, this.nextArrival()) : Infinity;
+        const phaseBoundary = this.elapsedMs < this.config.phaseDurationMs ? this.config.phaseDurationMs : Infinity;
+        const next = Math.min(target, deadline, arrival, phaseBoundary);
+        this.elapsedMs = next;
+        this.expireOrders(events, false);
+        if (this.config.maxExpiredOrders && this.expiredOrders >= this.config.maxExpiredOrders) {
+          this.status = 'finished';
+          events.push({ type: 'status', status: this.status });
+          break;
+        }
+        if (this.orders.length === 0 && this.issuedOrders < this.config.orders.length
+          && this.nextArrival() <= this.elapsedMs) this.issueOrder(events);
+        if (this.elapsedMs >= this.config.phaseDurationMs
+          && this.orders.length === 0 && this.issuedOrders === this.config.orders.length) {
+          this.status = 'finished';
+          events.push({ type: 'status', status: this.status });
+          break;
+        }
+        if (this.elapsedMs === target) break;
       }
       return events;
     }
@@ -186,23 +202,34 @@ export class GameSession {
       this.completedOrders++;
       if (!this.config.sequential) this.orders.splice(this.orders.indexOf(order), 1);
       events.push({ type: 'order-completed', orderId, basePoints: order.basePoints, speedBonus, points });
+      if (this.config.sequential && this.issuedOrders === this.config.orders.length
+        && this.completedOrders === this.config.orders.length) {
+        this.orders.splice(this.orders.indexOf(order), 1);
+        this.status = 'finished';
+        events.push({ type: 'status', status: this.status });
+      }
     }
     return events;
   }
 
-  /** Arquiva um chamado concluído e só então libera o próximo da fila. */
+  penalizeXP(amount: number, reason: string): SessionEvent[] {
+    if (this.status !== 'playing' || !Number.isSafeInteger(amount) || amount < 0 || !reason.trim()) return [];
+    this.score -= amount;
+    return [{ type: 'xp-penalty', amount, reason }];
+  }
+
+  /** Arquiva um chamado e libera o próximo; a última missão encerra a fase ao ser concluída. */
   archiveCompleted(orderId: number): SessionEvent[] {
     if (!this.config.sequential || this.status !== 'playing') return [];
     const order = this.orders.find(item => item.id === orderId);
     if (!order || order.completedSteps !== order.riskIds.length) return [];
     this.orders.splice(this.orders.indexOf(order), 1);
     const events: SessionEvent[] = [];
-    if (this.issuedOrders < this.config.orders.length && this.nextArrival() <= this.elapsedMs) this.issueOrder(events);
-    else if (this.issuedOrders === this.config.orders.length && this.orders.length === 0
-      && this.elapsedMs >= this.config.phaseDurationMs) {
+    if (this.issuedOrders === this.config.orders.length && this.completedOrders === this.config.orders.length
+      && this.orders.length === 0) {
       this.status = 'finished';
       events.push({ type: 'status', status: this.status });
-    }
+    } else if (this.issuedOrders < this.config.orders.length && this.nextArrival() <= this.elapsedMs) this.issueOrder(events);
     return events;
   }
 

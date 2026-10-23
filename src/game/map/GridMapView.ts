@@ -33,6 +33,7 @@ const MARK_COLORS = {
   dash: '#f7e9b0',
   edge: '#f4f1ea',
   bike: '#fbe6da',
+  electric: '#178568',
 } as const;
 
 type MarkKind = keyof typeof MARK_COLORS;
@@ -1374,7 +1375,7 @@ export class GridMapView {
     this.group.add(mesh);
   }
 
-  /** Rua: faixas amplas, via de escape sinalizada e travessia limpa. Ciclovia: 2m no Row 7. */
+  /** Rua: faixas amplas, avenida verde elétrica e travessia limpa. Ciclovia: 2m no Row 7. */
   private addMarkings(
     kind: TileKind,
     column: number,
@@ -1393,29 +1394,12 @@ export class GridMapView {
         this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + 5.14, size, 0.08);
       }
 
-      // Via de Escape (Z = 6.00 a 6.92): linha de canalização, chevrons diagonais amarelos e tachões
+      // Avenida Verde (Z = 6.00 a 6.92): faixa exclusiva, com símbolos de elétrico.
       if (column !== 1 && column !== 11 && column !== 20) {
-        this.line(`escape-channel-${column}`, 'dash', center.x, roadNorthZ + 0.92, size * 0.72, 0.065);
-        const chevronMat = this.material('mark:dash', MARK_COLORS.dash, { texture: 'grain', coloredTexture: false });
-        for (const dx of [-0.42, 0.42]) {
-          const cx = center.x + dx;
-          if (Math.abs(cx - crossingX) < 1.85) continue;
-          for (const arm of [-1, 1]) {
-            const bar = new Mesh(this.flat, chevronMat);
-            bar.name = `escape-chevron-${column}-${dx}-${arm}`;
-            bar.scale.set(0.28, 0.022, 0.055);
-            bar.position.set(cx, 0.013, roadNorthZ + 0.46 + arm * 0.11);
-            bar.rotation.y = arm * 0.52;
-            bar.receiveShadow = true;
-            this.group.add(bar);
-          }
-        }
-        // Tachões refletivos (olhos de gato) ao longo da linha divisória da via de escape
-        const stud = new Mesh(this.flat, this.ambienceMaterials.lampLight);
-        stud.name = `escape-stud-${column}`;
-        stud.scale.set(0.11, 0.032, 0.09);
-        stud.position.set(center.x, 0.018, roadNorthZ + 0.92);
-        this.group.add(stud);
+        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + 0.46, size, 0.82);
+        this.line(`electric-lane-edge-${column}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.055);
+        this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + 0.86, size, 0.055);
+        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + 0.46);
       }
 
       // Divisórias tracejadas brancas entre Faixa 1 e Faixa 2 (Leste em Z=7.88, Oeste em Z=10.24)
@@ -1440,6 +1424,24 @@ export class GridMapView {
         this.addBikePictogram(center.x, center.z + 0.48, 1);
       }
     }
+  }
+
+  private addElectricPictogram(x: number, z: number): void {
+    const material = this.material('mark:electric-pictogram', '#f2fae9', { texture: 'grain', coloredTexture: false });
+    const icon = new Group();
+    icon.name = 'electric-car-pictogram';
+    icon.position.set(x, 0.033, z);
+    const body = new Mesh(this.flat, material);
+    body.scale.set(0.5, 0.024, 0.23);
+    const cabin = new Mesh(this.flat, material);
+    cabin.position.set(0, 0.002, -0.01);
+    cabin.scale.set(0.29, 0.025, 0.15);
+    const bolt = new Mesh(this.flat, this.material('mark:electric-bolt', '#f3d16c', { texture: 'grain', coloredTexture: false }));
+    bolt.position.set(0, 0.004, 0.01);
+    bolt.scale.set(0.08, 0.028, 0.2);
+    bolt.rotation.y = 0.2;
+    icon.add(body, cabin, bolt);
+    this.group.add(icon);
   }
 
   /** Pictograma de bicicleta dimensionado para caber dentro de cada faixa de 1.0m da ciclovia. */
