@@ -40,6 +40,13 @@ export const ORLA_CAMERA = {
   portraitAspect: 0.85,
   minAspect: 0.01,
   groundPadding: 0.02,
+  /**
+   * A câmera mira um pouco ao sul do personagem: a avenida, onde acontece a ação,
+   * sobe na tela e sai de baixo da barra de habilidades e de personagens.
+   */
+  followOffsetZ: 2,
+  /** Chão mostrado além da calçada sul andável, para o personagem não encostar na borda da tela. */
+  southViewMargin: 2,
   groundApron: 30,
 } as const;
 

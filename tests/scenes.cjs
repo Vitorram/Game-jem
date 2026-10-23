@@ -423,7 +423,9 @@ for (const [width, height] of [[1920, 1080], [768, 1024], [390, 844], [844, 390]
         const hit = ray.ray.intersectPlane(floor, new three.Vector3());
         assert.ok(hit);
         assert.ok(Math.abs(hit.x) <= orla.map.width / 2 + (close ? 0 : ORLA_CAMERA.groundApron) + 1e-8);
-        assert.ok(Math.abs(hit.z) <= orla.map.depth / 2 + (close ? 0 : ORLA_CAMERA.groundApron) + 1e-8);
+        // Ao sul, a calçada andável passa da borda do mapa; a câmera pode mostrar até ela e um pouco além.
+        const south = orla.map.depth / 2 + (close ? orla.map.southWalkway + ORLA_CAMERA.southViewMargin : ORLA_CAMERA.groundApron);
+        assert.ok(hit.z <= south + 1e-8 && hit.z >= -orla.map.depth / 2 - (close ? 0 : ORLA_CAMERA.groundApron) - 1e-8);
       }
     }
     orla.dispose();
@@ -445,7 +447,8 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
     orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id || id === 3));
     for (let frame = 0; frame < 300; frame++) orla.update(0.05);
     assert.ok(Math.abs(orla.player.mesh.position.x) <= orla.map.width / 2 - orla.map.playerRadius);
-    assert.ok(Math.abs(orla.player.mesh.position.z) <= orla.map.depth / 2 - orla.map.playerRadius);
+    const playerZ = orla.player.mesh.position.z;
+    assert.ok(playerZ >= -orla.map.depth / 2 + orla.map.playerRadius && playerZ <= orla.map.depth / 2 + orla.map.southWalkway - orla.map.playerRadius);
   }
   orla.dispose();
   orla.dispose();
@@ -455,6 +458,260 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
   assert.equal(orla.scene.children.length, 0);
   assert.ok([...counts.values()].every(count => count === 1));
   assert.equal(shadowDispose.mock.callCount(), 1);
+});
+
+test('CT-3.1: veículos parados são sólidos para Mobilidade e Infraestrutura', () => {
+  for (const id of [1, 2]) {
+    const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 1, z: 0 }) });
+    try {
+      const [car, ...others] = orla.traffic.vehicles;
+      others.forEach(vehicle => orla.traffic.removeVehicle(vehicle));
+      orla.traffic.setScheduledDemand(0);
+      // Carro parado (em recarga, acidentado ou na fila): nunca anda e fica no meio da via.
+      car.maxSpeed = 0; car.speed = 0;
+      car.mesh.position.set(0, 0.27, car.lane.z);
+      orla.setTutorialCollisionProtection(true);
+      orla.selectPlayer(id);
+      orla.player.setPosition(-4, car.lane.z);
+      for (let frame = 0; frame < 80; frame++) orla.update(0.05);
+      const limit = car.mesh.position.x - 1.35 / 2 - orla.map.playerRadius;
+      assert.ok(orla.player.mesh.position.x <= limit + 1e-6,
+        `jogador ${id} atravessou o carro parado: x=${orla.player.mesh.position.x}, limite=${limit}`);
+      assert.ok(orla.player.mesh.position.x > limit - 0.5, 'encosta no carro em vez de parar longe dele');
+    } finally { orla.dispose(); }
+  }
+});
+
+test('CT-3.2: mobiliário e vegetação da Orla são registrados como obstáculos para os pedestres', () => {
+  const orla = new Fase1OrlaScene();
+  try {
+    const registered = orla.map.obstacles.length;
+    const props = new Set(['beach-palm', 'beach-umbrella', 'lifeguard-tower', 'promenade-bench', 'promenade-lamp', 'promenade-bin', 'traffic-signal', 'street-tree']);
+    let drawn = 0;
+    orla.scene.traverse(object => { if (props.has(object.name)) drawn++; });
+    assert.ok(drawn > 0, 'a Orla desenha mobiliário');
+    assert.equal(registered, drawn, 'todo item desenhado vira obstáculo');
+    assert.ok(orla.map.obstacles.every(item => item.radius > 0 && Number.isFinite(item.x) && Number.isFinite(item.z)));
+  } finally { orla.dispose(); }
+});
+
+test('CT-4.1: faixa elétrica tem ~1,2 m e dá folga lateral ao veículo sem invadir as vizinhas', () => {
+  const orla = new Fase1OrlaScene();
+  try {
+    const stripe = orla.scene.getObjectByName('electric-lane-2');
+    assert.ok(stripe, 'a faixa elétrica é desenhada');
+    const width = stripe.scale.z;
+    assert.ok(width >= 1.2 && width <= 1.3, `largura da faixa elétrica: ${width}`);
+    const lanes = orla.traffic.lanes;
+    const green = lanes.find(lane => lane.type === 'GREEN');
+    assert.ok(Math.abs(stripe.position.z - green.z) < 1e-6, 'a pintura é centrada na faixa por onde os carros andam');
+    const vehicleWidth = 0.56;
+    assert.ok((width - vehicleWidth) / 2 >= 0.3, 'folga lateral mínima de 30 cm para cada lado');
+    // Nenhuma pista comum pode invadir a pintura: a lateral do carro fica fora da faixa verde.
+    const southEdge = green.z + width / 2;
+    for (const lane of lanes.filter(item => item.type === 'PRINCIPAL')) {
+      assert.ok(lane.z - vehicleWidth / 2 >= southEdge || lane.z + vehicleWidth / 2 <= green.z - width / 2,
+        `pista ${lane.id} invade a faixa elétrica`);
+    }
+    const ordered = lanes.filter(item => item.type === 'PRINCIPAL').map(lane => lane.z).sort((a, b) => a - b);
+    ordered.slice(1).forEach((z, index) => assert.ok(z - ordered[index] >= 0.96 - 1e-6, 'pistas comuns mantêm 0,96 m entre eixos'));
+    assert.ok(Math.max(...ordered) + vehicleWidth / 2 < orla.map.depth / 2, 'pistas ficam dentro do mapa');
+    const charger = orla.traffic.getElectricChargerPosition();
+    assert.ok(charger.z >= green.z + width / 2 && charger.z + 0.08 <= Math.min(...ordered) - vehicleWidth / 2,
+      'carregador fica entre a faixa elétrica e a primeira pista comum');
+  } finally { orla.dispose(); }
+});
+
+test('CT-4.1: nenhuma pista invade o canteiro central e o refúgio da travessia fica alinhado a ele', () => {
+  const orla = new Fase1OrlaScene();
+  try {
+    const curb = orla.scene.getObjectByName('median-curb-2');
+    assert.ok(curb, 'o canteiro central é desenhado');
+    // Meia espessura do canteiro (0,38 m) somada às linhas amarelas, que ficam a ±0,23 m com 0,055 m de largura.
+    const halfExtent = 0.23 + 0.055 / 2;
+    const vehicleHalf = 0.56 / 2;
+    for (const lane of orla.traffic.lanes.filter(item => item.type === 'PRINCIPAL')) {
+      const gap = Math.abs(lane.z - curb.position.z) - vehicleHalf - halfExtent;
+      assert.ok(gap >= 0.1, `pista ${lane.id} a ${gap.toFixed(3)} m do canteiro (mínimo 0,10 m)`);
+    }
+    const refuge = orla.scene.getObjectByName('tactile-median-refuge');
+    assert.ok(refuge, 'o piso tátil do refúgio é desenhado');
+    assert.ok(Math.abs(refuge.position.z - curb.position.z) < 1e-6, 'refúgio da travessia alinhado ao canteiro central');
+    const principal = orla.traffic.lanes.filter(item => item.type === 'PRINCIPAL');
+    const east = principal.filter(item => item.direction === 1).map(item => item.z);
+    const west = principal.filter(item => item.direction === -1).map(item => item.z);
+    assert.ok(Math.max(...east) < curb.position.z && Math.min(...west) > curb.position.z, 'cada sentido fica de um lado do canteiro');
+    assert.ok(Math.abs((curb.position.z - Math.max(...east)) - (Math.min(...west) - curb.position.z)) < 0.05, 'canteiro centrado entre os sentidos');
+  } finally { orla.dispose(); }
+});
+
+test('combinação CT-3.1 + acidente: nenhum veículo parado da fila pode ser atravessado pela Mobilidade', () => {
+  const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 0, z: 0 }) });
+  try {
+    orla.traffic.startCollision();
+    for (let frame = 0; frame < 20 * 40; frame++) orla.update(0.05);
+    const stopped = orla.traffic.vehicles.filter(vehicle => vehicle.speed < 0.05);
+    assert.ok(stopped.length >= 2, `o acidente forma fila de carros parados (${stopped.length})`);
+    const radius = orla.map.playerRadius, halfLength = 1.35 / 2 + radius, halfWidth = 0.36 + radius;
+    const insideAny = point => stopped.some(other => Math.abs(point.x - other.mesh.position.x) < halfLength - 1e-6
+      && Math.abs(point.z - other.mesh.position.z) < halfWidth - 1e-6);
+    let checked = 0;
+    for (const vehicle of stopped) {
+      const { x, z } = vehicle.mesh.position;
+      for (const from of [{ x: x - halfLength - 0.5, z }, { x: x + halfLength + 0.5, z }, { x, z: z - halfWidth - 0.5 }, { x, z: z + halfWidth + 0.5 }]) {
+        // Na fila, o ponto de partida pode cair dentro do carro vizinho; só vale partir de fora de todos.
+        if (insideAny(from)) continue;
+        for (const target of [{ x, z }, { x: x + 0.2, z: z - 0.1 }, { x: x - 0.3, z: z + 0.1 }]) {
+          const resolved = orla.traffic.resolveWorkerMovement(from, target, radius, true);
+          assert.equal(insideAny(resolved), false,
+            `entrou em um veículo parado partindo de (${from.x.toFixed(2)}, ${from.z.toFixed(2)}) rumo a (${target.x.toFixed(2)}, ${target.z.toFixed(2)})`);
+          checked++;
+        }
+      }
+    }
+    assert.ok(checked >= 12, `pontos verificados: ${checked}`);
+    // Carros em movimento continuam atropelando em vez de bloquear: só os parados são sólidos.
+    const moving = orla.traffic.vehicles.find(vehicle => vehicle.speed > 0.05);
+    if (moving) {
+      const { x, z } = moving.mesh.position;
+      assert.deepEqual(orla.traffic.resolveWorkerMovement({ x: x - 3, z }, { x, z }, radius, true), { x, z });
+    }
+  } finally { orla.dispose(); }
+});
+
+test('combinação CT-3.2 + travessia: com o mobiliário real da Orla os pedestres cruzam e ninguém fica preso', () => {
+  const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 0, z: 0 }) });
+  try {
+    assert.ok(orla.map.obstacles.length > 10, 'a Orla tem obstáculos registrados');
+    orla.selectPlayer(3);
+    const lastMoved = new Map();
+    let groups = 0, previousCrossing = false;
+    for (let frame = 0; frame < 20 * 240; frame++) {
+      orla.update(0.05);
+      const time = frame * 0.05;
+      const walkers = orla.activeMobility.walkers;
+      const crossing = walkers.some(walker => walker.state === 'cross-road');
+      if (crossing && !previousCrossing) groups++;
+      previousCrossing = crossing;
+      for (const walker of walkers) {
+        const last = lastMoved.get(walker);
+        if (!last || Math.hypot(walker.x - last.x, walker.z - last.z) > 0.02) lastMoved.set(walker, { x: walker.x, z: walker.z, time });
+        const waiting = ['wait-road', 'wait-cycle', 'form-road'].includes(walker.state);
+        const idle = time - lastMoved.get(walker).time;
+        assert.ok(waiting || idle < 12, `pedestre preso em '${walker.state}' por ${idle.toFixed(0)} s em (${walker.x.toFixed(2)}, ${walker.z.toFixed(2)})`);
+      }
+    }
+    assert.ok(groups >= 2, `grupos que atravessaram a avenida: ${groups}`);
+    assert.ok(orla.activeMobility.getCrossingProgress().crossed >= 6, 'pedestres concluem a travessia');
+  } finally { orla.dispose(); }
+});
+
+test('A2: frente urbana ao sul ocupa o vazio sem esconder a avenida nem a saída dos pedestres', () => {
+  const orla = new Fase1OrlaScene();
+  try {
+    const southEdge = orla.map.depth / 2, crossingX = 1, exitZ = southEdge + 0.75;
+    // A câmera fica ao sul olhando para baixo (inclinação 0,75): cada unidade de altura cobre 0,75 do chão ao norte.
+    const shadowReach = 0.75;
+    const box = new three.Box3();
+    const buildings = [], trees = [];
+    orla.scene.traverse(object => {
+      if (object.name.startsWith('city-building-')) buildings.push(object);
+      if (object.name === 'street-tree') trees.push(object);
+    });
+    assert.ok(buildings.length >= 8, `prédios na frente urbana: ${buildings.length}`);
+    assert.ok(trees.length >= 6, `árvores na calçada sul: ${trees.length}`);
+    let minX = Infinity, maxX = -Infinity;
+    for (const building of buildings) {
+      box.setFromObject(building);
+      minX = Math.min(minX, box.min.x); maxX = Math.max(maxX, box.max.x);
+      assert.ok(box.max.y <= 1.36, `${building.name} alto demais (${box.max.y.toFixed(2)})`);
+      assert.ok(box.min.z - shadowReach * box.max.y >= southEdge + 1.3, `${building.name} esconde a faixa de saída dos pedestres`);
+      assert.ok(box.max.x < crossingX - 2.3 || box.min.x > crossingX + 2.3, `${building.name} fecha a praça em frente à travessia`);
+    }
+    assert.ok(minX <= -orla.map.width / 2 - 4 && maxX >= orla.map.width / 2 + 4, 'o quarteirão cobre a largura visível, além das bordas do mapa');
+    for (const tree of trees) {
+      box.setFromObject(tree);
+      assert.ok(box.max.y <= 1.1, 'árvore baixa o bastante para não cobrir a calçada');
+      assert.ok(tree.position.z - shadowReach * box.max.y >= exitZ + 0.15, 'copa não cobre quem sai da travessia');
+    }
+    for (const obstacle of orla.map.obstacles) {
+      assert.ok(Math.abs(obstacle.z - exitZ) >= obstacle.radius + 0.2, `obstáculo em (${obstacle.x.toFixed(1)}, ${obstacle.z.toFixed(1)}) na faixa de saída`);
+    }
+  } finally { orla.dispose(); }
+});
+
+test('A3: com o personagem na calçada norte, a avenida fica acima da barra de controles', () => {
+  for (const [width, height] of [[1280, 720], [1920, 1080], [1024, 768]]) {
+    for (const closeView of [false, true]) {
+      const orla = new Fase1OrlaScene();
+      try {
+        const camera = new three.PerspectiveCamera();
+        orla.selectPlayer(2);
+        orla.player.setPosition(1, 5);
+        orla.configureCamera(camera, width / height, closeView);
+        for (let frame = 0; frame < 120; frame++) orla.updateCamera(camera, 0.05, closeView);
+        // A barra de habilidades e de personagens ocupa ~22% da base da tela (NDC y < -0,56).
+        const lanes = orla.traffic.lanes.filter(lane => lane.type === 'PRINCIPAL').map(lane => lane.z);
+        const avenueCenter = (Math.min(...lanes) + Math.max(...lanes)) / 2;
+        const projected = new three.Vector3(1, 0, avenueCenter).project(camera);
+        assert.ok(projected.y > -0.56, `${width}x${height} ${closeView ? 'perto' : 'ampla'}: eixo da avenida em NDC y=${projected.y.toFixed(2)}`);
+        const player = orla.player.mesh.position.clone().project(camera);
+        assert.ok(player.y > -0.56 && player.y < 0.9, 'o personagem continua visível e fora da barra');
+      } finally { orla.dispose(); }
+    }
+  }
+});
+
+test('D12: com o mobiliário real, todo caminho de pedestre chega ao destino', () => {
+  const orla = new Fase1OrlaScene();
+  try {
+    const mobility = orla.activeMobility;
+    mobility.spawnWalkerTimer = Infinity;
+    mobility.setRoadBatchHold(true); // filas param na espera: medimos só a chegada
+    const walker = mobility.walkers[0];
+    const park = () => mobility.walkers.slice(1).forEach(other => { other.state = 'exit'; other.x = mobility.maxX + 50; other.z = mobility.southWalkZ; });
+    const runUntil = (done, seconds) => { for (let frame = 0; frame < seconds * 20; frame++) { orla.update(0.05); if (done()) return frame * 0.05; } return Infinity; };
+
+    for (const direction of [1, -1]) {
+      park();
+      Object.assign(walker, { state: 'exit', exitDirection: direction, speed: 0.8, z: mobility.southWalkZ,
+        x: direction === 1 ? mobility.minX + 0.6 : mobility.maxX - 0.6 });
+      const time = runUntil(() => !mobility.walkers.includes(walker), 80);
+      assert.ok(Number.isFinite(time), `saída sul no sentido ${direction > 0 ? 'leste' : 'oeste'} ficou presa (x=${walker.x.toFixed(2)})`);
+      mobility.walkers.unshift(walker); // devolve o pedestre para a próxima rodada
+    }
+
+    for (const [state, arrived, z] of [['approach-cycle', 'wait-cycle', mobility.beachSpawnZ], ['approach-road', 'wait-road', mobility.northSidewalkZ - 0.5]]) {
+      for (let x = mobility.minX + 0.6; x < mobility.maxX; x += 3.7) {
+        park();
+        Object.assign(walker, { state, x, z, speed: 0.8, roadSlot: null });
+        const time = runUntil(() => walker.state === arrived, 60);
+        assert.ok(Number.isFinite(time), `${state} a partir de x=${x.toFixed(1)} não chegou à fila (parou em ${walker.x.toFixed(2)}, ${walker.z.toFixed(2)})`);
+      }
+    }
+  } finally { orla.dispose(); }
+});
+
+test('calçada sul ampliada: o personagem anda até a faixa de grama e a câmera o acompanha', () => {
+  for (const closeView of [true, false]) {
+    const orla = new Fase1OrlaScene({ isSprinting: () => true, getAxis: () => ({ x: 0, z: 1 }) });
+    try {
+      orla.setTutorialCollisionProtection(true);
+      orla.selectPlayer(2);
+      const camera = new three.PerspectiveCamera();
+      orla.configureCamera(camera, 16 / 9, closeView);
+      for (let frame = 0; frame < 240; frame++) { orla.update(0.05); orla.updateCamera(camera, 0.05, closeView); }
+      const southEdge = orla.map.depth / 2, z = orla.player.mesh.position.z;
+      assert.ok(z >= southEdge + 0.9, `calçada sul com pelo menos ~2 m andáveis (parou em z=${z.toFixed(2)})`);
+      const box = new three.Box3();
+      const verges = [];
+      orla.scene.traverse(object => { if (object.name.startsWith('south-verge')) verges.push(box.setFromObject(object).clone()); });
+      assert.ok(verges.length > 0, 'faixa de grama marca o fim da calçada');
+      assert.ok(verges.every(verge => z + orla.map.playerRadius <= verge.min.z + 1e-6), 'o personagem para antes da grama, sem parede invisível');
+      const onScreen = orla.player.mesh.position.clone().project(camera);
+      assert.ok(onScreen.y > -0.56 && onScreen.y < 1, `${closeView ? 'perto' : 'ampla'}: personagem visível e acima da barra (NDC y=${onScreen.y.toFixed(2)})`);
+    } finally { orla.dispose(); }
+  }
 });
 
 test('Game segue seleção na Orla, reenquadra no resize pausado e restaura laboratório', t => {
@@ -494,7 +751,8 @@ test('Orla usa óptica de perto do laboratório e suavização independente do F
     orla.player.setPosition(0, 0);
     orla.configureCamera(camera, 1);
     assert.equal(camera.position.y, ORLA_CAMERA.closeHeight);
-    assert.equal(camera.position.z, ORLA_CAMERA.closeHeight * ORLA_CAMERA.tilt);
+    // A mira fica ao sul do personagem (followOffsetZ) para a avenida sair de baixo da barra de controles.
+    assert.equal(camera.position.z, ORLA_CAMERA.followOffsetZ + ORLA_CAMERA.closeHeight * ORLA_CAMERA.tilt);
     orla.player.setPosition(2, 0);
     orla.updateCamera(camera, 0, true);
     assert.equal(camera.position.x, 0);
@@ -588,7 +846,8 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
   assert.equal(key('KeyT', { ctrlKey: true }).defaultPrevented, false);
   key('KeyT'); key('KeyT');
   assert.equal(phase.player.id, 2);
-  assert.deepEqual(selected, [3, 2, 3, 1, 2]);
+  // start() já notifica a Mobilidade (2); depois vêm a seleção explícita e o ciclo T: 3 → 1 → 2.
+  assert.deepEqual(selected, [2, 2, 3, 1, 2]);
   phase.player.setPosition(source.x, source.z);
   game.togglePause();
   key('KeyE'); key('KeyT'); game.interact();
@@ -609,6 +868,8 @@ test('Game: E/toque interagem, T cicla inventários e UI, pausa e repetição n�
 
 
 const { sessionStore } = require('../src/game/session/sessionStore.ts');
+const { ORLA_EVENTS } = require('../src/game/session/orlaEvents.ts');
+const { ORLA_SESSION_CONFIG } = require('../src/game/session/sessionData.ts');
 
 test('treino mantém o relógio em zero e libera a agenda somente ao terminar', t => {
   const { Game, Element, created } = gameHarness(t);
@@ -621,14 +882,138 @@ test('treino mantém o relógio em zero e libera a agenda somente ao terminar', 
   assert.equal(sessionStore.getSnapshot().snapshot.orders.length, 0);
   game.finishTeamTutorials();
   assert.equal(suburbanGameState.snapshot().problems.length, 0);
-  renderer.loop(149_999);
+  const treinoEndedAt = 120_000, firstEvent = ORLA_EVENTS[0];
+  renderer.loop(treinoEndedAt + firstEvent.atMs - 1);
   assert.equal(sessionStore.getSnapshot().snapshot.orders.length, 0);
-  renderer.loop(150_000);
-  assert.equal(sessionStore.getSnapshot().snapshot.orders[0].definitionId, 'broken-light-pole-1');
+  renderer.loop(treinoEndedAt + firstEvent.atMs);
+  assert.equal(sessionStore.getSnapshot().snapshot.orders[0].definitionId, firstEvent.id);
   game.dispose();
 });
 
-test('fase real: aviso, reparo, tempo durante puzzle, fim em seis minutos e reinício', t => {
+test('CT-5.3: pular o tutorial em qualquer etapa inicia a partida com tudo liberado', t => {
+  const stages = {
+    analista: game => {},
+    mobilidade: game => game.startMobilityTutorial(),
+    infraestrutura: game => { game.startMobilityTutorial(); game.startInfrastructureTutorial(); },
+  };
+  for (const [name, enter] of Object.entries(stages)) {
+    const { Game, Element, created } = gameHarness(t);
+    const game = new Game(new Element(), () => {});
+    try {
+      assert.equal(game.skipTutorial(), false, 'sem tutorial ativo pular não faz nada');
+      game.startOrlaWithAnalystTutorial();
+      enter(game);
+      const renderer = created.at(-1);
+      renderer.loop(0); renderer.loop(5_000);
+      assert.equal(sessionStore.getSnapshot().snapshot.elapsedMs, 0, `${name}: relógio parado durante o tutorial`);
+      assert.equal(game.canSelectPlayer(name === 'analista' ? 2 : 3), false, `${name}: troca de personagem travada no tutorial`);
+      assert.equal(game.skipTutorial(), true);
+      assert.equal(game.skipTutorial(), false, 'pular duas vezes é idempotente');
+      assert.equal(suburbanGameState.snapshot().problems.length, 0);
+      for (const id of [1, 2, 3]) assert.equal(game.canSelectPlayer(id), true, `${name}: personagem ${id} liberada depois de pular`);
+      renderer.loop(6_000);
+      assert.equal(sessionStore.getSnapshot().snapshot.elapsedMs, 1_000, `${name}: relógio corre depois de pular`);
+      assert.equal(sessionStore.getSnapshot().snapshot.status, 'playing');
+    } finally { game.dispose(); }
+  }
+});
+
+test('A4: o tablet abre sozinho uma vez por chamado e nunca desfaz a escolha do jogador', t => {
+  const run = (renderer, from, to) => { for (let time = from; time <= to; time += 50) renderer.loop(time); return to; };
+  // Sem interferência: ao fim da cena de câmera do chamado novo, a Analista assume.
+  {
+    const { Game, Element, created } = gameHarness(t);
+    const game = new Game(new Element(), () => {});
+    try {
+      game.start('fase1-orla');
+      const orla = game.scenes.current, renderer = created.at(-1);
+      let time = run(renderer, 0, ORLA_EVENTS[0].atMs + 100);
+      assert.equal(orla.phaseIsCinematic(), true, 'o chamado novo começa com a cena de câmera');
+      time = run(renderer, time + 50, time + 4000);
+      assert.equal(orla.phaseIsCinematic(), false);
+      assert.equal(orla.player.id, 3, 'a Analista assume para analisar o chamado');
+    } finally { game.dispose(); }
+  }
+  // Escolha manual durante a cena é respeitada; chamado resolvido puxa a Analista uma vez só.
+  {
+    const { Game, Element, created } = gameHarness(t);
+    const game = new Game(new Element(), () => {});
+    try {
+      game.start('fase1-orla');
+      const orla = game.scenes.current, renderer = created.at(-1);
+      let time = run(renderer, 0, ORLA_EVENTS[0].atMs + 100);
+      game.selectPlayer(2);
+      time = run(renderer, time + 50, time + 4000);
+      assert.equal(orla.player.id, 2, 'quem escolheu a Mobilidade durante a cena continua nela');
+      assert.equal(game.analystNeedsAttention(), true, 'o botão da Analista avisa que há chamado esperando análise');
+      suburbanGameState.setProblemStatus(ORLA_EVENTS[0].id, 'RESOLVED');
+      time = run(renderer, time + 50, time + 500);
+      assert.equal(orla.player.id, 3, 'chamado resolvido leva à Analista para arquivar');
+      game.selectPlayer(2);
+      time = run(renderer, time + 50, time + 3000);
+      assert.equal(orla.player.id, 2, 'depois de sair, o jogador não é puxado de volta a cada quadro');
+      assert.equal(game.analystNeedsAttention(), true, 'o lembrete continua no botão da Analista');
+      game.selectPlayer(3);
+      assert.equal(game.analystNeedsAttention(), false, 'com a Analista selecionada não há lembrete');
+    } finally { game.dispose(); }
+  }
+});
+
+test('CT-5.1: durante o treino de Mobilidade e de Infraestrutura o jogador anda livremente', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.startOrlaWithAnalystTutorial();
+    const orla = game.scenes.current, renderer = created.at(-1);
+    game.startMobilityTutorial();
+    for (let step = 0; step <= 18; step++) {
+      game.setMobilityTutorialStep(step);
+      assert.equal(orla.tutorialMovementEnabled, true, `Mobilidade, etapa ${step}: movimento travado`);
+    }
+    game.startInfrastructureTutorial();
+    for (let step = 0; step <= 6; step++) {
+      game.setInfrastructureTutorialStep(step);
+      assert.equal(orla.tutorialMovementEnabled, true, `Infraestrutura, etapa ${step}: movimento travado`);
+    }
+    // Movimento real com a lição aberta na tela.
+    game.setInfrastructureTutorialStep(0);
+    const before = orla.player.mesh.position.clone();
+    game.input.setTouch(1, 'KeyD');
+    let time = 0;
+    for (let frame = 0; frame < 20; frame++) renderer.loop(time += 50);
+    assert.ok(orla.player.mesh.position.x > before.x + 0.3, 'o personagem anda enquanto a instrução está aberta');
+  } finally { game.dispose(); }
+});
+
+test('D11: sair no meio da partida e começar de novo devolve a Orla limpa', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.start('fase1-orla');
+    let renderer = created.at(-1), time = 0;
+    for (; time <= 60_000; time += 50) renderer.loop(time);
+    assert.ok(suburbanGameState.snapshot().problems.length > 0, 'a partida estava com chamado ativo');
+    game.togglePause();
+    game.returnToMenu();
+    assert.equal(sessionStore.getSnapshot().snapshot, null);
+    game.start('fase1-orla');
+    const orla = game.scenes.current;
+    renderer = created.at(-1);
+    renderer.loop(0);
+    const fresh = sessionStore.getSnapshot().snapshot;
+    assert.equal(fresh.elapsedMs, 0);
+    assert.equal(fresh.orders.length, 0);
+    assert.equal(fresh.score, 0);
+    assert.equal(suburbanGameState.snapshot().problems.length, 0);
+    assert.ok(suburbanGameState.snapshot().roads.every(road => !road.conesActive && road.status === 'open'));
+    assert.equal(orla.traffic.isCrossingGuarded(), false);
+    assert.equal(orla.player.id, 2);
+    for (time = 50; time <= ORLA_EVENTS[0].atMs + 50; time += 50) renderer.loop(time);
+    assert.equal(sessionStore.getSnapshot().snapshot.orders[0]?.definitionId, ORLA_EVENTS[0].id, 'o primeiro chamado chega no horário de novo');
+  } finally { game.dispose(); }
+});
+
+test('fase real: aviso, reparo, tempo durante puzzle, fim por expirações e reinício', t => {
   const { Game, Element, created } = gameHarness(t);
   const statuses = [], puzzles = [];
   const game = new Game(new Element(), value => statuses.push(value), undefined, undefined, undefined, undefined, open => puzzles.push(open));
@@ -636,43 +1021,62 @@ test('fase real: aviso, reparo, tempo durante puzzle, fim em seis minutos e rein
   game.start('fase1-orla');
   const orla = game.scenes.current;
   const renderer = created[0];
+  const first = ORLA_EVENTS[0];
   renderer.loop(0);
   game.completeRepairPuzzle();
   assert.equal(sessionStore.getSnapshot().snapshot.score, 0);
   assert.equal(sessionStore.getSnapshot().snapshot.orders.length, 0);
-  renderer.loop(30_000);
-  assert.equal(suburbanGameState.snapshot().problems[0].stage, 'warning');
-  assert.deepEqual(suburbanGameState.snapshot().problems[0].dispatchedTeams, ['infraestrutura']);
-  game.selectPlayer(1);
-  orla.player.setPosition(-9, 4.7);
-  game.interact();
-  assert.equal(puzzles.includes(true), false, 'o primeiro aviso antecede a falha');
-  let time = 37_000;
+  let time = first.atMs;
   renderer.loop(time);
+  assert.equal(suburbanGameState.snapshot().problems[0].id, first.id);
+  assert.equal(suburbanGameState.snapshot().problems[0].stage, 'warning');
+  assert.deepEqual(suburbanGameState.snapshot().problems[0].dispatchedTeams, []);
+  game.selectPlayer(1);
+  orla.player.setPosition(first.position.x, first.position.z);
+  game.interact();
+  assert.equal(puzzles.includes(true), false, 'sem o acionamento da equipe não há reparo');
+  // O analista confere o relatório e aciona as equipes; só então o chamado fica ativo.
+  game.selectPlayer(3);
+  assert.equal(orla.analyzeProblem(first.id), true);
+  assert.equal(orla.requestReinforcements(first.id), true);
+  renderer.loop(time += 3000);
+  assert.equal(suburbanGameState.snapshot().problems[0].stage, 'active');
+  // Infra só entra depois que a Mobilidade protege a faixa e o primeiro grupo começa a atravessar.
+  game.selectPlayer(2);
+  orla.player.setPosition(first.position.x, first.position.z);
+  assert.equal(game.canSelectPlayer(1), false);
+  game.useMobilityHotkey('Digit3');
+  for (let i = 0; i < 400 && !game.canSelectPlayer(1); i++) renderer.loop(time += 50);
+  assert.equal(game.canSelectPlayer(1), true, 'faixa protegida libera a Infraestrutura');
+  game.selectPlayer(1);
+  orla.player.setPosition(first.position.x, first.position.z);
   game.interact();
   assert.equal(puzzles.at(-1), true);
-  const remaining = sessionStore.getSnapshot().snapshot.remainingMs;
+  // O store publica com atraso; o relógio exato está na própria sessão.
+  const left = () => game.session.snapshot().remainingMs;
+  const remaining = left();
   window.dispatchEvent(new Event('blur'));
   renderer.loop(time += 5000);
   assert.equal(statuses.at(-1), 'paused');
-  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, remaining);
-  game.completeRepairPuzzle();
+  assert.equal(left(), remaining);
   assert.equal(suburbanGameState.snapshot().problems[0].status, 'MAINTENANCE');
   game.togglePause();
   renderer.loop(time += 50);
   renderer.loop(time += 2000);
-  assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, remaining - 2000, 'puzzle conta tempo real, não delta limitado da física');
+  assert.equal(left(), remaining - 2000, 'puzzle conta tempo real, não delta limitado da física');
   game.completeRepairPuzzle();
   assert.equal(statuses.at(-1), 'playing');
-  assert.equal(suburbanGameState.snapshot().problems[0].status, 'RESOLVED');
+  assert.equal(puzzles.at(-1), false);
+  // Só o reparo não conclui o chamado: a travessia protegida ainda é necessária.
   const result = sessionStore.getSnapshot().snapshot;
-  assert.equal(result.completedOrders, 1);
-  assert.ok(result.score >= 100 && result.score <= 150);
+  assert.equal(result.completedOrders, 0);
+  assert.equal(result.score, 0);
   game.completeRepairPuzzle(); game.interact();
   assert.equal(sessionStore.getSnapshot().snapshot.score, result.score);
-  renderer.loop(time += sessionStore.getSnapshot().snapshot.remainingMs);
+  // Sem concluir nada, os chamados expiram em série até o limite e a fase encerra.
+  renderer.loop(time += left());
   assert.equal(statuses.at(-1), 'finished');
-  assert.equal(sessionStore.getSnapshot().snapshot.elapsedMs, 360_000);
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, ORLA_SESSION_CONFIG.maxExpiredOrders);
   const counts = watchResources(orla.scene);
   sessionStore.restart();
   assert.equal(statuses.at(-1), 'playing');
@@ -726,7 +1130,8 @@ test('prazo encerra ações, relógio ignora pausa e menu desmonta a sessão', t
   assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 358000);
   game.togglePause(); renderer.loop(100100); renderer.loop(458100);
   assert.equal(statuses.at(-1), 'finished');
-  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 6);
+  // Em série, cada chamado ignorado expira sozinho; ao atingir o limite a fase encerra.
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, ORLA_SESSION_CONFIG.maxExpiredOrders);
   game.interact();
   assert.equal(suburbanGameState.snapshot().selectedProblemId, null);
   game.returnToMenu();

@@ -2,6 +2,7 @@ import {
   BoxGeometry, ConeGeometry, CylinderGeometry, Group, MathUtils, Mesh, MeshStandardMaterial, Shape, ShapeGeometry, TorusGeometry,
 } from 'three';
 import type { GridMap } from '../map/GridMap';
+import { ROAD_LAYOUT } from '../map/roadLayout';
 import { suburbanGameState, type RoadState } from '../core/GameState';
 import { ORLA_CROSSING } from '../config';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
@@ -66,6 +67,10 @@ const CONE_LOOKAHEAD = 9;
 const CONE_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.3;
 const CROSSING_STOP_DISTANCE = 2.45;
 const CROSSING_BRAKE_DISTANCE = 7;
+/** Abaixo desta velocidade o carro da frente conta como parado para a regra de não bloquear a faixa. */
+const KEEP_CLEAR_SPEED = 0.3;
+/** Acima desta velocidade o carro atropela o personagem; abaixo dela é um obstáculo sólido. */
+const PLAYER_COLLISION_SPEED = 0.05;
 /** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
 
 /** Fluxo viário da Orla: avenidas comuns e faixa verde exclusiva para elétricos. */
@@ -121,6 +126,8 @@ export class TrafficSystem {
   private readonly pedestrianCrossingX = ORLA_CROSSING.centerX;
   /** Posição do personagem a pé, usada para frear e para detectar atropelamento. */
   private playerPosition: { x: number; z: number } | null = null;
+  /** Ponto em que a pista foi interditada; quem já passou dele não precisa parar. */
+  private blockAnchorX: number | null = null;
   private readonly vehicleModels = new VehicleModels();
   private spawnedCount = 0;
   private disposed = false;
@@ -135,12 +142,12 @@ export class TrafficSystem {
     arrowShape.lineTo(0.42, 0); arrowShape.lineTo(0.05, 0.3); arrowShape.lineTo(0.05, 0.16); arrowShape.lineTo(-0.38, 0.16); arrowShape.closePath();
     this.directionGeometry = new ShapeGeometry(arrowShape);
     const roadLowEdge = map.depth / 2 - map.tileSize * 3;
-    const greenRoadZ = roadLowEdge + 0.46;
+    const greenRoadZ = roadLowEdge + ROAD_LAYOUT.greenCenter;
     this.lanes = [
-      this.createLane('orla-eastbound', 1, roadLowEdge + 1.4, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-eastbound-2', 1, roadLowEdge + 2.36, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-westbound', -1, roadLowEdge + 3.76, 'PRINCIPAL', 100, 1),
-      this.createLane('orla-westbound-2', -1, roadLowEdge + 4.72, 'PRINCIPAL', 100, 1),
+      this.createLane('orla-eastbound', 1, roadLowEdge + ROAD_LAYOUT.eastbound[0], 'PRINCIPAL', 100, 1),
+      this.createLane('orla-eastbound-2', 1, roadLowEdge + ROAD_LAYOUT.eastbound[1], 'PRINCIPAL', 100, 1),
+      this.createLane('orla-westbound', -1, roadLowEdge + ROAD_LAYOUT.westbound[0], 'PRINCIPAL', 100, 1),
+      this.createLane('orla-westbound-2', -1, roadLowEdge + ROAD_LAYOUT.westbound[1], 'PRINCIPAL', 100, 1),
       this.createLane('orla-green', 1, greenRoadZ, 'GREEN', GREEN_LANE_CAPACITY, 0),
     ];
     this.chargers = this.createChargers(greenRoadZ);
@@ -207,7 +214,7 @@ export class TrafficSystem {
     const xPositions = [this.minX + 8, this.minX + this.width * 0.44, this.minX + this.width - 8];
     return xPositions.map((x, index) => {
       // Posições junto ao bordo sul da faixa verde, no intervalo antes da pista comum.
-      const z = greenLaneZ + 0.52;
+      const z = greenLaneZ + ROAD_LAYOUT.chargerOffset;
       const group = new Group();
       group.name = `electric-charger-${index + 1}`;
       group.position.set(x, 0, z);
@@ -374,6 +381,7 @@ export class TrafficSystem {
   }
 
   resetRoadInterventions(): void {
+    this.blockAnchorX = null;
     for (const cone of [...this.cones]) this.removeCone(cone);
     this.lanes.forEach(lane => {
       lane.status = 'open';
@@ -393,7 +401,7 @@ export class TrafficSystem {
 
   getPlayerCollision(position: { x: number; z: number }, radius = 0.34): { x: number; z: number } | null {
     const impact = this.vehicles
-      .filter(vehicle => vehicle.speed > 0.05
+      .filter(vehicle => vehicle.speed > PLAYER_COLLISION_SPEED
         && Math.abs(vehicle.mesh.position.x - position.x) <= VEHICLE_LENGTH / 2 + radius
         && Math.abs(vehicle.mesh.position.z - position.z) <= VEHICLE_WIDTH / 2 + radius)
       .sort((a, b) => Math.hypot(a.mesh.position.x - position.x, a.mesh.position.z - position.z)
@@ -511,9 +519,14 @@ export class TrafficSystem {
     return { prepared, reason, nearbyVehicles };
   }
 
-  resolveWorkerMovement(from: { x: number; z: number }, to: { x: number; z: number }, radius: number): { x: number; z: number } {
+  /**
+   * Impede o personagem de entrar em carros. Com `onlyStopped`, só os parados
+   * (recarga, acidente, fila) são sólidos: os em movimento atropelam e reiniciam o personagem.
+   */
+  resolveWorkerMovement(from: { x: number; z: number }, to: { x: number; z: number }, radius: number, onlyStopped = false): { x: number; z: number } {
     const resolved = { ...to };
     for (const vehicle of this.vehicles) {
+      if (onlyStopped && vehicle.speed > PLAYER_COLLISION_SPEED) continue;
       const halfLength = VEHICLE_LENGTH / 2 + radius;
       const halfWidth = 0.36 + radius;
       const left = vehicle.mesh.position.x - halfLength;
@@ -548,7 +561,9 @@ export class TrafficSystem {
       this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
         .forEach(candidate => { candidate.status = 'open'; });
       if (!this.isElectricChargerBroken()) this.electricDetour = false;
+      this.blockAnchorX = null;
     }
+    if (action === 'block' || action === 'blockAll') this.blockAnchorX = this.playerPosition?.x ?? this.pedestrianCrossingX;
     if (action === 'block') this.lanes.filter(candidate => candidate.type === 'PRINCIPAL' && candidate.direction === lane.direction).forEach(candidate => { candidate.status = 'blocked'; });
     if (action === 'blockAll') {
       this.lanes.filter(candidate => candidate.type === 'PRINCIPAL')
@@ -759,14 +774,19 @@ export class TrafficSystem {
         || (!this.unsafeCrossing && this.waitingPedestrians > 0);
       const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
+      const keepClearRoom = this.keepClearRoom(vehicle, crossingDistance);
       const playerBrake = this.getPlayerBrake(vehicle);
-      const laneAvailable = vehicle.lane.status === 'open';
+      // Interditar a pista retém quem ainda vai chegar ao ponto bloqueado; quem já
+      // entrou na área de conflito ou passou dela segue até sair do mapa.
+      const pastBlock = vehicle.lane.status === 'blocked' && this.blockAnchorX !== null
+        && (this.blockAnchorX - vehicle.mesh.position.x) * vehicle.lane.direction < CROSSING_RULES.roadConflictHalfWidth;
+      const laneAvailable = vehicle.lane.status === 'open' || pastBlock;
       let targetSpeed = this.running && laneAvailable && !this.signalFailure && !charging.stopped
         ? vehicle.maxSpeed * following * coneBrake * playerBrake * charging.brake : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
-      const room = Math.min(crossingRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity,
+      const room = Math.min(crossingRoom, keepClearRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity,
         charging.stopDistance);
       const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
@@ -962,16 +982,34 @@ export class TrafficSystem {
     return from.lane.direction === 1 ? (raw + this.width) % this.width : (-raw + this.width) % this.width;
   }
 
-  private distanceToVehicleAhead(vehicle: Vehicle): number {
-    let nearest = this.width;
+  private nearestAhead(vehicle: Vehicle): { vehicle: Vehicle; distance: number } | null {
+    let nearest: { vehicle: Vehicle; distance: number } | null = null;
     for (const other of this.vehicles) {
       if (other === vehicle) continue;
       const lateralOverlap = Math.abs(other.mesh.position.z - vehicle.mesh.position.z) < 0.72;
       if (other.lane !== vehicle.lane && !lateralOverlap) continue;
       const distance = (other.mesh.position.x - vehicle.mesh.position.x) * vehicle.lane.direction;
-      if (distance > 0.001) nearest = Math.min(nearest, distance);
+      if (distance > 0.001 && (!nearest || distance < nearest.distance)) nearest = { vehicle: other, distance };
     }
     return nearest;
+  }
+
+  private distanceToVehicleAhead(vehicle: Vehicle): number {
+    return Math.min(this.width, this.nearestAhead(vehicle)?.distance ?? this.width);
+  }
+
+  /**
+   * Não fechar a faixa de pedestres: se o carro da frente está parado logo depois
+   * da faixa e não sobra espaço para um carro inteiro, quem chega espera antes dela.
+   */
+  private keepClearRoom(vehicle: Vehicle, crossingDistance: number): number {
+    if (crossingDistance < CROSSING_RULES.roadStopDistance - .001) return Infinity;
+    const front = this.nearestAhead(vehicle);
+    if (!front || front.vehicle.speed > KEEP_CLEAR_SPEED) return Infinity;
+    const frontPastCenter = front.distance - crossingDistance;
+    if (frontPastCenter <= 0) return Infinity;
+    const freeSpan = frontPastCenter - VEHICLE_LENGTH / 2 - CROSSING_RULES.roadConflictHalfWidth;
+    return freeSpan < VEHICLE_LENGTH + MIN_BUMPER_GAP ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
   }
 
   private makeVehicle(requestedKind?: VehicleKind, requestedColor?: string): Group {

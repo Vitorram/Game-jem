@@ -40,6 +40,7 @@ export default function GameCanvas() {
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
   const isAnalystTablet = isOriginalOrla && selectedPlayer === 3;
   const [closeView, setCloseView] = useState(false);
+  const [analystAttention, setAnalystAttention] = useState(false);
   const [analystTutorialStep, setAnalystTutorialStep] = useState<AnalystTutorialStep | null>(null);
   const [mobilityTutorialStep, setMobilityTutorialStep] = useState<MobilityTutorialStep | null>(null);
   const [infrastructureTutorialStep, setInfrastructureTutorialStep] = useState<InfrastructureTutorialStep | null>(null);
@@ -147,6 +148,33 @@ export default function GameCanvas() {
     setInfrastructureTutorialStep(step);
   };
 
+  useEffect(() => {
+    if (!isOriginalOrla) return;
+    // Lembrete no botão da Analista quando há chamado esperando por ela e o jogador está em outra equipe.
+    const timer = window.setInterval(() => setAnalystAttention(game.current?.analystNeedsAttention() ?? false), 400);
+    return () => { window.clearInterval(timer); setAnalystAttention(false); };
+  }, [isOriginalOrla]);
+
+  const tutorialOpen = analystTutorialStep !== null || mobilityTutorialStep !== null || infrastructureTutorialStep !== null;
+  useEffect(() => {
+    if (!tutorialOpen) return;
+    // Atalho para pular o treino; Esc continua sendo pausa.
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== 'KeyP' || event.repeat || event.ctrlKey || event.altKey || event.metaKey) return;
+      event.preventDefault();
+      skipTutorial();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
+  const skipTutorial = () => {
+    game.current?.skipTutorial();
+    setAnalystTutorialStep(null);
+    setMobilityTutorialStep(null);
+    setInfrastructureTutorialStep(null);
+  };
+
   const finishInfrastructureTutorial = () => {
     game.current?.finishTeamTutorials();
     setInfrastructureTutorialStep(null);
@@ -231,18 +259,21 @@ export default function GameCanvas() {
           step={analystTutorialStep}
           onBegin={beginAnalystTutorialSteps}
           onComplete={beginMobilityTutorial}
+          onSkip={skipTutorial}
         />}
         {isOriginalOrla && mobilityTutorialStep !== null && <MobilityTutorialGuide
           step={mobilityTutorialStep}
           onBegin={() => setMobilityStep(1)}
           onContinue={() => setMobilityStep((mobilityTutorialStep + 1) as MobilityTutorialStep)}
           onComplete={finishTeamTutorials}
+          onSkip={skipTutorial}
         />}
         {isOriginalOrla && infrastructureTutorialStep !== null && <InfrastructureTutorialGuide
           step={infrastructureTutorialStep}
           onBegin={() => setInfrastructureStep(1)}
           onContinue={() => setInfrastructureStep((infrastructureTutorialStep + 1) as InfrastructureTutorialStep)}
           onComplete={finishInfrastructureTutorial}
+          onSkip={skipTutorial}
         />}
         <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}
@@ -264,6 +295,8 @@ export default function GameCanvas() {
         </aside>}
         {analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <div className="character-selector" role="group" aria-label="Escolher personagem">
           {playerIds.map(id => <button key={id} aria-pressed={selectedPlayer === id} disabled={isOriginalOrla && !game.current?.canSelectPlayer(id)}
+            className={id === 3 && analystAttention ? 'needs-attention' : undefined}
+            aria-label={id === 3 && analystAttention ? `${PLAYER_APPEARANCES[id].name} · chamado aguardando` : undefined}
             onClick={event => { game.current?.selectPlayer(id); event.currentTarget.blur(); }}>
             <span className="character-color" style={{ backgroundColor: PLAYER_APPEARANCES[id].shirt }} aria-hidden="true" />
             {PLAYER_APPEARANCES[id].name}

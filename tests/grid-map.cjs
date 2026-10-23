@@ -123,7 +123,9 @@ test('deslocamentos repetidos não penetram quinas ou emendas entre tiles sólid
   for (let i = 0; i < 5000; i++) {
     position = map.resolveMovement(position, { x: position.x + (random() - 0.5) * 4, z: position.z + (random() - 0.5) * 4 });
     assert.ok(Math.abs(position.x) <= map.width / 2 - map.playerRadius + 1e-9);
-    assert.ok(Math.abs(position.z) <= map.depth / 2 - map.playerRadius + 1e-9);
+    // Ao sul, a calçada andável continua map.southWalkway além da grade.
+    assert.ok(position.z >= -map.depth / 2 + map.playerRadius - 1e-9);
+    assert.ok(position.z <= map.depth / 2 + map.southWalkway - map.playerRadius + 1e-9);
     for (let row = 0; row < map.rows; row++) for (let col = 0; col < map.columns; col++) {
       if (!map.isSolid(col, row)) continue;
       const center = map.cellCenter(col, row);

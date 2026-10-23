@@ -7,7 +7,8 @@ export const ORLA_SESSION_CONFIG = {
   orderIntervalMs: 55_000,
   firstOrderDelayMs: ORLA_EVENTS[0].atMs,
   scheduledAtMs: ORLA_EVENTS.map(event => event.atMs),
-  maxExpiredOrders: 3,
+  // Tolera até 3 chamados perdidos: quem ainda está aprendendo não perde a fase antes de entender o ritmo.
+  maxExpiredOrders: 4,
   sequential: true,
   orders: ORLA_EVENTS.map(event => ({
     id: event.id, title: event.title, riskIds: event.steps,

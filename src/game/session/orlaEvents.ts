@@ -28,7 +28,7 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
     warning: 'Um poste apagou depois de uma falha no circuito. Prepare o reparo.',
     instruction: 'Infraestrutura: siga a seta, use E no poste e conecte o circuito elétrico.' },
   { id: 'ev-charger-repair', title: 'Carregador elétrico quebrado', atMs: 190_000, warningMs: 0,
-    teams: ['mobilidade', 'infraestrutura'], position: { x: -3, z: 6.98 }, steps: [901, 902],
+    teams: ['mobilidade', 'infraestrutura'], position: { x: -3, z: 7.32 }, steps: [901, 902],
     warning: 'O carregador da avenida verde falhou e os carros elétricos estão formando uma fila. Mobilidade: a Habilidade 4 desvia os elétricos para as pistas comuns.',
     instruction: 'Mobilidade: use a Habilidade 4 (tecla 4) para desviar os elétricos para a rua normal. Infraestrutura: vá ao carregador e use E para iniciar o reparo.' },
   { id: 'cyclist-assist', title: 'Resgate do entregador 99', atMs: 50_000, warningMs: 0,

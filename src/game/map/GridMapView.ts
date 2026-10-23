@@ -17,8 +17,9 @@ import {
   Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { GRID_CONFIG } from '../config';
+import { GRID_CONFIG, ORLA_CROSSING } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
+import { ROAD_LAYOUT } from './roadLayout';
 import { TextureLibrary, type TextureKey } from './proceduralTextures';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
@@ -316,6 +317,7 @@ export class GridMapView {
     this.addSidewalkFurniture();
     this.addRoadMedian();
     this.addSouthSidewalk();
+    this.addSouthCityFront();
     this.addOutdoorGym();
     this.addSeaAmbience();
     this.addApron();
@@ -803,6 +805,7 @@ export class GridMapView {
   private addPalm(x: number, z: number, scale: number, rotation: number): void {
     const palm = new Group();
     palm.name = 'beach-palm';
+    this.map.addObstacle(x, z, 0.2 * scale);
     palm.position.set(x, 0, z);
     palm.rotation.y = rotation;
     palm.scale.setScalar(scale);
@@ -845,6 +848,7 @@ export class GridMapView {
   private addUmbrella(x: number, z: number, colorIndex: number, rotation: number): void {
     const umbrella = new Group();
     umbrella.name = 'beach-umbrella';
+    this.map.addObstacle(x, z, 0.32);
     umbrella.position.set(x, 0, z);
     umbrella.rotation.y = rotation;
 
@@ -874,6 +878,7 @@ export class GridMapView {
   private addLifeguardTower(x: number, z: number): void {
     const tower = new Group();
     tower.name = 'lifeguard-tower';
+    this.map.addObstacle(x, z, 0.8);
     tower.position.set(x, 0, z);
 
     for (const dx of [-0.34, 0.34]) {
@@ -954,6 +959,7 @@ export class GridMapView {
   private addBench(x: number, z: number, flip: boolean): void {
     const bench = new Group();
     bench.name = 'promenade-bench';
+    this.map.addObstacle(x, z, 0.45);
     bench.position.set(x, 0, z);
     bench.rotation.y = flip ? Math.PI : 0;
 
@@ -980,6 +986,7 @@ export class GridMapView {
   private addLamp(x: number, z: number): void {
     const lamp = new Group();
     lamp.name = 'promenade-lamp';
+    this.map.addObstacle(x, z, 0.12);
     lamp.position.set(x, 0, z);
 
     const pole = new Mesh(this.lampPole, this.ambienceMaterials.lamp);
@@ -996,6 +1003,7 @@ export class GridMapView {
   private addBin(x: number, z: number): void {
     const bin = new Group();
     bin.name = 'promenade-bin';
+    this.map.addObstacle(x, z, 0.2);
     bin.position.set(x, 0, z);
 
     const body = new Mesh(this.binBody, this.ambienceMaterials.bin);
@@ -1391,23 +1399,24 @@ export class GridMapView {
       // Linhas de bordo contínuas (Norte e Sul da avenida), interrompidas na faixa de pedestres
       if (column !== 11) {
         this.line(`edge-top-${column}-${row}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.08);
-        this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + 5.14, size, 0.08);
+        this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + ROAD_LAYOUT.bottomEdge, size, 0.08);
       }
 
       // Avenida Verde (Z = 6.00 a 6.92): faixa exclusiva, com símbolos de elétrico.
       if (column !== 1 && column !== 11 && column !== 20) {
-        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + 0.46, size, 0.82);
+        const { greenCenter, greenWidth } = ROAD_LAYOUT;
+        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + greenCenter, size, greenWidth);
         this.line(`electric-lane-edge-${column}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.055);
-        this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + 0.86, size, 0.055);
-        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + 0.46);
+        this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + greenCenter + greenWidth / 2 - 0.04, size, 0.055);
+        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + greenCenter);
       }
 
       // Divisórias tracejadas brancas entre Faixa 1 e Faixa 2 (Leste em Z=7.88, Oeste em Z=10.24)
       for (const dx of [-0.25, 0.25]) {
         const dashX = center.x + dx * size;
         if (Math.abs(dashX - crossingX) < 1.85) continue;
-        this.line(`lane-east-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + 1.88, size * 0.28, 0.065);
-        this.line(`lane-west-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + 4.24, size * 0.28, 0.065);
+        this.line(`lane-east-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + ROAD_LAYOUT.eastDash, size * 0.28, 0.065);
+        this.line(`lane-west-dash-${column}-${dx}`, 'edge', dashX, roadNorthZ + ROAD_LAYOUT.westDash, size * 0.28, 0.065);
       }
     } else if (kind === 'cycleway' && !this.isSidewalk(column, row)) {
       if (column !== 11) {
@@ -1431,12 +1440,15 @@ export class GridMapView {
     const icon = new Group();
     icon.name = 'electric-car-pictogram';
     icon.position.set(x, 0.033, z);
+    // Dimensionado para a faixa de 1,2 m: ~0,8 m de carro, legível na câmera do jogo.
+    icon.scale.setScalar(1.3);
     const body = new Mesh(this.flat, material);
     body.scale.set(0.5, 0.024, 0.23);
     const cabin = new Mesh(this.flat, material);
     cabin.position.set(0, 0.002, -0.01);
     cabin.scale.set(0.29, 0.025, 0.15);
-    const bolt = new Mesh(this.flat, this.material('mark:electric-bolt', '#f3d16c', { texture: 'grain', coloredTexture: false }));
+    // Âmbar escuro: o raio fica sobre o corpo claro do carro e precisa de contraste ≥ 3:1 com ele.
+    const bolt = new Mesh(this.flat, this.material('mark:electric-bolt', '#b97400', { texture: 'grain', coloredTexture: false }));
     bolt.position.set(0, 0.004, 0.01);
     bolt.scale.set(0.08, 0.028, 0.2);
     bolt.rotation.y = 0.2;
@@ -1478,7 +1490,7 @@ export class GridMapView {
   /** Canteiro central paisagístico entre os sentidos Leste e Oeste da avenida, com refúgio na travessia. */
   private addRoadMedian(): void {
     const size = this.map.tileSize;
-    const medianZ = this.map.cellCenter(0, this.map.rows - 1).z - 1.94;
+    const medianZ = this.map.depth / 2 - this.map.tileSize * 3 + ROAD_LAYOUT.median;
     const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
     const yellowMat = this.material('mark:dash', MARK_COLORS.dash, { texture: 'grain', coloredTexture: false });
     const curbGeo = this.roundedBox(size * 0.97, 0.11, 0.38, 0.032);
@@ -1668,6 +1680,162 @@ export class GridMapView {
       const center = this.map.cellCenter(column, southRow);
       this.addBin(center.x, southEdgeZ - 0.34);
     }
+  }
+
+  /**
+   * Frente urbana ao sul da avenida, fora da área jogável, ocupando o vazio do
+   * enquadramento. A câmera olha do sul para baixo (inclinação 0,75): cada unidade
+   * de altura esconde ~0,75 do chão ao norte, então tudo é baixo e o destaque fica
+   * nos telhados (solar, verde, caixa d'água). A faixa onde os pedestres saem da
+   * travessia (z = borda + 0,75) e a praça em frente à faixa ficam livres.
+   */
+  private addSouthCityFront(): void {
+    const southEdgeZ = this.map.depth / 2;
+    const crossingX = ORLA_CROSSING.centerX;
+    const frontZ = southEdgeZ + 2.65;
+    const lotDepth = 4.6;
+    const reach = this.map.width / 2 + 12;
+    const plazaHalf = 2.6;
+    const facades = ['#e9b872', '#7fb7a4', '#e58f6f', '#9fb6d8', '#f1e3c8'];
+    const awnings = ['#c4553f', '#2f7f74', '#d89b2b', '#41658f'];
+    const widths = [5.2, 4.4, 6, 3.8];
+    const heights = [0.85, 1.05, 0.95, 1.1];
+
+    let x = -reach, index = 0;
+    while (x < reach) {
+      const width = widths[index % widths.length];
+      if (x < crossingX + plazaHalf && x + width > crossingX - plazaHalf) {
+        x = crossingX + plazaHalf + 0.6;
+        continue;
+      }
+      this.addCityBuilding(index, x + width / 2, frontZ, width, lotDepth, heights[index % heights.length],
+        facades[index % facades.length], awnings[index % awnings.length], index % 3);
+      x += width + 0.6;
+      index++;
+    }
+
+    // Praça em frente à travessia: piso claro, bancos e árvores marcando a chegada.
+    const plaza = new Mesh(this.flat, this.material('city:plaza', '#efe6d2', { texture: 'grain', coloredTexture: false }));
+    plaza.name = 'city-plaza';
+    plaza.scale.set(plazaHalf * 2, 0.02, lotDepth + 1.2);
+    plaza.position.set(crossingX, 0.01, frontZ + lotDepth / 2 - 0.6);
+    plaza.receiveShadow = true;
+    this.group.add(plaza);
+    this.addBench(crossingX - 1.1, frontZ + 1.4, false);
+    this.addBench(crossingX + 1.1, frontZ + 1.4, false);
+
+    const treeZ = southEdgeZ + 1.75;
+    // Faixa de grama sob as árvores: marca o fim da calçada andável (map.southWalkway).
+    const vergeNorth = southEdgeZ + this.map.southWalkway + 0.05, vergeDepth = 0.8;
+    const verge = this.material('city:verge', '#7fae5d', { texture: 'grain', coloredTexture: false });
+    for (const [name, from, to] of [['w', -reach, crossingX - plazaHalf], ['e', crossingX + plazaHalf, reach]] as const) {
+      const strip = new Mesh(this.flat, verge);
+      strip.name = `south-verge-${name}`;
+      strip.scale.set(to - from, 0.03, vergeDepth);
+      strip.position.set((from + to) / 2, 0.015, vergeNorth + vergeDepth / 2);
+      strip.receiveShadow = true;
+      this.group.add(strip);
+    }
+    for (let treeX = -reach + 2; treeX < reach; treeX += 4.4) {
+      if (Math.abs(treeX - crossingX) < plazaHalf) continue;
+      this.addStreetTree(treeX, treeZ);
+    }
+  }
+
+  private addCityBuilding(index: number, x: number, frontZ: number, width: number, depth: number,
+    height: number, facade: string, awning: string, roofKind: number): void {
+    const building = new Group();
+    building.name = `city-building-${index}`;
+    building.position.set(x, 0, frontZ + depth / 2);
+    const front = -depth / 2;
+    const flatMaterial = (key: string, color: string) =>
+      this.material(`city:${key}:${color}`, color, { texture: 'grain', coloredTexture: false });
+    const box = (name: string, material: MeshStandardMaterial, size: [number, number, number],
+      at: [number, number, number], cast = true) => {
+      const mesh = new Mesh(this.flat, material);
+      mesh.name = name;
+      mesh.scale.set(...size);
+      mesh.position.set(...at);
+      mesh.castShadow = cast;
+      mesh.receiveShadow = true;
+      building.add(mesh);
+      return mesh;
+    };
+
+    box('facade', flatMaterial('facade', facade), [width, height, depth], [0, height / 2, 0]);
+    box('roof', flatMaterial('roof', '#d8d0c0'), [width + 0.08, 0.06, depth + 0.08], [0, height + 0.03, 0]);
+
+    // Térreo com lojas: vitrine escura e toldo listrado voltados para a avenida.
+    const shops = Math.max(1, Math.round(width / 1.6));
+    const glass = flatMaterial('glass', '#2f4b57');
+    for (let shop = 0; shop < shops; shop++) {
+      const shopX = (shop + 0.5) * width / shops - width / 2;
+      box('shop-window', glass, [width / shops * 0.62, 0.36, 0.04], [shopX, 0.3, front - 0.02], false);
+      box('awning', flatMaterial('awning', shop % 2 ? '#f4efe4' : awning), [width / shops * 0.78, 0.04, 0.32], [shopX, 0.56, front - 0.16]);
+    }
+    if (height > 0.95) {
+      for (let window = 0; window < shops * 2; window++) {
+        const windowX = (window + 0.5) * width / (shops * 2) - width / 2;
+        box('window', glass, [0.22, 0.14, 0.03], [windowX, height - 0.2, front - 0.015], false);
+      }
+    }
+
+    // Telhados sustentáveis: o que a câmera mais enxerga.
+    const roofY = height + 0.06;
+    if (roofKind === 0) {
+      const solar = flatMaterial('solar', '#2f4a6b');
+      const span = width - 0.4;
+      const panels = Math.max(1, Math.floor(span / 0.95));
+      for (let row = 0; row < 2; row++) for (let panel = 0; panel < panels; panel++) {
+        const mesh = box('solar-panel', solar, [0.82, 0.035, 0.55], [(panel + 0.5) * span / panels - span / 2, roofY + 0.09, -0.6 + row * 1.2]);
+        mesh.rotation.x = -0.32;
+      }
+    } else if (roofKind === 1) {
+      box('green-roof', this.ambienceMaterials.palmLeaf, [width * 0.82, 0.05, depth * 0.72], [0, roofY + 0.025, 0], false);
+      for (const [dx, dz] of [[-0.3, -0.2], [0.25, 0.3], [0.05, -0.05]]) {
+        const bush = new Mesh(this.pebble, this.ambienceMaterials.palmLeafLight);
+        bush.name = 'green-roof-bush';
+        bush.scale.set(0.2, 0.09, 0.2);
+        bush.position.set(dx * width, roofY + 0.09, dz * depth);
+        bush.castShadow = true;
+        building.add(bush);
+      }
+    } else {
+      const tank = new Mesh(this.binBody, flatMaterial('tank', '#4d7ea8'));
+      tank.name = 'water-tank';
+      tank.scale.set(1.7, 0.45, 1.7);
+      tank.position.set(width * 0.25, roofY + 0.095, depth * 0.15);
+      tank.castShadow = true;
+      building.add(tank);
+      box('ac-unit', flatMaterial('ac', '#bfc6c7'), [0.32, 0.14, 0.24], [-width * 0.25, roofY + 0.07, -depth * 0.1]);
+    }
+    this.group.add(building);
+  }
+
+  /** Árvore baixa de calçada em canteiro: sombra para quem anda, sem cobrir a via na câmera. */
+  private addStreetTree(x: number, z: number): void {
+    const tree = new Group();
+    tree.name = 'street-tree';
+    this.map.addObstacle(x, z, 0.3);
+    tree.position.set(x, 0, z);
+    const planter = new Mesh(this.flat, this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false }));
+    planter.scale.set(0.7, 0.12, 0.7);
+    planter.position.y = 0.06;
+    planter.receiveShadow = true;
+    const trunk = new Mesh(this.palmTrunk, this.ambienceMaterials.palmTrunk);
+    trunk.scale.set(0.8, 0.55, 0.8);
+    trunk.position.y = 0.39;
+    trunk.castShadow = true;
+    tree.add(planter, trunk);
+    const crowns = [[0, 0.78, 0, 0.36, false], [0.18, 0.72, 0.1, 0.24, true], [-0.16, 0.74, -0.08, 0.22, true]] as const;
+    for (const [dx, dy, dz, size, light] of crowns) {
+      const crown = new Mesh(this.pebble, light ? this.ambienceMaterials.palmLeafLight : this.ambienceMaterials.palmLeaf);
+      crown.scale.set(size, size * 0.8, size);
+      crown.position.set(dx, dy, dz);
+      crown.castShadow = true;
+      tree.add(crown);
+    }
+    this.group.add(tree);
   }
 
   private addApron(): void {

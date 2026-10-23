@@ -53,6 +53,8 @@ export class Game {
   private disposed = false;
   private readonly observedCallIds = new Set<string>();
   private pendingTabletOpen = false;
+  /** Chamados resolvidos que já levaram o jogador ao tablet uma vez para arquivar. */
+  private readonly promptedArchiveIds = new Set<string>();
 
   constructor(
     private host: HTMLElement,
@@ -140,6 +142,7 @@ export class Game {
 
     if (sceneId === 'fase1-orla') {
       this.observedCallIds.clear();
+      this.promptedArchiveIds.clear();
       this.pendingTabletOpen = false;
       suburbanGameState.reset();
       const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, type => this.openRepairPuzzle(type), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
@@ -195,7 +198,7 @@ export class Game {
     this.mandatoryTutorialActive = true;
     this.tutorialStage = 0;
     this.start('fase1-orla');
-    this.selectPlayer(3);
+    this.autoSelectPlayer(3);
   }
 
   setAnalystTutorialStep(step: number): void {
@@ -205,11 +208,13 @@ export class Game {
   startMobilityTutorial(): void {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.tutorialStage = 10;
-    this.selectPlayer(2);
+    this.autoSelectPlayer(2);
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) {
+      // Treino sem travar o personagem: as instruções ficam num cartão compacto e o
+      // jogador anda à vontade; a proteção contra atropelamento segue ligada.
       current.setTutorialCollisionProtection(true);
-      current.setTutorialMovementEnabled(false);
+      current.setTutorialMovementEnabled(true);
     }
   }
 
@@ -217,17 +222,17 @@ export class Game {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.tutorialStage = 10 + step;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1 || step === 5);
+    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(true);
   }
 
   startInfrastructureTutorial(): void {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.tutorialStage = 30;
-    this.selectPlayer(1);
+    this.autoSelectPlayer(1);
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) {
       current.setTutorialCollisionProtection(true);
-      current.setTutorialMovementEnabled(false);
+      current.setTutorialMovementEnabled(true);
       current.setTutorialWorkZonePrepared(true);
     }
   }
@@ -236,7 +241,7 @@ export class Game {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.tutorialStage = 30 + step;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1 || step === 4 || step === 5);
+    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(true);
   }
 
   getInfrastructureTutorialStep(): number | null {
@@ -248,6 +253,15 @@ export class Game {
   getInfrastructureTutorialSnapshot() {
     const current = this.scenes.current;
     return current instanceof Fase1OrlaScene ? current.getInfrastructureTutorialSnapshot() : null;
+  }
+
+  /** Pula o treino de qualquer etapa: libera a partida como se o tutorial tivesse terminado. */
+  skipTutorial(): boolean {
+    if (this.disposed || !this.mandatoryTutorialActive) return false;
+    this.repairPuzzleOpen = false;
+    this.onRepairPuzzleChange?.(false);
+    this.finishTeamTutorials();
+    return true;
   }
 
   finishTeamTutorials(): void {
@@ -287,6 +301,7 @@ export class Game {
     if (this.session) sessionStore.unbind(this.session);
     this.session = undefined;
     this.observedCallIds.clear();
+    this.promptedArchiveIds.clear();
     this.pendingTabletOpen = false;
     this.input.clear();
     suburbanGameState.setActiveCharacter(1);
@@ -313,8 +328,31 @@ export class Game {
     );
   }
 
+  /** Escolha feita pelo jogador: cancela qualquer troca automática pendente. */
   selectPlayer(id: PlayerId) {
     if (!this.canSelectPlayer(id) || this.repairPuzzleOpen) return;
+    this.pendingTabletOpen = false;
+    this.applyPlayerSelection(id);
+  }
+
+  /**
+   * Há chamado esperando a Analista (análise, acionamento ou arquivamento) enquanto
+   * o jogador controla outra equipe. A interface usa isso para destacar o botão.
+   */
+  analystNeedsAttention(): boolean {
+    const current = this.scenes.current;
+    if (this.mandatoryTutorialActive || !(current instanceof Fase1OrlaScene) || current.player.role === 'analista') return false;
+    return suburbanGameState.getProblems().some(problem => problem.status === 'RESOLVED' || !problem.analyzed
+      || (problem.requiredTeams ?? []).some(team => !problem.dispatchedTeams.includes(team)));
+  }
+
+  /** Troca feita pelo próprio jogo (tutorial, fluxo de chamados): não mexe nas pendências. */
+  private autoSelectPlayer(id: PlayerId) {
+    if (!this.canSelectPlayer(id) || this.repairPuzzleOpen) return;
+    this.applyPlayerSelection(id);
+  }
+
+  private applyPlayerSelection(id: PlayerId) {
     this.input.clear();
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
@@ -362,7 +400,7 @@ export class Game {
     if (!dispatched) return false;
     const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
     const assigned = problem?.requiredTeams?.find(team => problem.dispatchedTeams.includes(team));
-    if (assigned) this.selectPlayer(assigned === 'infraestrutura' ? 1 : 2);
+    if (assigned) this.autoSelectPlayer(assigned === 'infraestrutura' ? 1 : 2);
     return true;
   }
 
@@ -371,7 +409,7 @@ export class Game {
     const scene = this.scenes.current;
     if (!(scene instanceof Fase1OrlaScene) || !scene.archiveResolvedProblem(id)) return false;
     sessionStore.archiveCompleted(id);
-    if (!suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED')) this.selectPlayer(2);
+    if (!suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED')) this.autoSelectPlayer(2);
     this.checkSessionEnd();
     return true;
   }
@@ -589,18 +627,22 @@ export class Game {
       problems.forEach(problem => this.observedCallIds.add(problem.id));
       if (incoming) {
         this.pendingTabletOpen = true;
-        if (currentScene.phaseIsCinematic() && currentScene.player.id === 3) this.selectPlayer(2);
+        if (currentScene.phaseIsCinematic() && currentScene.player.id === 3) this.autoSelectPlayer(2);
       }
       if (this.pendingTabletOpen && !currentScene.phaseIsCinematic()) {
         this.pendingTabletOpen = false;
-        if (currentScene.player.id !== 3) this.selectPlayer(3);
+        if (currentScene.player.id !== 3) this.autoSelectPlayer(3);
       }
     }
-    if (this.status === 'playing' && currentScene instanceof Fase1OrlaScene
-      && currentScene.player.role !== 'analista'
-      && !currentScene.phaseIsCinematic()
-      && suburbanGameState.getProblems().some(problem => problem.status === 'RESOLVED')) {
-      this.selectPlayer(3);
+    // Chamado resolvido leva à Analista uma única vez para arquivar; se o jogador sair,
+    // o lembrete fica no botão da Analista em vez de tomar o controle a cada quadro.
+    if (this.status === 'playing' && currentScene instanceof Fase1OrlaScene && !currentScene.phaseIsCinematic()) {
+      const awaitingArchive = suburbanGameState.getProblems()
+        .find(problem => problem.status === 'RESOLVED' && !this.promptedArchiveIds.has(problem.id));
+      if (awaitingArchive) {
+        this.promptedArchiveIds.add(awaitingArchive.id);
+        if (currentScene.player.role !== 'analista') this.autoSelectPlayer(3);
+      }
     }
 
     const current = this.scenes.current;

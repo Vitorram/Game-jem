@@ -307,6 +307,9 @@ export class OrlaPhase {
       const safe = problem && player.id === 1 && distance(player.position, this.serviceTarget(problem)) <= 1.6
         && (problem.id !== 'minor-collision' || this.traffic.isIncidentProtected());
       if (safe && problem) {
+        // Ao retomar um serviço pausado o chamado volta a ficar em manutenção;
+        // sem isso o quebra-cabeça concluído seria ignorado por completePuzzle.
+        if (problem.status !== 'MAINTENANCE') this.patch(problem.id, { status: 'MAINTENANCE' });
         this.service.elapsed += dt;
         const duration = problem.id === 'sensor-failure' ? 1.25 : problem.id === 'ev-charger-repair' ? 1.2 : 1.5;
         const serviceLabel = problem.id === 'sensor-failure' ? 'Instalando sensor'
