@@ -3,6 +3,9 @@ import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeom
 
 export const VEHICLE_KINDS = ['hatch', 'sedan', 'suv', 'pickup', 'truck', 'bus', 'motorcycle'] as const;
 export type VehicleKind = typeof VEHICLE_KINDS[number];
+export const VEHICLE_VISUAL_SCALE: Record<VehicleKind, number> = {
+  hatch: .54, sedan: .54, suv: .59, pickup: .59, truck: .58, bus: .62, motorcycle: .56,
+};
 export type VehicleModel = { group: Group; wheels: Mesh[]; brakeLights: Mesh[]; length: number; width: number; kind: VehicleKind };
 
 /** Modelos voltados para +Z. Geometrias e materiais pertencem à fábrica. */

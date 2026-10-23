@@ -107,6 +107,48 @@ export class NpcModels {
     visual.animate(.001, 0);
     return visual;
   }
+
+  createInjuredDeliveryWorker(): NpcVisual {
+    const person = new Player(3, false, { ...CYCLIST_LOOKS[2], lowDetail: true });
+    const root = new Group();
+    root.name = 'injured-99food-delivery-worker';
+    root.userData.appearance = 'Entregador 99Food ferido';
+    root.add(person.mesh);
+    this.deliveryBag(person);
+
+    // A bicicleta fica ao lado do entregador, apoiada pelo braço enquanto ele
+    // manca até a calçada segura.
+    const bike = new Group();
+    bike.position.set(-.48, .12, -.08);
+    bike.rotation.y = Math.PI / 2;
+    bike.rotation.z = -.16;
+    root.add(bike);
+    for (const z of [-.4, .4]) {
+      const wheel = new Group(); wheel.position.set(0, .285, z); bike.add(wheel);
+      const tire = new Mesh(this.tire, this.material('#34424b'));
+      tire.rotation.y = Math.PI / 2; tire.castShadow = true; wheel.add(tire);
+    }
+    const rear = [0, .285, -.4], front = [0, .285, .4], crank = [0, .3, .05], seat = [0, .64, -.08], neck = [0, .68, .34];
+    for (const [a, b] of [[rear, crank], [crank, seat], [seat, rear], [seat, neck], [neck, crank], [neck, front]]) {
+      this.rod(bike, '#e7bd32', a, b, .032);
+    }
+    this.rod(bike, '#34424b', neck, [0, .83, .4], .025);
+    this.rod(bike, '#34424b', [-.23, .83, .4], [.23, .83, .4], .025);
+
+    let limpTime = 0;
+    const visual: NpcVisual = {
+      mesh: root,
+      animate: (dt, distance, turning) => {
+        limpTime += dt;
+        person.animateWalking(dt, distance * .72, turning);
+        root.rotation.z = Math.sin(limpTime * 7.5) * .055;
+        bike.rotation.x = Math.sin(limpTime * 4) * .045;
+      },
+      dispose: () => { person.dispose(); root.clear(); },
+    };
+    visual.animate(.001, 0);
+    return visual;
+  }
   private deliveryBag(person: Player) {
     const torso = person.mesh.getObjectByName('torso') as Group;
     const bag = new Group(); bag.name = '99food-yellow-delivery-bag'; torso.add(bag);

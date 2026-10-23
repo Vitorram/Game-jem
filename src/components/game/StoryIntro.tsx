@@ -5,41 +5,21 @@ import type { IntroPlayback, IntroShot } from '@/game/cinematics/IntroWorld';
 import styles from './StoryIntro.module.css';
 
 const SCRIPT = ([
-  { text: 'Toda cidade tem um ritmo.\nE alguém precisa cuidar dele.', shot: 'city', minimum: 4800 },
-  { text: 'Três amigas criaram o Suburban, um sistema para tornar o trânsito mais seguro e a cidade mais humana.', shot: 'city', minimum: 6200 },
-  { text: 'Pelas câmeras e pelos chamados da população, o Suburban acompanha o movimento da cidade.', shot: 'city', minimum: 7000 },
-  { text: 'Um acidente. Uma fila começa a crescer. O sistema identifica o problema e aciona quem pode ajudar.', shot: 'incident', minimum: 7000 },
-  { text: 'A Analista acompanha. A Mobilidade protege o trecho. A Infraestrutura chega para resolver. Juntas, elas fazem a cidade seguir.', shot: 'response', minimum: 7500 },
-  { text: 'Ajude nossas amigas a testar o Suburban e provar o que essa ideia pode fazer pela cidade. Boa sorte!', shot: 'team', minimum: 6500 },
+  { text: 'Toda cidade tem um ritmo.\nÀs vezes, basta um instante para mudá-lo.', shot: 'city', minimum: 4800 },
+  { text: 'Três amigas criaram o Suburban\npara tornar a cidade mais segura.', shot: 'city', minimum: 5600 },
+  { text: 'Câmeras e chamados ajudam o sistema\na perceber quando algo sai do normal.', shot: 'city', minimum: 5600 },
+  { text: 'Um acidente interrompe a via.\nA fila cresce. O Suburban dá o alerta.', shot: 'incident', minimum: 5600 },
+  { text: 'A Analista aciona a equipe.\nA Mobilidade protege o local.\nA Infraestrutura resolve o problema.', shot: 'response', minimum: 6400 },
+  { text: 'Agora é com você.\nAjude a equipe a manter a cidade em movimento.', shot: 'team', minimum: 5600 },
 ] satisfies { text: string; shot: IntroShot; minimum: number }[]).map(beat => {
   let at = 450;
   const letters = Array.from(beat.text);
-  const timing = letters.map(letter => { at += /[.!?]/.test(letter) ? 180 : letter === '\n' ? 260 : 29; return at; });
+  const timing = letters.map(letter => {
+    at += /[.!?]/.test(letter) ? 300 : /[,;:]/.test(letter) ? 150 : letter === '\n' ? 420 : letter === ' ' ? 13 : 25;
+    return at;
+  });
   return { ...beat, letters, timing, typingEnd: at, duration: Math.max(beat.minimum, at + 2000) };
 });
-
-function soundtrack() {
-  const context = new AudioContext();
-  const master = context.createGain(); master.gain.value = .16; master.connect(context.destination);
-  [130.81, 196, 261.63].forEach((frequency, i) => {
-    const voice = context.createOscillator(), level = context.createGain();
-    voice.type = 'sine'; voice.frequency.value = frequency; voice.detune.value = i * 3;
-    level.gain.value = .035; voice.connect(level); level.connect(master); voice.start();
-  });
-  return {
-    context,
-    cue: (success: boolean) => {
-      const voice = context.createOscillator(), envelope = context.createGain();
-      voice.type = 'sine'; voice.frequency.setValueAtTime(success ? 523.25 : 392, context.currentTime);
-      voice.frequency.exponentialRampToValueAtTime(success ? 783.99 : 523.25, context.currentTime + .18);
-      envelope.gain.setValueAtTime(.001, context.currentTime); envelope.gain.exponentialRampToValueAtTime(.3, context.currentTime + .025);
-      envelope.gain.exponentialRampToValueAtTime(.001, context.currentTime + .5);
-      voice.connect(envelope); envelope.connect(master); voice.start(); voice.stop(context.currentTime + .55);
-      voice.onended = () => { voice.disconnect(); envelope.disconnect(); };
-    },
-    dispose: () => { void context.close(); },
-  };
-}
 
 function CinematicWorld({ shot, reducedMotion, paused }: IntroPlayback) {
   const host = useRef<HTMLDivElement>(null);
@@ -62,10 +42,8 @@ function CinematicWorld({ shot, reducedMotion, paused }: IntroPlayback) {
 
 export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
   const root = useRef<HTMLDivElement>(null);
-  const audio = useRef<ReturnType<typeof soundtrack> | null>(null);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishing = useRef(false);
-  const [sound, setSound] = useState(false);
   const [paused, setPaused] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [clock, setClock] = useState({ beat: 0, time: 0 });
@@ -81,18 +59,8 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
     const query = matchMedia('(prefers-reduced-motion: reduce)');
     const motion = () => setReducedMotion(query.matches);
     motion(); query.addEventListener('change', motion);
-    return () => { query.removeEventListener('change', motion); audio.current?.dispose(); if (exitTimer.current) clearTimeout(exitTimer.current); };
+    return () => { query.removeEventListener('change', motion); if (exitTimer.current) clearTimeout(exitTimer.current); };
   }, []);
-
-  useEffect(() => {
-    const visibility = () => {
-      if (!audio.current) return;
-      if (document.hidden || paused || !sound) void audio.current.context.suspend();
-      else void audio.current.context.resume();
-    };
-    visibility(); document.addEventListener('visibilitychange', visibility);
-    return () => document.removeEventListener('visibilitychange', visibility);
-  }, [paused, sound]);
 
   useEffect(() => {
     if (paused || exiting) return;
@@ -109,8 +77,6 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
     return () => clearInterval(timer);
   }, [paused, exiting]);
 
-  useEffect(() => { if (sound && !paused && clock.beat > 0) audio.current?.cue(clock.beat >= 4); }, [clock.beat, sound, paused]);
-
   const finish = () => {
     if (finishing.current) return;
     finishing.current = true; setExiting(true);
@@ -122,14 +88,6 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
     if (finale) { finish(); return; }
     setClock(current => ({ beat: current.beat + 1, time: 0 }));
   };
-  const toggleSound = async () => {
-    try {
-      if (!audio.current) audio.current = soundtrack();
-      if (!sound) await audio.current.context.resume(); else await audio.current.context.suspend();
-      setSound(!sound);
-    } catch { setSound(false); }
-  };
-
   return <div ref={root} tabIndex={-1} className={`${styles.intro} ${cinema ? styles.cinema : ''} ${finale ? styles.finale : ''} ${exiting ? styles.exiting : ''}`} role="dialog" aria-modal="true" aria-label="Prólogo do Suburban" onKeyDown={event => {
     event.stopPropagation();
     if ((event.key === ' ' || event.key === 'Enter') && event.target === root.current) { event.preventDefault(); advance(); }
@@ -145,7 +103,7 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
     <div className={styles.vignette} aria-hidden="true" />
     <header className={styles.topbar}>
       <span className={styles.signature}><b>S</b> SUBURBAN <i /> <small>PRÓLOGO</small></span>
-      <nav aria-label="Controles do prólogo"><button onClick={toggleSound} aria-pressed={sound}>{sound ? '♪ Som ligado' : '♪ Ativar som'}</button><button onClick={() => setPaused(value => !value)} aria-label={paused ? 'Continuar prólogo' : 'Pausar prólogo'}>{paused ? '▶' : 'Ⅱ'}</button><button onClick={finish}>Pular <span>↗</span></button></nav>
+      <nav aria-label="Controles do prólogo"><button onClick={() => setPaused(value => !value)} aria-label={paused ? 'Continuar prólogo' : 'Pausar prólogo'}>{paused ? '▶' : 'Ⅱ'}</button><button onClick={finish}>Pular <span>↗</span></button></nav>
     </header>
     <section key={`narrative-${clock.beat}`} className={styles.narrative}>
       {finale && <div className={styles.titleReveal}><h1>SUBURBAN</h1></div>}

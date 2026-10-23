@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
+import { CollisionSafetyPuzzle, SignalCheckPuzzle } from './RepairPuzzleVariants';
 
 type Direction = 0 | 1 | 2 | 3;
 type WireTile = { id: string; row: number; column: number; kind: 'straight' | 'corner'; rotation: number };
@@ -119,7 +120,7 @@ function SignalRepairPuzzle({ paused, onComplete, onCancel }: { paused: boolean;
     if (Object.keys(next).length === SIGNAL_CABLES.length) {
       setSolved(true);
       setMessage('TODOS OS CIRCUITOS RESTABELECIDOS · SEMÁFORO OPERACIONAL');
-      completion.current = setTimeout(onComplete, 1100);
+      completion.current = setTimeout(onComplete, 300);
     }
   };
 
@@ -265,7 +266,7 @@ function TrafficTileGraphic({ piece, active }: { piece: TrafficPiece; active: bo
   </svg>;
 }
 
-function TrafficFlowPuzzle({ paused, onComplete, onCancel }: { paused: boolean; onComplete: () => void; onCancel?: () => void }) {
+function SensorSyncPuzzle({ paused, onComplete, onCancel }: { paused: boolean; onComplete: () => void; onCancel?: () => void }) {
   const [pieces, setPieces] = useState(TRAFFIC_INITIAL_PIECES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [solved, setSolved] = useState(false);
@@ -289,25 +290,26 @@ function TrafficFlowPuzzle({ paused, onComplete, onCancel }: { paused: boolean; 
   };
   const pieceByCell = new Map(pieces.map(piece => [`${piece.row},${piece.column}`, piece]));
   // O caminho só acende ao chegar à saída: o jogador deduz as conexões pelos trechos.
-  const routeIds = solved ? new Set(route.path) : new Set<string>();
+  const routeIds = new Set(route.path);
   const labels: Record<TrafficPiece['id'], string> = {
-    origin: 'origem do fluxo', 'road-a': 'trecho reto A', 'road-b': 'curva B',
-    'road-c': 'trecho reto C', 'road-d': 'curva D', 'road-e': 'curva E',
-    'road-f': 'curva F', 'road-g': 'trecho reto G', destination: 'destino do fluxo',
+    origin: 'fonte de pulso', 'road-a': 'cabo reto A', 'road-b': 'conector curvo B',
+    'road-c': 'cabo reto C', 'road-d': 'conector D', 'road-e': 'conector E',
+    'road-f': 'conector F', 'road-g': 'cabo reto G', destination: 'caixa de sincronização',
   };
 
-  return <div className="repair-puzzle-overlay" style={paused ? { display: 'none' } : undefined} role="dialog" aria-modal="true" aria-labelledby="traffic-flow-title">
-    <section className={`repair-puzzle-card flow-repair-card${solved ? ' is-solved' : ''}`}>
+  return <div className="repair-puzzle-overlay" style={paused ? { display: 'none' } : undefined} role="dialog" aria-modal="true" aria-labelledby="sensor-sync-title">
+    <section className={`repair-puzzle-card flow-repair-card sensor-sync-card${solved ? ' is-solved' : ''}`}>
       <header className="repair-puzzle-header flow-repair-header">
-        <span className="repair-puzzle-kicker">CENTRAL DE OPERAÇÕES · MOBILIDADE URBANA</span>
-        <span className="repair-puzzle-chip">VIAS 04</span>
+        <span className="repair-puzzle-kicker">OFICINA DE CAMPO · INFRAESTRUTURA</span>
+        <span className="repair-puzzle-chip">SENSOR 05</span>
         {onCancel && <button type="button" className="repair-puzzle-cancel" onClick={onCancel}>Voltar aos testes</button>}
-        <h2 id="traffic-flow-title">RESTABELEÇA O FLUXO</h2>
-        <p>Gire os trechos para conectar a origem à saída sem interrupções.</p>
+        <h2 id="sensor-sync-title">CAIXA DE SINCRONIA</h2>
+        <p>Gire os módulos para conduzir o pulso até a caixa e sincronizar os três canais do sensor.</p>
       </header>
+      <div className="sync-channel-lights"><span><i className={solved ? 'is-on' : ''} /> VEÍCULOS</span><span><i className={solved ? 'is-on' : ''} /> FAIXA</span><span><i className={solved ? 'is-on' : ''} /> CICLO</span></div>
       <div className="flow-board-wrap">
-        <div className="flow-board-legend"><span><i className="flow-legend-origin" /> ORIGEM</span><span><i className="flow-legend-route" /> ROTA ATIVA</span><span><i className="flow-legend-destination" /> DESTINO</span></div>
-        <div className="flow-board" role="group" aria-label="Grade de vias. Gire os trechos para formar uma rota contínua.">
+        <div className="flow-board-legend"><span><i className="flow-legend-origin" /> FONTE</span><span><i className="flow-legend-route" /> SINAL</span><span><i className="flow-legend-destination" /> SENSOR</span></div>
+        <div className="flow-board sync-board" role="group" aria-label="Caixa de sincronização: gire os cabos para conectar o pulso aos módulos do sensor.">
           {Array.from({ length: 25 }, (_, index) => {
             const row = Math.floor(index / 5), column = index % 5;
             const piece = pieceByCell.get(`${row},${column}`);
@@ -322,66 +324,14 @@ function TrafficFlowPuzzle({ paused, onComplete, onCancel }: { paused: boolean; 
         </div>
       </div>
       <div className={`repair-puzzle-status flow-repair-status${solved ? ' is-on' : ''}`} role="status" aria-live="polite">
-        <i className={solved ? 'is-on' : ''} />{solved ? 'ROTA VALIDADA · FLUXO RESTABELECIDO' : 'Gire os trechos para conectar a origem à saída.'}
+        <i className={solved ? 'is-on' : ''} />{solved ? 'PULSO SINCRONIZADO · SENSOR ONLINE' : 'Gire os cabos para fechar a rota do sinal.'}
       </div>
-      <footer className="repair-puzzle-footer"><span>{solved ? 'FLUXO RESTABELECIDO' : 'TOQUE PARA GIRAR'}</span><span>7 TRECHOS</span></footer>
+      <footer className="repair-puzzle-footer"><span>{solved ? '3 CANAIS SINCRONIZADOS' : 'GIRE OS MÓDULOS'}</span><span>CAIXA DE SINCRONIA</span></footer>
     </section>
   </div>;
 }
 
-function DifferentRepairPuzzle({ type, paused, onComplete, onCancel }: { type: Exclude<RepairPuzzleType, 'pole'>; paused: boolean; onComplete: () => void; onCancel?: () => void }) {
-  const [values, setValues] = useState<number[]>(type === 'signal' ? [0, 2, 1] : type === 'traffic' ? [0, 1, 0, 1] : []);
-  const [sequenceStep, setSequenceStep] = useState(-1);
-  const [solved, setSolved] = useState(false);
-  const [message, setMessage] = useState('');
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  const complete = () => { setSolved(true); setMessage('REPARO CONCLUÍDO · SISTEMA RESTABELECIDO'); timer.current = setTimeout(onComplete, 850); };
-  const specs = {
-    signal: ['SEMÁFORO 02', 'SINCRONIZE AS LUZES', 'Toque nas lâmpadas até formar a sequência segura: vermelho, amarelo, verde.'],
-    crossing: ['FAIXA 03', 'LIBERE A TRAVESSIA', 'Toque nos pontos na ordem indicada para programar a travessia segura.'],
-    traffic: ['VIAS 04', 'REORGANIZE O FLUXO', 'Gire as placas para conectar a entrada à saída pela rota de escape.'],
-    sensor: ['SENSOR 05', 'CALIBRE O SENSOR', 'Observe a sequência de sinais e repita tocando nos módulos.'],
-    car: ['VEÍCULO 06', 'RECONECTE O VEÍCULO', 'Ligue os cabos na ordem correta para liberar o carro da faixa.'],
-  }[type];
-  const click = (index: number) => {
-    if (paused || solved) return;
-    if (type === 'signal') {
-      const next = values.map((value, i) => i === index ? (value + 1) % 3 : value); setValues(next);
-      if (next.every((value, i) => value === i)) complete();
-    } else if (type === 'traffic') {
-      const next = values.map((value, i) => i === index ? (value + 1) % 2 : value); setValues(next);
-      if (next.join('') === '1010') complete();
-    } else if (type === 'crossing' || type === 'car') {
-      const nextIndex = values.length;
-      if (index === nextIndex) { const next = [...values, index]; setValues(next); if (next.length === 3) complete(); }
-      else { setValues([]); setMessage('Ordem incorreta. Tente novamente seguindo 1, 2 e 3.'); }
-    } else {
-      const expected = [2, 0, 3][sequenceStep + 1];
-      if (index !== expected) { setSequenceStep(-1); setMessage('Sinal incorreto. Repita a sequência: módulo 3, 1, 4.'); return; }
-      if (sequenceStep === 1) complete(); else setSequenceStep(sequenceStep + 1);
-    }
-  };
-  const names = type === 'signal' ? ['VERMELHO', 'AMARELO', 'VERDE'] : type === 'crossing' ? ['CALÇADA', 'FAIXA', 'REFÚGIO'] : type === 'sensor' ? ['MÓDULO 1', 'MÓDULO 2', 'MÓDULO 3', 'MÓDULO 4'] : type === 'car' ? ['TERMINAL 1', 'TERMINAL 2', 'TERMINAL 3'] : ['VIA 1', 'VIA 2', 'VIA 3', 'VIA 4'];
-  const count = names.length;
-  return <div className="repair-puzzle-overlay" style={paused ? { display: 'none' } : undefined} role="dialog" aria-modal="true">
-    <section className={`repair-puzzle-card${solved ? ' is-solved' : ''}`}>
-      <header className="repair-puzzle-header"><span className="repair-puzzle-kicker">OFICINA DE CAMPO · CENTRAL DE OPERAÇÕES</span><span className="repair-puzzle-chip">{specs[0]}</span>{onCancel && <button type="button" className="repair-puzzle-cancel" onClick={onCancel}>Voltar aos testes</button>}<h2>{specs[1]}</h2><p>{specs[2]}</p></header>
-      <div className={`repair-variant-board variant-${type}`}>
-        {type === 'traffic' && <strong>ENTRADA</strong>}
-        {Array.from({ length: count }, (_, i) => <button key={i} type="button" disabled={paused || solved} onClick={() => click(i)} className={`repair-variant-node${(type === 'crossing' || type === 'car') && values.includes(i) || type === 'sensor' && sequenceStep === i ? ' is-powered' : ''}${type === 'signal' ? ` signal-${['red','yellow','green'][values[i]]}` : ''}`}><span>{type === 'signal' ? '●' : type === 'crossing' ? values.includes(i) ? '✓' : i + 1 : type === 'traffic' ? values[i] ? '↘' : '↗' : type === 'sensor' ? ['◈','⌁','⌖','◉'][i] : values.includes(i) ? '✓' : '＋'}</span><small>{type === 'signal' ? ['VERMELHO','AMARELO','VERDE'][values[i]] : names[i]}</small></button>)}
-        {type === 'traffic' && <strong>SAÍDA</strong>}
-      </div>
-      <div className="repair-puzzle-status" role="status"><i className={solved ? 'is-on' : ''} />{message || (type === 'sensor' ? 'Memorize e repita: módulo 3, 1, 4.' : type === 'traffic' ? 'Ajuste as quatro placas até fechar a rota.' : type === 'signal' ? 'Estado atual das três lâmpadas.' : 'Siga os números 1, 2 e 3.')}</div>
-      <footer className="repair-puzzle-footer"><span>{solved ? 'SISTEMA OPERACIONAL' : `${type === 'crossing' || type === 'car' ? values.length : type === 'sensor' ? sequenceStep + 1 : '—'} / ${type === 'signal' ? '3 LUZES' : type === 'traffic' ? '4 VIAS' : type === 'sensor' ? '3 SINAIS' : '3 ETAPAS'}`}</span><span>PROTOCOLO DE REPARO</span></footer>
-    </section>
-  </div>;
-}
-
-export default function RepairPuzzle({ onComplete, paused = false, type = 'pole', onCancel }: { onComplete: () => void; paused?: boolean; type?: RepairPuzzleType; onCancel?: () => void }) {
-  if (type === 'signal') return <SignalRepairPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
-  if (type === 'traffic') return <TrafficFlowPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
-  if (type !== 'pole') return <DifferentRepairPuzzle type={type} paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+function PoleRepairPuzzle({ onComplete, paused = false, onCancel }: { onComplete: () => void; paused?: boolean; onCancel?: () => void }) {
   const [tiles, setTiles] = useState(INITIAL_TILES);
   const [solved, setSolved] = useState(false);
   const [hint, setHint] = useState('A energia não chega à luminária. Gire os conectores para fechar o circuito.');
@@ -432,4 +382,12 @@ export default function RepairPuzzle({ onComplete, paused = false, type = 'pole'
       <footer className="repair-puzzle-footer"><span>{powered.size}/4 CONEXÕES ENERGIZADAS</span><button type="button" onClick={() => { if (!solved && !paused) { setTiles(INITIAL_TILES); setHint('Circuito reiniciado. Gire as peças para levar energia à luminária.'); } }} disabled={solved || paused}>REINICIAR CIRCUITO</button></footer>
     </section>
   </div>;
+}
+
+export default function RepairPuzzle({ onComplete, paused = false, type = 'pole', onCancel }: { onComplete: () => void; paused?: boolean; type?: RepairPuzzleType; onCancel?: () => void }) {
+  if (type === 'signal') return <SignalRepairPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+  if (type === 'sensor') return <SensorSyncPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+  if (type === 'car') return <CollisionSafetyPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+  if (type === 'signal-check') return <SignalCheckPuzzle paused={paused} onComplete={onComplete} onCancel={onCancel} />;
+  return <PoleRepairPuzzle onComplete={onComplete} paused={paused} onCancel={onCancel} />;
 }

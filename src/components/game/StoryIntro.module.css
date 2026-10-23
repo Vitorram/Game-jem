@@ -49,14 +49,14 @@
   z-index: 1;
   top: 50%;
   left: 50%;
-  width: min(800px, 78vw);
+  width: min(760px, 78vw);
   transform: translate(-50%, -50%);
   animation: narrative-in .85s ease both;
 }
 
-.narrative p { min-height: 4.6em; margin: 0; color: #f5f5f2; font-size: clamp(25px, 3.1vw, 40px); font-weight: 400; line-height: 1.5; letter-spacing: -.035em; white-space: pre-line; }
-.narrative p > span:first-child { padding: .06em .14em; background: rgb(0 0 0 / 78%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
-.cursor { display: inline-block; margin-left: 3px; color: #d8c69b; animation: cursor-blink 1s steps(2, start) infinite; }
+.narrative p { min-height: 4.2em; margin: 0; color: #f7f5ef; font-size: clamp(27px, 3.4vw, 44px); font-weight: 400; line-height: 1.3; letter-spacing: -.045em; white-space: pre-line; text-wrap: balance; }
+.narrative p > span:first-child { padding: .09em .17em; background: rgb(0 0 0 / 68%); box-decoration-break: clone; -webkit-box-decoration-break: clone; text-shadow: 0 2px 18px #000b; }
+.cursor { display: inline-block; width: .045em; margin-left: .08em; color: #e8c77d; animation: cursor-blink .8s steps(2, start) infinite; }
 .titleReveal { margin: 0 0 24px; animation: title-in 1.2s ease both; }
 .titleReveal h1 { margin: 0; color: #fff5d9; font-size: clamp(43px, 8vw, 88px); font-weight: 700; letter-spacing: -.07em; line-height: 1; }
 .intro .startButton { display: inline-flex; align-items: center; justify-content: space-between; gap: 40px; min-width: 230px; margin-top: 30px; padding: 14px 18px; border: 1px solid #e8c77d; background: #e8c77d; color: #151515; font-size: 12px; font-weight: 700; transition: background .2s; }
@@ -77,7 +77,7 @@
   .topbar nav { gap: 0; }
   .topbar button { padding: 8px 6px; font-size: 9px; }
   .narrative { width: 82vw; }
-  .narrative p { min-height: 6.4em; font-size: clamp(23px, 6vw, 30px); }
+  .narrative p { min-height: 6em; font-size: clamp(24px, 6.2vw, 32px); line-height: 1.34; }
   .continue { right: 14px; bottom: 12px; }
   .intro .startButton { margin-top: 22px; }
 }

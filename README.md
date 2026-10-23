@@ -77,7 +77,7 @@ Assim, o tutorial pratica ações isoladas e a partida usa essas mesmas ações 
 
 ## Módulo de partida e pedidos
 
-`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. A Orla usa uma agenda finita em `orlaEvents.ts`: cinco eventos em seis minutos. `sessionData.ts` transforma a agenda em pedidos. O modo genérico de catálogo cíclico continua disponível para outros cenários.
+`src/game/session/GameSession.ts` implementa a lógica pura de partida, sem Three, React, DOM ou relógio global. A Orla usa uma agenda finita em `orlaEvents.ts`: nove eventos encadeados em seis minutos, com chamados menores depois do acidente principal. `sessionData.ts` transforma a agenda em pedidos. O modo genérico de catálogo cíclico continua disponível para outros cenários.
 
 - Estados: `menu` → `playing` ↔ `paused` → `finished`. `start()` inicia ou reinicia após o fim; `returnToMenu()` limpa a partida. A pausa congela fase, chegadas e prazos. Só `playing` aceita resoluções.
 - Na agenda da Orla, qualquer ocorrência ativa pode receber progresso, seguindo seus passos em ordem. No modo genérico, a fila permanece FIFO. Cada instância tem ID próprio, preservado contra reutilização ao reiniciar.
@@ -123,7 +123,6 @@ session.resume();
 | `public/assets/characters/` | Personagens `.glb` e `.gltf`; o arquivo padrão é `personagem.glb` |
 | `public/assets/models/` | Outros modelos 3D reutilizáveis (`.glb` e `.gltf`) |
 | `public/assets/textures/` | Texturas e materiais |
-| `public/assets/audio/` | Efeitos sonoros e músicas |
 | `public/assets/ui/` | Imagens e elementos visuais da interface |
 
 Arquivos em `public` são acessados sem o prefixo `public`: `/assets/characters/personagem.glb`.
@@ -178,12 +177,17 @@ bônus. Pendências só expiram no fim, com desconto de 20 pontos por ocorrênci
 
 | Horário | Evento e resposta |
 | --- | --- |
-| 0:30 | Poste pisca por 7 s antes de apagar. **Infraestrutura:** E no poste e puzzle de circuito. |
-| 1:25 | Motoristas deixam de ceder; a fila de pedestres cresce durante o aviso de 8 s. **Mobilidade:** 3 junto à faixa, aguardar o trio atravessar e 1 para liberar. |
-| 2:30 | Demanda aumenta gradualmente, com aviso de 10 s. **Mobilidade:** faixas abertas e desvio (1 e 4), mantendo circulação por 8 s. |
-| 3:35 | Sensor pisca por 7 s antes da falha. **Infraestrutura:** E no ponto e permanecer 4 s. Sair pausa o serviço. |
-| 4:40 | Veículo freia com pisca-alerta e para após 5 s. **Mobilidade:** cone na marca e desvio aberto. **Infraestrutura:** E ao lado do carro e permanecer 3 s para liberar a faixa. |
-| 5:25–6:00 | Sem novas ocorrências; menor chegada de carros. Resolver pendências, recolher cones com E e usar 1 para restaurar o fluxo. |
+| 0:10 | Pane urgente no semáforo, com faíscas, balão e take de câmera; os carros param. **Infraestrutura:** E no semáforo e puzzle de reparo. |
+| 0:40 | Pedestres não conseguem atravessar e a fila cresce. **Mobilidade:** 3 para parar os carros, aguardar o trio e 1 para liberar. |
+| 1:20 | Fluxo intenso; abrir faixas e desvio (1 e 4), mantendo circulação por 8 s. |
+| 2:05 | Ciclista precisa de ajuda. **Mobilidade:** E perto dele para liberar a ciclovia. |
+| 2:50 | Checagem rápida do semáforo. **Infraestrutura:** E para confirmar o controlador. |
+| 4:00 | Batida leve entre dois carros, com fumaça e take de câmera. **Mobilidade:** cone e desvio. **Infraestrutura:** E ao lado dos carros para liberar a faixa. |
+| 4:40 | Falha de sensor. **Infraestrutura:** E no ponto e permanecer durante a instalação. |
+| 5:20 | Poste apagado. **Infraestrutura:** E no poste e puzzle de circuito. |
+| 5:50–6:00 | Objeto bloqueia a ciclovia. **Mobilidade:** E perto do objeto para liberar a passagem. |
+
+Entre chamados, Mobilidade e Infraestrutura ficam selecionáveis para circular livremente. A chegada de uma ocorrência abre o tablet; ao acionar o reforço, o controle passa para a equipe responsável.
 
 O HUD mostra responsáveis, próximos passos, pedestres esperando e carros parados.
 **Marcar objetivo** escolhe a seta da ocorrência. Avisos mudam de cor com a espera;

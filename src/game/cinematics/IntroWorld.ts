@@ -1,10 +1,10 @@
 import { ACESFilmicToneMapping, BoxGeometry, Color, ConeGeometry, CylinderGeometry, DirectionalLight, Fog, Group, HemisphereLight, MathUtils, Mesh, MeshStandardMaterial, PCFSoftShadowMap, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from 'three';
-import { GRID_CONFIG } from '../config';
+import { GRID_CONFIG, ORLA_CONFIG } from '../config';
 import { GridMap } from '../map/GridMap';
 import { GridMapView } from '../map/GridMapView';
 import { ORLA_MAP } from '../map/orlaMap';
 import { Player } from '../entities/Player';
-import { VehicleModels, type VehicleKind } from '../traffic/VehicleModels';
+import { VehicleModels, VEHICLE_VISUAL_SCALE, type VehicleKind } from '../traffic/VehicleModels';
 
 export type IntroShot = 'city' | 'incident' | 'response' | 'team';
 export type IntroPlayback = { shot: IntroShot; reducedMotion: boolean; paused: boolean };
@@ -20,9 +20,9 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
   renderer.domElement.setAttribute('aria-hidden', 'true');
   host.prepend(renderer.domElement);
   const scene = new Scene();
-  scene.background = new Color('#a0c4c1');
-  scene.fog = new Fog('#a0c4c1', 45, 95);
-  scene.add(new HemisphereLight('#fff0d0', '#728e8a', 2.1));
+  scene.background = new Color(ORLA_CONFIG.background);
+  scene.fog = new Fog(ORLA_CONFIG.background, 55, 110);
+  scene.add(new HemisphereLight(ORLA_CONFIG.hemisphere.skyColor, ORLA_CONFIG.hemisphere.groundColor, ORLA_CONFIG.hemisphere.intensity));
   const sun = new DirectionalLight('#ffe2bc', 3);
   sun.position.set(-9, 20, 6);
   sun.castShadow = true;
@@ -34,23 +34,25 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
   const mapView = new GridMapView(map);
   scene.add(mapView.group);
   const models = new VehicleModels();
-  const roadZ = map.cellCenter(0, map.rows - 1).z - map.tileSize * 1.5;
-  const incidentZ = roadZ + 1.2;
+  // Alinha o filme ?s faixas atuais, deixando o canteiro e as cal?adas livres.
+  const roadZ = map.depth / 2 - map.tileSize * 3;
+  const incidentZ = roadZ + 1.4;
+  const sidewalkZ = roadZ - 1;
   const palette = ['#5eaba0', '#d7aa54', '#d67462', '#829ab2', '#dcd8c9'];
   const createCar = (kind: VehicleKind, paint: string, x: number, z: number, direction = 1) => {
     const model = models.create(kind, paint);
-    model.group.scale.setScalar(.72);
+    model.group.scale.setScalar(VEHICLE_VISUAL_SCALE[kind]);
     model.group.rotation.y = direction * Math.PI / 2;
     model.group.position.set(x, .03, z);
     scene.add(model.group);
     return model;
   };
   const front = createCar('sedan', '#e3b85f', 5.1, incidentZ);
-  const back = createCar('hatch', '#c85d51', 3.4, incidentZ);
+  const back = createCar('hatch', '#c85d51', 4, incidentZ);
   front.group.rotation.y += .12;
   back.group.rotation.y -= .18;
   const passing = Array.from({ length: 8 }, (_, i) => ({
-    model: createCar((['hatch', 'suv', 'sedan', 'motorcycle'] as const)[i % 4], palette[i % palette.length], i * 6 - 22, roadZ + (i % 2 ? 3.5 : 2.7), -1),
+    model: createCar((['hatch', 'suv', 'sedan', 'motorcycle'] as const)[i % 4], palette[i % palette.length], i * 6 - 22, roadZ + (i % 2 ? 4.72 : 3.76), -1),
     speed: 1.9 + (i % 3) * .2,
   }));
   const queue = [-.2, -3, -5.8].map((x, i) => createCar('hatch', palette[i], x, incidentZ));
@@ -72,10 +74,10 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
     return cone;
   });
   const crew = [new Player(1), new Player(2), new Player(3)];
-  crew.forEach((player, i) => { player.setPosition(2.3 + i * 1.5, roadZ - 1.1); player.mesh.visible = false; scene.add(player.mesh); });
+  crew.forEach((player, i) => { player.setPosition(2.3 + i * 1.5, sidewalkZ); player.mesh.visible = false; scene.add(player.mesh); });
 
   const camera = new PerspectiveCamera(42, 1, .1, 150);
-  camera.position.set(-15, 22, 29);
+  camera.position.set(-17, 24, 28);
   const target = new Vector3(2, 0, 3);
   const wantedPosition = new Vector3(), wantedTarget = new Vector3(), projected = new Vector3();
   const resize = () => { const w = host.clientWidth || 1, h = host.clientHeight || 1; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); };
@@ -93,17 +95,17 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
     shotTime += dt;
     const motion = reducedMotion ? 0 : Math.min(shotTime / 12, 1);
     if (shot === 'city') {
-      wantedPosition.set(-14 + motion * 9, 22 - motion * 4, 28);
-      wantedTarget.set(2, 0, 3.5);
+      wantedPosition.set(-17 + motion * 10, 24 - motion * 3, 28);
+      wantedTarget.set(1, 0, 1.5);
     } else if (shot === 'incident') {
-      wantedPosition.set(9 - motion * 2, 10 - motion, 19);
+      wantedPosition.set(4.2 + Math.cos(.7 + motion * .6) * 10, 11, incidentZ + Math.sin(.7 + motion * .6) * 10);
       wantedTarget.set(4.2, .1, incidentZ);
     } else if (shot === 'response') {
-      wantedPosition.set(-2 + motion * 3, 8, 16);
-      wantedTarget.set(4.2, .3, incidentZ - .7);
+      wantedPosition.set(-3 + motion * 3, 11, incidentZ + 9);
+      wantedTarget.set(4.2, .3, (incidentZ + sidewalkZ) / 2);
     } else {
-      wantedPosition.set(4.3, 3.6, 13.7);
-      wantedTarget.set(3.8, .7, roadZ - .7);
+      wantedPosition.set(6.5, 7, sidewalkZ + 8);
+      wantedTarget.set(3.8, .8, sidewalkZ);
     }
     if (camera.aspect < 1) {
       const zoomOut = Math.min(1.7, 1 / camera.aspect);
@@ -116,7 +118,7 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
       if (!reducedMotion) { model.group.position.x -= dt * speed; if (model.group.position.x < -25) model.group.position.x = 25; }
     });
     const detected = shot !== 'city';
-    back.group.position.x = detected ? 3.4 : 1.4 + Math.min(shotTime / 5, 1) * 2;
+    back.group.position.x = detected ? 4 : 2 + Math.min(shotTime / 5, 1) * 2;
     queue.forEach((model, i) => { model.group.visible = detected; model.group.position.x = -.2 - i * 2.8; });
     const responding = shot === 'response' || shot === 'team';
     cones.forEach((cone, i) => {
@@ -128,7 +130,7 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
       player.mesh.visible = responding;
       const progress = reducedMotion || shot === 'team' ? 1 : MathUtils.clamp(shotTime / 3.3, 0, 1);
       const oldZ = player.mesh.position.z;
-      player.mesh.position.z = roadZ - 1.7 + progress * .9;
+      player.mesh.position.z = sidewalkZ - .65 + progress * .65;
       player.mesh.rotation.y = 0;
       player.animateWalking(dt, responding && shot === 'response' ? Math.abs(player.mesh.position.z - oldZ) : 0);
       if (i === 2) player.mesh.rotation.y = -.2;

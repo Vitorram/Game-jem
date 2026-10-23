@@ -34,10 +34,10 @@ export type MobilityTutorialSnapshot = {
 };
 export type InfrastructureTutorialSnapshot = { readyToRepair: boolean };
 
-/** Cena da Orla; recursos prÃ³prios liberados em dispose. */
+/** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
   readonly scene = new Scene();
-  // MantÃ©m a mesma velocidade direta e resposta de movimento do laboratÃ³rio.
+  // Mantém a mesma velocidade direta e resposta de movimento do laboratório.
   readonly players = [new Player(1), new Player(2), new Player(3)];
   private readonly input: Pick<Input, 'getAxis' | 'isSprinting'>;
   private readonly idle = { x: 0, z: 0 };
@@ -62,8 +62,6 @@ export class Fase1OrlaScene implements GameScene {
     const resolved = this.map.resolveMovement(from, to);
     const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
     const radius = GRID_CONFIG.playerRadius;
-    const left = crate.x - 0.95 - radius, right = crate.x + 0.95 + radius;
-    const near = crate.z - 0.78 - radius, far = crate.z + 0.78 + radius;
     const cabin = this.map.spawns[2];
     const obstacles = [
       { cx: crate.x, cz: crate.z, hx: 0.95, hz: 0.78 },
@@ -86,22 +84,14 @@ export class Fase1OrlaScene implements GameScene {
       }
     }
     return { x: rx, z: rz };
-    let { x, z } = resolved;
-    if (from.z > near && from.z < far) {
-      if (from.x <= left && x > left) x = left;
-      if (from.x >= right && x < right) x = right;
-    }
-    if (x > left && x < right) {
-      if (from.z <= near && z > near) z = near;
-      if (from.z >= far && z < far) z = far;
-    }
-    return { x, z };
   };
   private readonly resolveInfrastructureMovement = (from: { x: number; z: number }, to: { x: number; z: number }) =>
     this.traffic.resolveWorkerMovement(from, this.resolveOrlaMovement(from, to), GRID_CONFIG.playerRadius);
   private readonly sun: DirectionalLight;
   private disposed = false;
   private readonly cameraTarget = new Vector3();
+  private readonly cinematicFocus = new Vector3();
+  private readonly cinematicPosition = new Vector3();
   private cameraHeight: number = ORLA_CAMERA.closeHeight;
   private lastObjectiveDistance: number | null = null;
   private missionStep = 0;
@@ -125,6 +115,7 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   advancePhase(elapsedMs: number): void { this.phase?.advance(elapsedMs); }
+  phaseIsCinematic(): boolean { return this.phase?.isCinematicActive() ?? false; }
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
@@ -164,11 +155,13 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   selectPlayer(id: PlayerId): void {
-    if (this.disposed) return;
+    if (this.disposed || !this.canSelectPlayer(id)) return;
     this.stopMovement();
     suburbanGameState.setActiveCharacter(id);
     if (this.risks.selectRole(id)) this.syncRisks();
   }
+
+  canSelectPlayer(id: PlayerId): boolean { return this.phase?.canSelectPlayer(id) ?? true; }
 
   interact(): void {
     if (this.disposed) return;
@@ -348,8 +341,7 @@ export class Fase1OrlaScene implements GameScene {
 
   completeRepairPuzzle(type: RepairPuzzleType): void {
     if (type === 'pole') { this.completePoleRepair(); return; }
-    const expectedRole = type === 'crossing' || type === 'traffic' ? 'mobilidade' : 'infraestrutura';
-    if (this.disposed || this.player.role !== expectedRole) return;
+    if (this.disposed || this.player.role !== 'infraestrutura') return;
     this.phase?.completePuzzle(type);
   }
 
@@ -414,10 +406,24 @@ export class Fase1OrlaScene implements GameScene {
     this.updateCamera(camera, 0, closeView, true);
   }
 
-  /** Limita a pegada inteira do frustum no chÃ£o, inclusive apÃ³s resize e zoom. */
+  /** Limita a pegada inteira do frustum no chão, inclusive após resize e zoom. */
   updateCamera(camera: PerspectiveCamera, dt: number, closeView: boolean, snap = false): void {
     if (this.disposed) return;
     const config = ORLA_CAMERA;
+    const shot = this.phase?.getCinematicShot();
+    if (shot) {
+      const blend = snap ? 1 : 1 - Math.exp(-5 * Math.max(0, dt));
+      const height = config.closeHeight * .82;
+      const angle = (shot.progress - .5) * 1.25;
+      this.cinematicFocus.set(shot.x, shot.focusY, shot.z);
+      this.cameraTarget.lerp(this.cinematicFocus, blend);
+      this.cinematicPosition.set(shot.x + Math.sin(angle) * 2.4, height,
+        shot.z + height * config.tilt + Math.cos(angle) * 2.4);
+      camera.position.lerp(this.cinematicPosition, blend);
+      camera.lookAt(this.cameraTarget);
+      camera.updateMatrixWorld(true);
+      return;
+    }
     const angle = Math.atan2(1, config.tilt);
     const sin = Math.sin(angle), cos = Math.cos(angle);
     const tan = Math.tan(MathUtils.degToRad(config.fov) / 2);
@@ -463,7 +469,8 @@ export class Fase1OrlaScene implements GameScene {
     if (this.disposed) return;
     this.updateCollisionRecovery(dt);
     const recovering = !!this.collisionRecovery && !this.collisionRecovery.respawned;
-    const axis = this.player.role === 'analista'
+    const cinematic = this.phase?.isCinematicActive() ?? false;
+    const axis = this.player.role === 'analista' || cinematic
       || !this.tutorialMovementEnabled
       || (recovering && this.collisionRecovery?.player === this.player)
       ? this.idle : this.input.getAxis();
@@ -476,8 +483,7 @@ export class Fase1OrlaScene implements GameScene {
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.phase?.update(dt, this.player);
-    const signalFault = suburbanGameState.snapshot().problems.find(problem => problem.id === 'traffic-signal-failure');
-    this.trafficSignals.setFaulty(!!signalFault && signalFault.status !== 'RESOLVED' && signalFault.stage === 'active');
+    this.trafficSignals.setFaulty(this.phase?.isSignalFaulty() ?? false);
     this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {
@@ -599,14 +605,14 @@ export class Fase1OrlaScene implements GameScene {
       if (workZone?.prepared) this.reportMissionStep(2);
     }
     this.traffic.setMobilityView(this.player.role === 'mobilidade');
-    const prompt = road?.type === 'PRINCIPAL' ? !mobilityAssigned ? 'AGUARDE O ACIONAMENTO DA ANALISTA' : carryingCone ? this.returningConeToCrate ? 'LEVAR CONE AO BAÃš' : facingConeCrate ? 'GUARDAR CONE NO BAÃš' : 'SOLTAR CONE NA VIA' : nearCone ? 'RECOLHER CONE DA VIA' : 'VÃ AO BAÃš DE CONES'
-      : facingConeCrate ? carryingCone ? 'GUARDAR CONE NO BAÃš' : 'PEGAR CONE DO BAÃš'
+    const prompt = road?.type === 'PRINCIPAL' ? !mobilityAssigned ? 'AGUARDE O ACIONAMENTO DA ANALISTA' : carryingCone ? this.returningConeToCrate ? 'LEVAR CONE AO BAÚ' : facingConeCrate ? 'GUARDAR CONE NO BAÚ' : 'SOLTAR CONE NA VIA' : nearCone ? 'RECOLHER CONE DA VIA' : 'VÁ AO BAÚ DE CONES'
+      : facingConeCrate ? carryingCone ? 'GUARDAR CONE NO BAÚ' : 'PEGAR CONE DO BAÚ'
       : nearPole && pole?.status !== 'RESOLVED' && !pole?.dispatchedTeams.includes('infraestrutura') ? 'AGUARDE O ACIONAMENTO DA ANALISTA'
-        : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'CÃRCULO LIVRE Â· E REPARAR POSTE'
-        : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE Â· TRÃ‚NSITO NO CÃRCULO'
-          : workZone?.reason === 'NEEDS_INTERVENTION' ? 'SINALIZE A ÃREA COM MOBILIDADE'
-          : workZone?.reason === 'ACCESS_TOO_NARROW' ? 'ACESSO FÃSICO INSUFICIENTE'
-            : 'ÃREA INSEGURA Â· PREPARE COM MOBILIDADE' : null;
+        : nearPole && pole?.status !== 'RESOLVED' && workZone?.prepared ? 'CÍRCULO LIVRE · E REPARAR POSTE'
+        : nearPole && pole?.status !== 'RESOLVED' ? workZone?.reason === 'CARS_IN_WORK_ZONE' ? 'AGUARDE · TRÂNSITO NO CÍRCULO'
+          : workZone?.reason === 'NEEDS_INTERVENTION' ? 'SINALIZE A ÁREA COM MOBILIDADE'
+          : workZone?.reason === 'ACCESS_TOO_NARROW' ? 'ACESSO FÍSICO INSUFICIENTE'
+            : 'ÁREA INSEGURA · PREPARE COM MOBILIDADE' : null;
     if (prompt !== this.currentInteractionPrompt) {
       this.currentInteractionPrompt = prompt;
       this.onInteractionPrompt?.(prompt);

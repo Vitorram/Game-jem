@@ -5,7 +5,7 @@ import type { GridMap } from '../map/GridMap';
 import { suburbanGameState, type RoadState } from '../core/GameState';
 import { ORLA_CROSSING } from '../config';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
-import { VehicleModels, type VehicleKind } from './VehicleModels';
+import { VehicleModels, VEHICLE_VISUAL_SCALE, type VehicleKind } from './VehicleModels';
 
 const FLEET_SEQUENCE: readonly VehicleKind[] = [
   'sedan', 'motorcycle', 'bus', 'truck', 'hatch', 'suv', 'pickup', 'motorcycle',
@@ -118,7 +118,9 @@ export class TrafficSystem {
   private demandLevel = 0.5;
   private scheduledDemand: number | null = null;
   private unsafeCrossing = false;
+  private signalFailure = false;
   private guardedCrossing = false;
+  private assistedCrossingRequested = false;
   private incidentVehicle: Vehicle | null = null;
   private collisionWarningVehicle: Vehicle | null = null;
   private readonly incidentLights = new Group();
@@ -257,7 +259,9 @@ export class TrafficSystem {
   setScheduledDemand(level: number): void { this.scheduledDemand = MathUtils.clamp(level, 0, 1); }
 
   setUnsafeCrossing(unsafe: boolean): void { this.unsafeCrossing = unsafe; }
+  setSignalFailure(active: boolean): void { this.signalFailure = active; }
   setCrossingGuarded(guarded: boolean): void { this.guardedCrossing = guarded; }
+  setAssistedCrossingRequested(requested: boolean): void { this.assistedCrossingRequested = requested; }
   isCrossingGuarded(): boolean { return this.guardedCrossing; }
 
   getQueuedVehicleCount(): number {
@@ -557,17 +561,21 @@ export class TrafficSystem {
 
   isPedestrianCrossingClear(): boolean {
     if (this.unsafeCrossing && !this.guardedCrossing) return false;
-    if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize) return false;
+    if (this.waitingPedestrians < CROSSING_RULES.roadGroupSize && !this.assistedCrossingRequested) return false;
     if (this.crossingSignalPhase !== 'red') return false;
     return this.vehicles.every(vehicle => {
       const distance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
-      if (Math.abs(vehicle.mesh.position.x - this.pedestrianCrossingX) < CROSSING_RULES.roadConflictHalfWidth) return false;
+      // A falha do semáforo pode congelar um carro em cima da faixa. Um carro
+      // parado nessa área não deve deixar a travessia presa para sempre.
+      if (Math.abs(vehicle.mesh.position.x - this.pedestrianCrossingX) < CROSSING_RULES.roadConflictHalfWidth) {
+        return vehicle.speed <= CROSSING_RULES.stoppedSpeed;
+      }
       return distance < 0 || distance > CROSSING_RULES.roadApproachDistance || vehicle.speed <= CROSSING_RULES.stoppedSpeed;
     });
   }
 
   private updateCrossingSignal(dt: number): void {
-    if (this.guardedCrossing || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize)) {
+    if (this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize)) {
       if (this.crossingSignalPhase === 'green') {
         this.crossingSignalPhase = 'yellow';
         this.crossingSignalTimer = 1.25;
@@ -654,7 +662,7 @@ export class TrafficSystem {
       const coneBrake = Number.isFinite(obstructionDistance)
         ? MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1) : 1;
       const crossingDistance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
-      const carsYield = this.guardedCrossing || this.pedestrianCrossingOccupied
+      const carsYield = this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied
         || (!this.unsafeCrossing && this.waitingPedestrians >= CROSSING_RULES.roadGroupSize);
       const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
@@ -669,7 +677,7 @@ export class TrafficSystem {
       const mayLeaveBlockedLane = vehicle.plannedConnectionId !== null;
       const mayExitClosedEscape = vehicle.lane.type === 'ESCAPE' && vehicle.homeLane !== vehicle.lane;
       const laneAvailable = vehicle.lane.status === 'open' || mayLeaveBlockedLane || mayExitClosedEscape;
-      let targetSpeed = this.running && laneAvailable ? vehicle.maxSpeed * following * coneBrake * connectionBrake * playerBrake : 0;
+      let targetSpeed = this.running && laneAvailable && !this.signalFailure ? vehicle.maxSpeed * following * coneBrake * connectionBrake * playerBrake : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
@@ -873,8 +881,7 @@ export class TrafficSystem {
     const color = FLEET_COLORS[seqIndex % FLEET_COLORS.length];
     const model = this.vehicleModels.create(kind, color);
     model.group.rotation.y = Math.PI / 2;
-    const scale = kind === 'bus' ? 0.42 : kind === 'truck' ? 0.45 : kind === 'motorcycle' ? 0.56 : 0.52;
-    model.group.scale.setScalar(scale);
+    model.group.scale.setScalar(VEHICLE_VISUAL_SCALE[kind]);
     model.group.position.y = -0.27;
     vehicle.add(model.group);
     void bodyMaterial;

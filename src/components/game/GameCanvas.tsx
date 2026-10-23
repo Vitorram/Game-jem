@@ -51,6 +51,7 @@ export default function GameCanvas() {
   const [repairPuzzleOpen, setRepairPuzzleOpen] = useState(false);
   const [repairPuzzleType, setRepairPuzzleType] = useState<RepairPuzzleType>('pole');
   const [testPuzzleType, setTestPuzzleType] = useState<RepairPuzzleType | null>(null);
+  const [pauseSettingsOpen, setPauseSettingsOpen] = useState(false);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
   const [, refreshTeamAvailability] = useState(0);
@@ -182,6 +183,9 @@ export default function GameCanvas() {
     return () => window.clearInterval(timer);
   }, [isOriginalOrla, status]);
 
+  const promptClassName = `interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`;
+  const promptIsInstruction = !!interactionPrompt && (/USE [13]/.test(interactionPrompt) || interactionPrompt.startsWith('AGUARDE'));
+
   return (
     <section className={`game-shell${isLaboratory ? '' : ' is-orla'}`} aria-label="Suburban — jogo de mobilidade urbana">
       <div ref={host} className="viewport" />
@@ -191,11 +195,11 @@ export default function GameCanvas() {
       </header>
       {status === 'ready' && !error && <EntryScreen ready={initialized} onStory={() => setStoryOpen(true)} onLab={() => { game.current?.start(); setSceneId('test'); }} />}
       {(status === 'paused' || error) && (
-        <div className="overlay">
+        <div className={`overlay${status === 'paused' && !error ? ' pause-overlay' : ''}`}>
           <div ref={panel} className="panel">
-            <span className="eyebrow">{error ? 'INICIALIZAÇÃO' : status === 'paused' ? 'UM RESPIRO' : 'O COMEÇO DE UM MUNDO'}</span>
-            <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? 'Jogo pausado.' : <>Como você<br />quer começar<span>?</span></>}</h1>
-            <p>{error ?? (status === 'paused' ? 'Sua cena está esperando. Continue quando quiser.' : 'Jogue a fase da Orla ou explore as habilidades e os puzzles na área de testes.')}</p>
+            <span className="eyebrow">{error ? 'INICIALIZAÇÃO' : status === 'paused' ? 'SUBURBAN · ORLA' : 'O COMEÇO DE UM MUNDO'}</span>
+            <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? <>Pausa<span>.</span></> : <>Como você<br />quer começar<span>?</span></>}</h1>
+            <p>{error ?? (status === 'paused' ? pauseSettingsOpen ? 'CONTROLES\nWASD ou setas · mover\nE ou clique · interagir\nT · trocar personagem\nEsc · pausar e continuar' : '' : 'Jogue a fase da Orla ou explore as habilidades e os puzzles na área de testes.')}</p>
             {error ? <button onClick={() => window.location.reload()}>Tentar novamente ↗</button> :
               <button disabled={!initialized} onClick={status === 'ready' ? () => setStoryOpen(true) : event => { game.current?.togglePause(); event.currentTarget.blur(); }}>
                 {!initialized ? 'Preparando…' : status === 'paused' ? 'Continuar →' : 'Jogar a fase →'}
@@ -204,8 +208,11 @@ export default function GameCanvas() {
               onClick={event => { game.current?.start(); setSceneId('test'); event.currentTarget.blur(); }}>
               Área de testes →
             </button>}
-            {!error && status === 'paused' && <button className="secondary" onClick={returnToMenu}>Voltar ao menu</button>}
-            <div className="stack">ANALISAR <i /> ORGANIZAR <i /> REPARAR</div>
+            {!error && status === 'paused' && <div className="pause-actions">
+              <button className="pause-secondary" onClick={returnToMenu}>Sair</button>
+              <button className="pause-secondary" onClick={() => setPauseSettingsOpen(value => !value)}>{pauseSettingsOpen ? 'Fechar configurações' : 'Configurações'}</button>
+            </div>}
+            {status !== 'paused' && <div className="stack">ANALISAR <i /> ORGANIZAR <i /> REPARAR</div>}
           </div>
         </div>
       )}
@@ -215,9 +222,16 @@ export default function GameCanvas() {
       {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
         {isAnalystTablet && <OrlaTablet onAnalyze={id => game.current?.analyzeProblem(id)} onAction={id => {
-          if (!id || analystTutorialStep !== null) return;
+          if (!id) return;
+          if (analystTutorialStep !== null) {
+            if (analystTutorialStep === 2) game.current?.analyzeProblem(id);
+            else if (analystTutorialStep === 3) game.current?.dispatchTeam('infraestrutura');
+            else if (analystTutorialStep === 4) game.current?.dispatchTeam('mobilidade');
+            return;
+          }
           const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
           if (problem?.status === 'RESOLVED') game.current?.archiveResolvedProblem(id);
+          else if (!problem?.analyzed) game.current?.analyzeProblem(id);
           else game.current?.requestReinforcements(id);
         }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
@@ -237,9 +251,11 @@ export default function GameCanvas() {
           onContinue={() => setInfrastructureStep((infrastructureTutorialStep + 1) as InfrastructureTutorialStep)}
           onComplete={finishInfrastructureTutorial}
         />}
-        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
+        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}
-        {!isLaboratory && interactionPrompt && <div className={`interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`} role="status"><kbd>E</kbd> {interactionPrompt}</div>}
+        {!isLaboratory && interactionPrompt && (promptIsInstruction
+          ? <div className={`${promptClassName} is-hotkey-hint`} role="status">{interactionPrompt}</div>
+          : <button type="button" className={promptClassName} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }} aria-label={`Interagir: ${interactionPrompt}`}><kbd>E</kbd> / clique {interactionPrompt}</button>)}
 
         {isLaboratory && <AbilityPanel state={abilities} onUse={() => game.current?.useAbility()} onTool={tool => game.current?.setAbilityTool(tool)} onStop={index => game.current?.selectStop(index)} onMap={(point, mark) => game.current?.clickAbilityMap(point, mark)} onInspect={(id, mark) => game.current?.inspectIssue(id, mark)} onReset={() => game.current?.resetAbilities()} />}
         {isLaboratory && <aside className="repair-test-panel" aria-label="Testar quebra-cabeças de reparo">
@@ -248,8 +264,8 @@ export default function GameCanvas() {
           <p>Abra qualquer reparo sem iniciar uma ocorrência.</p>
           <div className="repair-test-options">
             {([
-              ['pole', 'Poste'], ['signal', 'Semáforo'], ['crossing', 'Travessia'], ['traffic', 'Fluxo de vias'],
-              ['sensor', 'Sensor'], ['car', 'Veículo'],
+              ['pole', 'Poste · circuito'], ['signal', 'Semáforo · cabos'], ['sensor', 'Sensor · sincronização'],
+              ['signal-check', 'Controlador · calibração'], ['car', 'Colisão · segurança'],
             ] as const).map(([type, label]) => <button key={type} type="button" onClick={() => setTestPuzzleType(type)}>{label}</button>)}
           </div>
         </aside>}
