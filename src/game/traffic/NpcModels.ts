@@ -77,7 +77,7 @@ export class NpcModels {
     this.rod(bike, '#34424b', [-.23, .83, .4], [.23, .83, .4], .022);
     this.part(bike, '#34424b', 0, .665, -.08, .25, .06, .23, true);
     const pedals: Group[] = [];
-    for (const side of [-1, 1]) {
+    for (let i = 0; i < 2; i++) {
       const pedal = new Group(); bike.add(pedal); pedals.push(pedal);
       this.part(pedal, '#34424b', 0, 0, 0, .17, .035, .1);
     }

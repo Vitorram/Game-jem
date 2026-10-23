@@ -68,6 +68,8 @@ export class GameSession {
   private expiredOrders = 0;
   private orders: ActiveOrder[] = [];
   private issuedOrders = 0;
+  /** Prazo congelado quando uma missão sequencial já foi concluída e aguarda arquivamento. */
+  private readonly completedAtMs = new Map<number, number>();
   // Mantido entre reinícios para não aceitar uma resolução antiga em uma nova partida.
   private nextOrderId = 1;
 
@@ -83,7 +85,7 @@ export class GameSession {
       score: this.score, completedOrders: this.completedOrders, expiredOrders: this.expiredOrders,
       orders: this.orders.map(order => ({
         ...order, riskIds: [...order.riskIds],
-        remainingMs: Math.max(0, order.expiresAtMs - this.elapsedMs),
+        remainingMs: Math.max(0, order.expiresAtMs - (this.completedAtMs.get(order.id) ?? this.elapsedMs)),
         nextRiskId: order.riskIds[order.completedSteps],
       })),
     };
@@ -138,7 +140,8 @@ export class GameSession {
       const events: SessionEvent[] = [];
       const target = this.elapsedMs + deltaMs;
       while (this.elapsedMs < target && this.status === 'playing') {
-        const deadline = this.orders[0]?.expiresAtMs ?? Infinity;
+        const activeOrder = this.orders.find(order => order.completedSteps < order.riskIds.length);
+        const deadline = activeOrder?.expiresAtMs ?? Infinity;
         const arrival = this.orders.length === 0 && this.issuedOrders < this.config.orders.length
           ? Math.max(this.elapsedMs, this.nextArrival()) : Infinity;
         const phaseBoundary = this.elapsedMs < this.config.phaseDurationMs ? this.config.phaseDurationMs : Infinity;
@@ -200,11 +203,13 @@ export class GameSession {
       const points = order.basePoints + speedBonus;
       this.score += points;
       this.completedOrders++;
+      if (this.config.sequential) this.completedAtMs.set(order.id, this.elapsedMs);
       if (!this.config.sequential) this.orders.splice(this.orders.indexOf(order), 1);
       events.push({ type: 'order-completed', orderId, basePoints: order.basePoints, speedBonus, points });
       if (this.config.sequential && this.issuedOrders === this.config.orders.length
         && this.completedOrders === this.config.orders.length) {
         this.orders.splice(this.orders.indexOf(order), 1);
+        this.completedAtMs.delete(order.id);
         this.status = 'finished';
         events.push({ type: 'status', status: this.status });
       }
@@ -224,6 +229,7 @@ export class GameSession {
     const order = this.orders.find(item => item.id === orderId);
     if (!order || order.completedSteps !== order.riskIds.length) return [];
     this.orders.splice(this.orders.indexOf(order), 1);
+    this.completedAtMs.delete(order.id);
     const events: SessionEvent[] = [];
     if (this.issuedOrders === this.config.orders.length && this.completedOrders === this.config.orders.length
       && this.orders.length === 0) {
@@ -254,6 +260,13 @@ export class GameSession {
 
   private expireOrders(events: SessionEvent[], phaseEnded: boolean): void {
     this.orders = this.orders.filter(order => {
+      const completed = order.completedSteps === order.riskIds.length;
+      if (completed) {
+        // A resolved call may wait in the tablet until the player archives it.
+        // It must never turn into a failed mission while waiting for that action.
+        if (phaseEnded) this.completedAtMs.delete(order.id);
+        return !phaseEnded;
+      }
       const deadlineReached = order.expiresAtMs <= this.elapsedMs;
       if (!deadlineReached && !phaseEnded) return true;
       this.score -= order.expirationPenalty;
@@ -270,6 +283,7 @@ export class GameSession {
     this.completedOrders = 0;
     this.expiredOrders = 0;
     this.orders = [];
+    this.completedAtMs.clear();
     this.issuedOrders = 0;
   }
 

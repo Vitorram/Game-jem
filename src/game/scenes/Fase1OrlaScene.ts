@@ -57,7 +57,6 @@ export class Fase1OrlaScene implements GameScene {
     { stops: ORLA_ROUTE.stops.map(cell => this.map.cellCenter(cell.column, cell.row)), movedIndex: ORLA_ROUTE.movedIndex,
       destination: this.map.cellCenter(ORLA_ROUTE.destination.column, ORLA_ROUTE.destination.row) },
   );
-  private readonly resolveMovement = this.map.resolveMovement.bind(this.map);
   private readonly resolveOrlaMovement = (from: { x: number; z: number }, to: { x: number; z: number }) => {
     const resolved = this.map.resolveMovement(from, to);
     const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
@@ -560,8 +559,8 @@ export class Fase1OrlaScene implements GameScene {
       }
       return;
     }
-    const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
     const state = suburbanGameState.snapshot();
+    const pole = state.problems.find(problem => problem.id === 'broken-light-pole-1');
     if (pole) this.brokenPoleMarker.setState(pole.status, this.player.role === 'analista', state.selectedProblemId === pole.id);
     const workZone = pole ? this.getWorkZoneReadiness(pole.position) : null;
     const workZoneVisible = !!pole && pole.status !== 'RESOLVED' && pole.dispatchedTeams.includes('infraestrutura');
@@ -590,7 +589,7 @@ export class Fase1OrlaScene implements GameScene {
     }
     const laneId = this.player.role === 'mobilidade'
       ? this.traffic.getNearbyLane(this.player.mesh.position.x, this.player.mesh.position.z) : null;
-    const road = laneId ? suburbanGameState.snapshot().roads.find(item => item.id === laneId) : undefined;
+    const road = laneId ? state.roads.find(item => item.id === laneId) : undefined;
     const nearCone = this.player.role === 'mobilidade'
       && this.traffic.getNearbyCone(this.player.mesh.position.x, this.player.mesh.position.z);
     const mobilityAssigned = !!pole?.dispatchedTeams.includes('mobilidade');

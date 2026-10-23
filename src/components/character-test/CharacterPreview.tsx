@@ -46,7 +46,6 @@ export default function CharacterPreview() {
     let wasWalking = false;
     let blobUrl: string | null = null;
     let alive = true;
-    let previous = 0;
     const clock = new Clock();
     const keys = new Set<string>();
     const onDown = (event: KeyboardEvent) => { if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) { keys.add(event.code); setMoving(true); } };

@@ -53,7 +53,6 @@ export default function GameCanvas() {
   const [pauseSettingsOpen, setPauseSettingsOpen] = useState(false);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
-  const [, refreshTeamAvailability] = useState(0);
 
   useEffect(() => {
     if (!host.current) return;
@@ -182,12 +181,6 @@ export default function GameCanvas() {
     return () => window.clearInterval(timer);
   }, [infrastructureTutorialStep, interactionPrompt]);
 
-  useEffect(() => {
-    if (!isOriginalOrla || status !== 'playing') return;
-    const timer = window.setInterval(() => refreshTeamAvailability(value => value + 1), 220);
-    return () => window.clearInterval(timer);
-  }, [isOriginalOrla, status]);
-
   const promptClassName = `interaction-prompt${infrastructureTutorialStep === 3 || mobilityTutorialStep === 3 && interactionPrompt === 'PEGAR CONE DO BAÚ' || mobilityTutorialStep === 7 && interactionPrompt === 'SOLTAR CONE NA VIA' ? ' tutorial-focus' : ''}`;
   const promptIsInstruction = !!interactionPrompt && (/USE [1-4]/.test(interactionPrompt)
     || interactionPrompt.startsWith('AGUARDE') || interactionPrompt.startsWith('DESVIO'));
@@ -282,11 +275,11 @@ export default function GameCanvas() {
         </div>}
         {isOriginalOrla && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
           <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
-          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Desviar elétricos'].map((label, index) => {
+          {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Habilidade 4 · Desviar elétricos'].map((label, index) => {
             const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;
             const target = activeSkill === index;
             const locked = mobilityTutorialStep !== null && !target;
-            return <button key={label} disabled={locked} className={target ? 'tutorial-focus' : undefined} data-tutorial-target={target ? 'true' : undefined} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}><kbd>{index + 1}</kbd> {label}</button>;
+            return <button key={label} disabled={locked} className={target ? 'tutorial-focus' : undefined} data-tutorial-target={target ? 'true' : undefined} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}>{index < 3 && <kbd>{index + 1}</kbd>} {label}</button>;
           })}
         </div>}
         {(isOriginalOrla && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div data-tutorial-target={mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? 'true' : undefined} className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}${mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? ' tutorial-focus' : ''}`} aria-label="Controles de movimento">

@@ -62,7 +62,17 @@ export class GameState {
 
   snapshot(): GameStateSnapshot { return structuredClone(this.state); }
 
+  /** Cópia isolada de uma ocorrência, sem clonar as vias e o restante do estado. */
+  findProblem(id: UrbanProblem['id']): UrbanProblem | undefined {
+    const problem = this.state.problems.find(item => item.id === id);
+    return problem ? structuredClone(problem) : undefined;
+  }
+
+  /** Cópia isolada da lista de ocorrências para as consultas da simulação. */
+  getProblems(): UrbanProblem[] { return structuredClone(this.state.problems); }
+
   get activeCharacter(): PlayerId { return this.state.activeCharacter; }
+  get selectedProblemId(): UrbanProblem['id'] | null { return this.state.selectedProblemId; }
 
   setActiveCharacter(id: PlayerId): void { this.state.activeCharacter = id; }
 

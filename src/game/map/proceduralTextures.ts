@@ -52,7 +52,6 @@ function speckle(
 
 /** Desenha a mesma linha deslocada em Y para fechar a costura vertical. */
 function wrappedLine(
-  ctx: CanvasRenderingContext2D,
   y: number,
   drawAt: (offsetY: number) => void,
 ): void {
@@ -70,7 +69,7 @@ function wave(
   width: number,
   color: string,
 ): void {
-  wrappedLine(ctx, y, offsetY => {
+  wrappedLine(y, offsetY => {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
     ctx.lineCap = 'round';
@@ -222,7 +221,7 @@ const RECIPES: Record<TextureKey, Draw> = {
       ctx.strokeStyle = `rgba(28, 33, 36, ${0.08 + random() * 0.08})`;
       ctx.lineWidth = 6 + random() * 6;
 
-      wrappedLine(ctx, baseY, offsetY => {
+      wrappedLine(baseY, offsetY => {
         ctx.beginPath();
         ctx.moveTo(0, offsetY);
         ctx.lineTo(SIZE, offsetY);

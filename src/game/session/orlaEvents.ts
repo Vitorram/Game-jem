@@ -29,8 +29,8 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
     instruction: 'Infraestrutura: siga a seta, use E no poste e conecte o circuito elétrico.' },
   { id: 'ev-charger-repair', title: 'Carregador elétrico quebrado', atMs: 190_000, warningMs: 0,
     teams: ['mobilidade', 'infraestrutura'], position: { x: -3, z: 6.98 }, steps: [901, 902],
-    warning: 'O carregador da avenida verde falhou. Os carros elétricos estão formando uma fila.',
-    instruction: 'Mobilidade: use 4 para desviar os elétricos para a rua normal. Infraestrutura: vá ao carregador e use E para iniciar o reparo.' },
+    warning: 'O carregador da avenida verde falhou e os carros elétricos estão formando uma fila. Mobilidade: a Habilidade 4 desvia os elétricos para as pistas comuns.',
+    instruction: 'Mobilidade: use a Habilidade 4 (tecla 4) para desviar os elétricos para a rua normal. Infraestrutura: vá ao carregador e use E para iniciar o reparo.' },
   { id: 'cyclist-assist', title: 'Resgate do entregador 99', atMs: 50_000, warningMs: 0,
     teams: ['mobilidade'], position: { x: 0, z: 4.7 }, steps: [701, 702],
     warning: 'Um entregador de bicicleta se feriu e precisa atravessar a avenida. Mobilidade, proteja a travessia.',
@@ -69,6 +69,6 @@ export const ORLA_EVENT_STEPS: Record<number, { icon: string; label: string }> =
   801: { icon: '🚦', label: 'Infra: checar semáforo' },
   802: { icon: '🚲', label: 'Mob: liberar ciclovia' },
   803: { icon: '🚧', label: 'Mob: levar cone até a caixa' },
-  901: { icon: '↗', label: 'Mob: desviar carros elétricos' },
+  901: { icon: '↗', label: 'Mob: habilidade 4 · desviar elétricos' },
   902: { icon: '🔌', label: 'Infra: reparar carregador' },
 };

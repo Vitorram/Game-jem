@@ -46,6 +46,8 @@ export class OrlaPhase {
   private readonly bikeConeBandMaterial = new MeshStandardMaterial({ color: '#fff0c4', roughness: .45 });
   private readonly signalFx = new Group();
   private readonly signalSparks: Mesh[] = [];
+  private readonly sparkMaterial = new MeshStandardMaterial({ color: '#fff2a3', emissive: '#ff8a22', emissiveIntensity: 2.4 });
+  private readonly sparkGeometry = new BoxGeometry(.055, .42, .055);
   private readonly signalBubble: Sprite | null;
   private readonly crash = new Group();
   private readonly crashModels = new VehicleModels();
@@ -68,7 +70,7 @@ export class OrlaPhase {
   ) {
     suburbanGameState.setProblems([]);
     suburbanGameState.selectProblem(null);
-    this.traffic.resetTutorialInterventions();
+    this.traffic.resetRoadInterventions();
     this.traffic.setScheduledDemand(0.2);
     this.items.consume(2, 'cone');
     this.pole.setPhaseState('healthy', 0);
@@ -102,10 +104,8 @@ export class OrlaPhase {
     this.sensor.add(box, antenna);
     this.group.add(this.sensor);
     this.signalFx.position.set(0, 2.9, 4.7);
-    const sparkMaterial = new MeshStandardMaterial({ color: '#fff2a3', emissive: '#ff8a22', emissiveIntensity: 2.4 });
-    const sparkGeometry = new BoxGeometry(.055, .42, .055);
     for (let i = 0; i < 5; i++) {
-      const spark = new Mesh(sparkGeometry, sparkMaterial);
+      const spark = new Mesh(this.sparkGeometry, this.sparkMaterial);
       spark.position.set(Math.cos(i * 1.25) * .42, Math.sin(i * 1.25) * .36, .12);
       spark.rotation.z = i * .83;
       this.signalFx.add(spark); this.signalSparks.push(spark);
@@ -149,7 +149,7 @@ export class OrlaPhase {
     const event = ORLA_EVENTS[this.eventIndex];
     const problem = event && this.problem(event.id);
     if (!event || event.id !== id || problem?.status !== 'RESOLVED') return false;
-    suburbanGameState.setProblems(suburbanGameState.snapshot().problems.filter(item => item.id !== id));
+    suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
     suburbanGameState.selectProblem(null);
     this.eventIndex++;
     this.dispatchStartedAt = null;
@@ -160,22 +160,30 @@ export class OrlaPhase {
   expireOrder(id: string, continuePhase = true): void {
     const event = ORLA_EVENTS[this.eventIndex];
     if (!event || event.id !== id) return;
+    if (this.service?.id === id) this.service = null;
     if (id === 'traffic-signal-failure') {
       this.traffic.setCrossingGuarded(false);
       this.traffic.setUnsafeCrossing(false);
       this.traffic.setSignalFailure(false);
       this.pedestrians.setCrossingIncident(false);
+      this.pedestrians.setWalkerSpawningPaused(false);
       this.pedestrians.setRoadBatchHold(false);
       this.crossingProtected = false;
+      this.signalRepairCompleted = false;
     } else if (id === 'cyclist-assist') {
       this.traffic.setCrossingGuarded(false);
       this.pedestrians.cancelWorkerRescue();
+      this.pedestrians.setWalkerSpawningPaused(false);
       this.pedestrians.setRoadBatchHold(false);
       this.rescueProtected = false;
     } else if (id === 'ev-charger-repair') {
       this.traffic.setElectricChargerBroken(false);
+    } else if (id === 'minor-collision') {
+      this.traffic.clearCollision();
     }
-    suburbanGameState.setProblems(suburbanGameState.snapshot().problems.filter(item => item.id !== id));
+    this.rushFlowSeconds = 0;
+    this.traffic.resetRoadInterventions();
+    suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
     suburbanGameState.selectProblem(null);
     if (this.items.heldBy(2) === 'cone') this.items.consume(2, 'cone');
     this.eventIndex++;
@@ -185,7 +193,7 @@ export class OrlaPhase {
 
   private issueNext(): void {
     const event = ORLA_EVENTS[this.eventIndex];
-    if (!event || this.elapsedMs < event.atMs || suburbanGameState.snapshot().problems.length > 0) return;
+    if (!event || this.elapsedMs < event.atMs || suburbanGameState.getProblems().length > 0) return;
     const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition() : event.position;
     suburbanGameState.setProblems([{ id: event.id,
       type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
@@ -206,6 +214,13 @@ export class OrlaPhase {
       this.pedestrians.beginWorkerRescue();
       this.beginCinematic(event.position, .85, 2.5);
     }
+    if (event.id === 'minor-collision') {
+      this.traffic.warnCollision();
+      this.traffic.startCollision();
+      const collisionPosition = this.traffic.getIncidentPosition() ?? position;
+      this.patch(event.id, { position: collisionPosition });
+      this.beginCinematic(collisionPosition, .62);
+    }
     if (event.id === 'ev-charger-repair') {
       this.traffic.setElectricChargerBroken(true);
       this.beginCinematic(position, .72, 2.5);
@@ -220,12 +235,6 @@ export class OrlaPhase {
     if (event && active && active.stage === 'warning' && this.dispatchStartedAt !== null
       && elapsedMs >= this.dispatchStartedAt + event.warningMs) {
       this.patch(event.id, { stage: 'active', instruction: event.instruction });
-      if (event.id === 'minor-collision') {
-        this.traffic.warnCollision();
-        this.traffic.startCollision();
-        const position = this.traffic.getIncidentPosition();
-        if (position) { this.patch(event.id, { position }); this.beginCinematic(position, .62); }
-      }
     }
     const rush = this.problem('rush-hour');
     const rushDemand = rush && rush.stage === 'active' && rush.status !== 'RESOLVED'
@@ -254,7 +263,8 @@ export class OrlaPhase {
     const crossing = this.problem('traffic-signal-failure');
     const progress = this.pedestrians.getCrossingProgress();
     if (crossing?.stage === 'active' && crossing.status !== 'RESOLVED' && this.crossingProtected
-      && progress.crossed >= this.crossingBaseline + this.crossingTarget && !progress.occupied) {
+      && progress.crossed >= this.crossingBaseline + this.crossingTarget && progress.pending === 0
+      && progress.waiting === 0 && !progress.occupied) {
       this.step(crossing.id, 201);
       // O reparo pode terminar antes da travessia. Reporte os passos na ordem
       // da missão assim que ambos estiverem prontos, independentemente da ordem real.
@@ -285,7 +295,7 @@ export class OrlaPhase {
     const chargerIssue = this.problem('ev-charger-repair');
     if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE' && !this.completedSteps.has(901)) {
       const waiting = this.traffic.getElectricQueueCount();
-      if (waiting > 0) this.patch(chargerIssue.id, { instruction: `${waiting} carro${waiting === 1 ? '' : 's'} elétrico${waiting === 1 ? '' : 's'} na fila. Mobilidade: use 4 para desviá-los para a rua normal.` });
+      if (waiting > 0) this.patch(chargerIssue.id, { instruction: `${waiting} carro${waiting === 1 ? '' : 's'} elétrico${waiting === 1 ? '' : 's'} na fila. Mobilidade: use a Habilidade 4 (tecla 4) para desviá-los para a rua normal.` });
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status === 'ACTIVE' && this.traffic.isIncidentProtected()) {
@@ -301,7 +311,8 @@ export class OrlaPhase {
         const duration = problem.id === 'sensor-failure' ? 1.25 : problem.id === 'ev-charger-repair' ? 1.2 : 1.5;
         const serviceLabel = problem.id === 'sensor-failure' ? 'Instalando sensor'
           : problem.id === 'ev-charger-repair' ? 'Preparando reparo do carregador' : 'Liberando veículo';
-        this.patch(problem.id, { instruction: `${serviceLabel}: ${Math.min(100, Math.floor(this.service.elapsed / duration * 100))}%. Permaneça no local.` });
+        const serviceProgress = Math.min(100, Math.floor(this.service.elapsed / duration * 10) * 10);
+        this.patch(problem.id, { instruction: `${serviceLabel}: ${serviceProgress}%. Permaneça no local.` });
         if (this.service.elapsed >= duration) {
           this.patch(problem.id, { instruction: problem.id === 'sensor-failure'
             ? 'Sensor preparado. Calibre o equipamento.' : problem.id === 'ev-charger-repair'
@@ -334,7 +345,7 @@ export class OrlaPhase {
     }
     if (player.id === 2) {
       const position = player.position;
-      const bikeTask = suburbanGameState.snapshot().problems.find(problem =>
+      const bikeTask = suburbanGameState.getProblems().find(problem =>
         ['cyclist-assist', 'bike-lane-cleanup'].includes(problem.id)
         && problem.stage === 'active' && problem.status === 'ACTIVE'
         && distance(position, problem.position) <= 1.8);
@@ -377,7 +388,7 @@ export class OrlaPhase {
       }
       return;
     }
-    const nearby = suburbanGameState.snapshot().problems.filter(problem => problem.stage === 'active'
+    const nearby = suburbanGameState.getProblems().filter(problem => problem.stage === 'active'
       && problem.status === 'ACTIVE' && problem.requiredTeams?.includes('infraestrutura')
       && distance(player.position, this.serviceTarget(problem)) <= 1.6)
       .sort((a, b) => distance(player.position, this.serviceTarget(a)) - distance(player.position, this.serviceTarget(b)))[0];
@@ -447,6 +458,7 @@ export class OrlaPhase {
         this.rescueTarget = progress.pending;
         this.traffic.applyMobilityAction(roadId, 'release');
         this.traffic.setCrossingGuarded(true);
+        this.pedestrians.setWalkerSpawningPaused(true);
         this.pedestrians.setRoadBatchHold(false);
         this.rescueProtected = true;
         this.pedestrians.startWorkerCrossing();
@@ -456,10 +468,12 @@ export class OrlaPhase {
       if (action === 'release') {
         const workerPosition = this.pedestrians.getWorkerRescuePosition();
         const progress = this.pedestrians.getCrossingProgress();
-        const pedestriansSafe = progress.crossed >= this.rescueBaseline + this.rescueTarget && !progress.occupied && progress.waiting === 0;
+        const pedestriansSafe = progress.crossed >= this.rescueBaseline + this.rescueTarget
+          && progress.pending === 0 && !progress.occupied && progress.waiting === 0;
         if (this.completedSteps.has(701) && this.pedestrians.getWorkerRescueState() === 'safe' && workerPosition && pedestriansSafe) {
           this.traffic.setCrossingGuarded(false);
           this.traffic.setAssistedCrossingRequested(false);
+          this.pedestrians.setWalkerSpawningPaused(false);
           this.pedestrians.setRoadBatchHold(true);
           this.traffic.applyMobilityAction(roadId, 'release');
           this.resolve(rescue.id, 702);
@@ -493,14 +507,18 @@ export class OrlaPhase {
         this.crossingProtected = true;
         this.traffic.applyMobilityAction(roadId, 'release');
         this.traffic.setCrossingGuarded(true);
+        this.pedestrians.setWalkerSpawningPaused(true);
         this.pedestrians.setRoadBatchHold(false);
+        this.pedestrians.setCrossingIncident(false);
         return true;
       }
       if (action === 'release') {
         const progress = this.pedestrians.getCrossingProgress();
-        if (this.completedSteps.has(201) && this.completedSteps.has(601) && !progress.occupied) {
+        if (this.completedSteps.has(201) && this.completedSteps.has(601)
+          && progress.pending === 0 && progress.waiting === 0 && !progress.occupied) {
           this.traffic.setCrossingGuarded(false);
           this.traffic.setUnsafeCrossing(false); this.pedestrians.setCrossingIncident(false);
+          this.pedestrians.setWalkerSpawningPaused(false);
           this.pedestrians.setRoadBatchHold(false); this.crossingProtected = false;
           this.traffic.applyMobilityAction(roadId, 'release');
           this.resolve(crossing.id, 202);
@@ -517,12 +535,12 @@ export class OrlaPhase {
     }
     const chargerIssue = this.problem('ev-charger-repair');
     if (action === 'electricDetour' && chargerIssue?.status === 'ACTIVE' && chargerIssue.stage === 'warning') {
-      this.patch(chargerIssue.id, { instruction: 'Aguarde o chamado ser liberado pelas equipes antes de desviar os elétricos.' });
+      this.patch(chargerIssue.id, { instruction: 'Aguarde o chamado ser liberado pelas equipes. Depois, use a Habilidade 4 (tecla 4) para desviar os elétricos.' });
       return true;
     }
     if (action === 'electricDetour' && chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
       && this.completedSteps.has(901) && this.traffic.isElectricDiversionActive()) {
-      this.patch(chargerIssue.id, { instruction: 'Desvio mantido. Infraestrutura: repare o carregador para liberar a avenida verde.' });
+      this.patch(chargerIssue.id, { instruction: 'Habilidade 4 ativa: elétricos desviados. Infraestrutura: repare o carregador para liberar a avenida verde.' });
       return true;
     }
     this.traffic.applyMobilityAction(roadId, action);
@@ -530,9 +548,9 @@ export class OrlaPhase {
       if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
         && this.traffic.isElectricChargerBroken() && this.traffic.isElectricDiversionActive()) {
         this.step(chargerIssue.id, 901);
-        this.patch(chargerIssue.id, { instruction: 'Elétricos desviados para as vias comuns. Infraestrutura: aproxime-se do carregador e use E para iniciar o reparo.' });
+        this.patch(chargerIssue.id, { instruction: 'Habilidade 4 concluída: elétricos desviados para as vias comuns. Infraestrutura: aproxime-se do carregador e use E para iniciar o reparo.' });
       } else if (chargerIssue?.stage === 'active' && this.traffic.isElectricChargerBroken()) {
-        this.patch(chargerIssue.id, { instruction: 'Mantenha o desvio dos elétricos ativo com a tecla 4 enquanto o carregador estiver quebrado.' });
+        this.patch(chargerIssue.id, { instruction: 'Mantenha a Habilidade 4 ativa enquanto o carregador estiver quebrado.' });
       }
     }
     return true;
@@ -551,10 +569,11 @@ export class OrlaPhase {
   }
 
   guidance(player: Player): { target: Point | null; prompt: string | null } {
-    const problem = this.objective(player);
+    const problems = suburbanGameState.getProblems();
+    const problem = this.objective(player, problems, suburbanGameState.selectedProblemId);
     const held = this.items.heldBy(2) === 'cone';
     const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
-    const crossing = player.id === 2 ? this.problem('traffic-signal-failure') : undefined;
+    const crossing = player.id === 2 ? problems.find(item => item.id === 'traffic-signal-failure') : undefined;
     if (crossing?.stage === 'active' && crossing.status !== 'RESOLVED' && distance(player.position, crossing.position) <= 4) {
       const progress = this.pedestrians.getCrossingProgress();
       const crossed = this.completedSteps.has(201);
@@ -567,15 +586,15 @@ export class OrlaPhase {
               : 'TRAVESSIA SEGURA · AGUARDE O GRUPO ATRAVESSAR';
       return { target: this.targetFor(player, problem), prompt };
     }
-    const chargerIssue = player.id === 2 ? this.problem('ev-charger-repair') : undefined;
+    const chargerIssue = player.id === 2 ? problems.find(item => item.id === 'ev-charger-repair') : undefined;
     if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
       && distance(player.position, chargerIssue.position) <= 5) {
       const prompt = this.traffic.isElectricDiversionActive()
         ? 'DESVIO DOS ELÉTRICOS ATIVO · INFRA VAI REPARAR O CARREGADOR'
-        : 'USE 4 PARA DESVIAR OS ELÉTRICOS PARA A RUA NORMAL';
+        : 'HABILIDADE 4 · USE A TECLA 4 PARA DESVIAR OS ELÉTRICOS';
       return { target: this.targetFor(player, problem), prompt };
     }
-    const bikeTask = player.id === 2 ? suburbanGameState.snapshot().problems.find(item =>
+    const bikeTask = player.id === 2 ? problems.find(item =>
       ['cyclist-assist', 'bike-lane-cleanup', 'bike-lane-cone'].includes(item.id) && item.status === 'ACTIVE') : undefined;
     if (bikeTask && distance(player.position, bikeTask.position) <= (bikeTask.id === 'cyclist-assist' ? 4 : 1.8)) {
       if (bikeTask.id === 'cyclist-assist') {
@@ -602,7 +621,7 @@ export class OrlaPhase {
       && distance(player.position, this.traffic.getIncidentConeTarget()!) <= 1.8) {
       return { target: this.targetFor(player, problem), prompt: 'COLOCAR CONE ANTES DO VEÍCULO' };
     }
-    const near = player.id === 1 ? suburbanGameState.snapshot().problems.find(item => item.stage === 'active'
+    const near = player.id === 1 ? problems.find(item => item.stage === 'active'
       && item.status === 'ACTIVE' && item.requiredTeams?.includes('infraestrutura')
       && distance(player.position, this.serviceTarget(item)) <= 1.6) : null;
     const prompt = near ? near.id === 'broken-light-pole-1' ? 'REPARAR CIRCUITO'
@@ -614,11 +633,10 @@ export class OrlaPhase {
     return { target: this.targetFor(player, problem), prompt };
   }
 
-  private objective(player: Player): UrbanProblem | undefined {
-    const state = suburbanGameState.snapshot();
+  private objective(player: Player, problems: UrbanProblem[], selectedProblemId: string | null): UrbanProblem | undefined {
     const team = player.id === 1 ? 'infraestrutura' : 'mobilidade';
-    const candidates = state.problems.filter(problem => problem.status !== 'RESOLVED' && problem.requiredTeams?.includes(team));
-    return candidates.find(problem => problem.id === state.selectedProblemId) ?? candidates[0];
+    const candidates = problems.filter(problem => problem.status !== 'RESOLVED' && problem.requiredTeams?.includes(team));
+    return candidates.find(problem => problem.id === selectedProblemId) ?? candidates[0];
   }
 
   private targetFor(player: Player, problem?: UrbanProblem): Point | null {
@@ -649,7 +667,7 @@ export class OrlaPhase {
   }
 
   private problem(id: string): UrbanProblem | undefined {
-    return suburbanGameState.snapshot().problems.find(problem => problem.id === id);
+    return suburbanGameState.findProblem(id);
   }
 
   private crossingInstruction(): string {
@@ -667,9 +685,11 @@ export class OrlaPhase {
   }
 
   private patch(id: string, patch: Partial<UrbanProblem>): void {
+    const current = suburbanGameState.findProblem(id);
+    if (!current || Object.entries(patch).every(([key, value]) => current[key as keyof UrbanProblem] === value)) return;
     const problems = suburbanGameState.snapshot().problems;
     const problem = problems.find(item => item.id === id);
-    if (!problem || Object.entries(patch).every(([key, value]) => problem[key as keyof UrbanProblem] === value)) return;
+    if (!problem) return;
     Object.assign(problem, patch);
     suburbanGameState.setProblems(problems);
   }
@@ -692,11 +712,13 @@ export class OrlaPhase {
   }
 
   private updateVisuals(): void {
-    const pole = this.problem('broken-light-pole-1');
+    const problems = suburbanGameState.getProblems();
+    const findProblem = (id: string) => problems.find(problem => problem.id === id);
+    const pole = findProblem('broken-light-pole-1');
     this.pole.setPhaseState(!pole ? 'healthy' : pole.status === 'RESOLVED' ? 'resolved'
       : pole.stage === 'warning' ? 'warning' : pole.status === 'MAINTENANCE' ? 'repairing' : 'broken', this.elapsedMs);
     for (const [id, marker] of this.markers) {
-      const problem = this.problem(id);
+      const problem = findProblem(id);
       marker.visible = !!problem && problem.status !== 'RESOLVED';
       if (!problem) continue;
       marker.position.set(problem.position.x, 0.06, problem.position.z);
@@ -704,14 +726,14 @@ export class OrlaPhase {
       (marker.material as MeshStandardMaterial).color.set(problem.stage === 'warning' ? '#ffbe46'
         : this.elapsedMs - (problem.startedAtMs ?? 0) > 35_000 ? '#ff6559' : '#ffc85e');
     }
-    const coneTask = this.problem('bike-lane-cone');
+    const coneTask = findProblem('bike-lane-cone');
     this.bikeLaneCone.visible = !!coneTask && coneTask.stage === 'active' && coneTask.status === 'ACTIVE'
       && this.items.heldBy(2) !== 'cone';
     if (coneTask) this.bikeLaneCone.position.set(coneTask.position.x, 0, coneTask.position.z);
-    const sensor = this.problem('sensor-failure');
+    const sensor = findProblem('sensor-failure');
     this.sensorMaterial.color.set(!sensor || sensor.status === 'RESOLVED' ? '#69dfb0'
       : sensor.stage === 'warning' && Math.floor(this.elapsedMs / 220) % 2 === 0 ? '#ffc85e' : '#ed675a');
-    const signal = this.problem('traffic-signal-failure');
+    const signal = findProblem('traffic-signal-failure');
     const signalBroken = !!signal && signal.status !== 'RESOLVED';
     this.traffic.setSignalFailure(signalBroken);
     this.signalFx.visible = signalBroken && !this.signalRepairCompleted;
@@ -721,7 +743,7 @@ export class OrlaPhase {
       spark.position.x = Math.cos(phase) * (.32 + (index % 2) * .22);
       spark.position.y = Math.sin(phase * .8) * .38;
     });
-    const collision = this.problem('minor-collision');
+    const collision = findProblem('minor-collision');
     this.crash.visible = !!collision && collision.status !== 'RESOLVED' && collision.stage === 'active';
     if (collision) this.crash.position.set(collision.position.x, 0, collision.position.z);
     this.smoke.forEach((puff, index) => {
@@ -759,10 +781,10 @@ export class OrlaPhase {
     this.pedestrians.setRoadBatchHold(false);
     this.traffic.setAssistedCrossingRequested(false);
     this.ringGeometry.dispose(); this.boxGeometry.dispose(); this.antennaGeometry.dispose();
+    this.sparkGeometry.dispose(); this.sparkMaterial.dispose();
     this.warningMaterial.dispose(); this.sensorMaterial.dispose(); this.bikeConeMaterial.dispose(); this.bikeConeBandMaterial.dispose();
     this.bikeLaneCone.traverse(object => { if (object instanceof Mesh) object.geometry.dispose(); });
     this.markerMaterials.forEach(material => material.dispose());
-    this.signalFx.traverse(object => { if (object instanceof Mesh) (object.material as MeshStandardMaterial).dispose(); });
     if (this.signalBubble) { (this.signalBubble.material as SpriteMaterial).map?.dispose(); (this.signalBubble.material as SpriteMaterial).dispose(); }
     if (this.crashBubble) { (this.crashBubble.material as SpriteMaterial).map?.dispose(); (this.crashBubble.material as SpriteMaterial).dispose(); }
     if (this.rescueBubble) { (this.rescueBubble.material as SpriteMaterial).map?.dispose(); (this.rescueBubble.material as SpriteMaterial).dispose(); }

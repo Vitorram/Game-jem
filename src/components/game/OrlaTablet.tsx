@@ -167,7 +167,7 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
             {requiredTeams.map(team => {
               const dispatched = issue?.dispatchedTeams.includes(team.id) ?? false;
               const taskLabel = issue?.id === 'ev-charger-repair'
-                ? team.id === 'mobilidade' ? 'DESVIAR ELÉTRICOS' : 'REPARAR CARREGADOR'
+                ? team.id === 'mobilidade' ? 'HABILIDADE 4 · DESVIAR ELÉTRICOS' : 'REPARAR CARREGADOR'
                 : team.short;
               return <div className={`tablet-team ${team.color}${dispatched ? ' is-dispatched' : ''}`} key={team.id}>
                 <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : taskLabel}</small></span>

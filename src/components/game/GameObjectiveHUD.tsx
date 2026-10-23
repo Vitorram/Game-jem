@@ -13,19 +13,10 @@ function useWorld() {
   return world;
 }
 
-function useRoads() {
-  const [roads, setRoads] = useState<RoadState[]>(() => suburbanGameState.snapshot().roads);
-  useEffect(() => {
-    const timer = window.setInterval(() => setRoads(suburbanGameState.snapshot().roads), 350);
-    return () => window.clearInterval(timer);
-  }, []);
-  return roads;
-}
-
 export default function GameObjectiveHUD({ player, distance, tutorialTarget = false }: { player: PlayerId; distance: number | null; tutorialTarget?: boolean }) {
   const world = useWorld();
   const problem = world.problems[0];
-  const roads = useRoads();
+  const roads: RoadState[] = world.roads;
   if (world.phase) {
     const crossing = world.problems.find(item => item.id === 'traffic-signal-failure');
     const returnToMobility = crossing?.instruction?.includes('Troque para Mobilidade');

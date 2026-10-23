@@ -145,7 +145,19 @@ export class Game {
       const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, type => this.openRepairPuzzle(type), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
       this.scenes.setScene(orla);
       this.session = new GameSession(ORLA_SESSION_CONFIG);
-      sessionStore.bind(this.session, () => this.restartPhase(), (id, continuePhase) => orla.expirePhaseOrder(id, continuePhase), () => {
+      sessionStore.bind(this.session, () => this.restartPhase(), (id, continuePhase) => {
+        orla.expirePhaseOrder(id, continuePhase);
+        const puzzleOrders: Record<RepairPuzzleType, string> = {
+          pole: 'broken-light-pole-1', signal: 'traffic-signal-failure', sensor: 'sensor-failure',
+          car: 'minor-collision', 'signal-check': 'signal-check', charger: 'ev-charger-repair',
+        };
+        if (this.repairPuzzleOpen && puzzleOrders[this.activeRepairType] === id) {
+          this.repairPuzzleOpen = false;
+          orla.setTutorialMovementEnabled(true);
+          orla.setTutorialCollisionProtection(false);
+          this.onRepairPuzzleChange?.(false);
+        }
+      }, () => {
         if (this.status === 'playing') this.togglePause();
       });
       sessionStore.start();
@@ -572,11 +584,12 @@ export class Game {
 
     const currentScene = this.scenes.current;
     if (this.status === 'playing' && currentScene instanceof Fase1OrlaScene && !this.mandatoryTutorialActive) {
-      const problems = suburbanGameState.snapshot().problems;
+      const problems = suburbanGameState.getProblems();
       const incoming = problems.find(problem => problem.status !== 'RESOLVED' && !this.observedCallIds.has(problem.id));
       problems.forEach(problem => this.observedCallIds.add(problem.id));
       if (incoming) {
         this.pendingTabletOpen = true;
+        if (currentScene.phaseIsCinematic() && currentScene.player.id === 3) this.selectPlayer(2);
       }
       if (this.pendingTabletOpen && !currentScene.phaseIsCinematic()) {
         this.pendingTabletOpen = false;
@@ -586,7 +599,7 @@ export class Game {
     if (this.status === 'playing' && currentScene instanceof Fase1OrlaScene
       && currentScene.player.role !== 'analista'
       && !currentScene.phaseIsCinematic()
-      && suburbanGameState.snapshot().problems.some(problem => problem.status === 'RESOLVED')) {
+      && suburbanGameState.getProblems().some(problem => problem.status === 'RESOLVED')) {
       this.selectPlayer(3);
     }
 

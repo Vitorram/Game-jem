@@ -1,5 +1,5 @@
 import {
-  BoxGeometry, BufferGeometry, Group, MathUtils, Mesh, MeshStandardMaterial,
+  BoxGeometry, BufferGeometry, Group, Mesh, MeshStandardMaterial,
 } from 'three';
 import type { GridMap } from '../map/GridMap';
 import { WORK_ZONE_CLEARANCE, type TrafficSystem } from './TrafficSystem';
@@ -61,6 +61,7 @@ export class ActiveMobilitySystem {
   private crossedPedestrians = 0;
   private holdRoadBatches = false;
   private drainRoadQueue = false;
+  private walkerSpawningPaused = false;
 
   setRoadBatchHold(hold: boolean): void {
     this.holdRoadBatches = hold;
@@ -70,8 +71,9 @@ export class ActiveMobilitySystem {
   setCrossingIncident(active: boolean): void {
     if (active && !this.crossingIncident) this.spawnWalkerTimer = 0;
     this.crossingIncident = active;
-    if (!active) this.drainRoadQueue = false;
   }
+
+  setWalkerSpawningPaused(paused: boolean): void { this.walkerSpawningPaused = paused; }
 
   getCrossingProgress(): { waiting: number; pending: number; crossed: number; occupied: boolean } {
     return { waiting: this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road').length,
@@ -112,7 +114,7 @@ export class ActiveMobilitySystem {
     return this.injuredWorker ? { x: this.injuredWorker.x, z: this.injuredWorker.z } : null;
   }
 
-  constructor(private readonly map: GridMap, private readonly traffic: TrafficSystem) {
+  constructor(map: GridMap, private readonly traffic: TrafficSystem) {
     this.group.name = 'cycleway-and-pedestrians';
     this.minX = -map.width / 2 + 1;
     this.maxX = map.width / 2 - 1;
@@ -287,8 +289,8 @@ export class ActiveMobilitySystem {
       this.spawnCycleTimer = 3.8 + this.random() * 3.6;
     }
     const drainingStoppedQueue = this.drainRoadQueue && this.traffic.isCrossingGuarded();
-    if (!drainingStoppedQueue) this.spawnWalkerTimer -= dt;
-    if (!drainingStoppedQueue && this.spawnWalkerTimer <= 0) {
+    if (!drainingStoppedQueue && !this.walkerSpawningPaused) this.spawnWalkerTimer -= dt;
+    if (!drainingStoppedQueue && !this.walkerSpawningPaused && this.spawnWalkerTimer <= 0) {
       this.spawnWalker(this.crossingIncident ? CROSSING_X - 3.2 : this.minX + 0.55);
       this.spawnWalkerTimer = this.crossingIncident ? 2.3 : 5.5 + this.random() * 5.5;
     }

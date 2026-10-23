@@ -66,22 +66,13 @@ const CONE_LOOKAHEAD = 9;
 const CONE_STOP_DISTANCE = VEHICLE_LENGTH / 2 + 0.3;
 const CROSSING_STOP_DISTANCE = 2.45;
 const CROSSING_BRAKE_DISTANCE = 7;
-const CROSSING_SAFE_DISTANCE = 2.35;
-const CROSSING_CLEARING_DISTANCE = 1.8;
 /** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
-const PLAYER_HIT_RADIUS = 0.26;
 
 /** Fluxo viário da Orla: avenidas comuns e faixa verde exclusiva para elétricos. */
 export class TrafficSystem {
   readonly group = new Group();
-  private readonly bodyGeometry = new BoxGeometry(VEHICLE_LENGTH, 0.36, VEHICLE_WIDTH);
-  private readonly cabinGeometry = new BoxGeometry(0.62, 0.3, 0.46);
-  private readonly wheelGeometry = new CylinderGeometry(0.1, 0.1, 0.08, 10);
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.14, 0.84);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
-  private readonly materials = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84']
-    .map(color => new MeshStandardMaterial({ color, roughness: 0.72 }));
-  private readonly dark = new MeshStandardMaterial({ color: '#20272c', roughness: 0.9 });
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
   private readonly chargerBodyMaterial = new MeshStandardMaterial({ color: '#e6f0e7', roughness: 0.55 });
   private readonly chargerScreenMaterial = new MeshStandardMaterial({ color: '#385b68', emissive: '#16353d', roughness: 0.4 });
@@ -111,7 +102,6 @@ export class TrafficSystem {
   private electricSpawnClock = 7;
   private electricSpawnIndex = 0;
   private mobilityView = false;
-  private pedestrianCrossingRequested = false;
   private waitingPedestrians = 0;
   private pedestrianCrossingOccupied = false;
   private crossingSignalPhase: 'green' | 'yellow' | 'red' = 'green';
@@ -134,6 +124,7 @@ export class TrafficSystem {
   private readonly vehicleModels = new VehicleModels();
   private spawnedCount = 0;
   private disposed = false;
+  private roadStatePublishElapsed = 0;
 
   constructor(map: GridMap) {
     this.group.name = 'traffic-flow';
@@ -158,8 +149,7 @@ export class TrafficSystem {
       this.spawnTimers.set(lane.id, 1.4 + laneIndex * 0.65);
       for (let index = 0; index < INITIAL_VEHICLES_PER_LANE; index++) {
         const vehicleIndex = laneIndex * INITIAL_VEHICLES_PER_LANE + index;
-        const material = this.materials[vehicleIndex % this.materials.length];
-        const mesh = this.makeVehicle(material);
+        const mesh = this.makeVehicle();
         const startFraction = [0.2, 0.42, 0.63, 0.83][laneIndex % 4];
         const start = this.minX + this.width * startFraction;
         mesh.position.set(start, 0.27, lane.z);
@@ -176,7 +166,7 @@ export class TrafficSystem {
     this.spawnElectricVehicle(greenLane, this.minX + 13, 1);
     this.electricSpawnIndex = 2;
     this.setMobilityView(false);
-    this.publishRoadState();
+    this.publishRoadState(true);
   }
 
   private createLane(id: string, direction: 1 | -1, z: number, type: Lane['type'], capacity: number, priority: number, initialStatus: Lane['status'] = 'open'): Lane {
@@ -258,7 +248,7 @@ export class TrafficSystem {
     charger.statusMaterial.emissive.set(broken ? '#7a201a' : '#246b42');
     charger.statusMaterial.emissiveIntensity = broken ? 1.8 : 1.1;
     this.electricDetour = false;
-    this.publishRoadState();
+    this.publishRoadState(true);
   }
 
   isElectricChargerBroken(): boolean {
@@ -275,7 +265,7 @@ export class TrafficSystem {
 
   setElectricDiversion(enabled: boolean): void {
     this.electricDetour = enabled;
-    this.publishRoadState();
+    this.publishRoadState(true);
   }
 
   isElectricDiversionActive(): boolean { return this.electricDetour; }
@@ -383,10 +373,22 @@ export class TrafficSystem {
     return cone ? { x: cone.x, z: cone.lane.z } : null;
   }
 
-  resetTutorialInterventions(): void {
+  resetRoadInterventions(): void {
     for (const cone of [...this.cones]) this.removeCone(cone);
-    this.applyMobilityAction('orla-eastbound', 'release');
+    this.lanes.forEach(lane => {
+      lane.status = 'open';
+      lane.direction = lane.normalDirection;
+      this.syncLaneVisual(lane);
+    });
+    this.vehicles.forEach(vehicle => {
+      vehicle.laneChangeFromZ = vehicle.lane.z;
+      vehicle.laneChangeElapsed = LANE_CHANGE_DURATION;
+      vehicle.mesh.position.z = vehicle.lane.z;
+      vehicle.mesh.rotation.y = vehicle.lane.direction === 1 ? 0 : Math.PI;
+    });
+    this.electricDetour = false;
     this.running = true;
+    this.publishRoadState(true);
   }
 
   getPlayerCollision(position: { x: number; z: number }, radius = 0.34): { x: number; z: number } | null {
@@ -397,7 +399,6 @@ export class TrafficSystem {
       .sort((a, b) => Math.hypot(a.mesh.position.x - position.x, a.mesh.position.z - position.z)
         - Math.hypot(b.mesh.position.x - position.x, b.mesh.position.z - position.z))[0];
     if (!impact) return null;
-    const dx = position.x - impact.mesh.position.x;
     const dz = position.z - impact.mesh.position.z;
     const push = { x: impact.lane.direction * 0.8, z: dz >= 0 ? 1 : -1 };
     const length = Math.hypot(push.x, push.z) || 1;
@@ -439,7 +440,7 @@ export class TrafficSystem {
     cone.castShadow = true;
     lane.coneGroup.add(cone);
     this.cones.push({ lane, mesh: cone, x: coneX });
-    this.publishRoadState();
+    this.publishRoadState(true);
     return true;
   }
 
@@ -448,7 +449,7 @@ export class TrafficSystem {
       .filter(candidate => candidate.distance <= radius).sort((a, b) => a.distance - b.distance)[0]?.cone;
     if (!nearest) return false;
     this.removeCone(nearest);
-    this.publishRoadState();
+    this.publishRoadState(true);
     return true;
   }
 
@@ -563,7 +564,7 @@ export class TrafficSystem {
     }
     if (action === 'electricDetour') this.electricDetour = !this.electricDetour;
     this.lanes.forEach(candidate => this.syncLaneVisual(candidate));
-    this.publishRoadState();
+    this.publishRoadState(true);
   }
 
   private removeCone(cone: ConeObstacle): void {
@@ -576,7 +577,7 @@ export class TrafficSystem {
   toggleRunning(): boolean {
     this.running = !this.running;
     if (!this.running) this.vehicles.forEach(vehicle => { vehicle.speed = 0; });
-    this.publishRoadState();
+    this.publishRoadState(true);
     return this.running;
   }
 
@@ -587,7 +588,6 @@ export class TrafficSystem {
    */
   setPedestrianCrossingState(waiting: number | boolean, occupied: boolean): void {
     this.waitingPedestrians = typeof waiting === 'number' ? waiting : waiting ? CROSSING_RULES.roadGroupSize : 0;
-    this.pedestrianCrossingRequested = typeof waiting === 'number' ? waiting > 0 : waiting;
     this.pedestrianCrossingOccupied = occupied;
   }
 
@@ -667,8 +667,7 @@ export class TrafficSystem {
     });
     if (!entryIsClear) return false;
 
-    const vehicleIndex = this.vehicles.length;
-    const mesh = this.makeVehicle(this.materials[vehicleIndex % this.materials.length]);
+    const mesh = this.makeVehicle();
     mesh.position.set(entryX, 0.27, lane.z);
     mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
     this.group.add(mesh);
@@ -688,7 +687,7 @@ export class TrafficSystem {
     const sequence = this.electricSpawnIndex++;
     const kind: VehicleKind = sequence % 2 === 0 ? 'ev-sedan' : 'ev-crossover';
     const colors = ['#f2f1e8', '#86c4b0'] as const;
-    const mesh = this.makeVehicle(this.materials[sequence % this.materials.length], kind, colors[sequence % colors.length]);
+    const mesh = this.makeVehicle(kind, colors[sequence % colors.length]);
     const greenLane = this.lanes.find(candidate => candidate.type === 'GREEN')!;
     const chargeTargetIndex = targetIndex ?? sequence % this.chargers.length;
     mesh.position.set(entryX, 0.27, lane.z);
@@ -735,6 +734,7 @@ export class TrafficSystem {
   update(delta: number): void {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, 0.05);
+    this.roadStatePublishElapsed += dt;
     this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
     this.incidentTime += dt;
@@ -759,11 +759,6 @@ export class TrafficSystem {
         || (!this.unsafeCrossing && this.waitingPedestrians > 0);
       const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
-      const clearingCrosswalk = crossingDistance <= CROSSING_CLEARING_DISTANCE;
-      const crossingBrake = carsYield && this.crossingSignalPhase !== 'green' && !clearingCrosswalk
-        ? this.getCrossingBrake(vehicle) : 1;
-      const atCrossingStopLine = carsYield && this.crossingSignalPhase !== 'green' && !clearingCrosswalk
-        && crossingDistance <= CROSSING_STOP_DISTANCE;
       const playerBrake = this.getPlayerBrake(vehicle);
       const laneAvailable = vehicle.lane.status === 'open';
       let targetSpeed = this.running && laneAvailable && !this.signalFailure && !charging.stopped
@@ -800,12 +795,6 @@ export class TrafficSystem {
     if (Math.abs(player.z - vehicle.mesh.position.z) > 0.75) return 1;
     const distance = (player.x - vehicle.mesh.position.x) * vehicle.lane.direction;
     if (distance <= 0 || distance >= CROSSING_BRAKE_DISTANCE) return 1;
-    return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
-  }
-
-  private getCrossingBrake(vehicle: Vehicle): number {
-    const distance = this.distanceToPoint(vehicle.mesh.position.x, this.pedestrianCrossingX, vehicle.lane.direction);
-    if (distance >= CROSSING_BRAKE_DISTANCE) return 1;
     return MathUtils.clamp((distance - CROSSING_STOP_DISTANCE) / (CROSSING_BRAKE_DISTANCE - CROSSING_STOP_DISTANCE), 0, 1);
   }
 
@@ -985,7 +974,7 @@ export class TrafficSystem {
     return nearest;
   }
 
-  private makeVehicle(bodyMaterial: MeshStandardMaterial, requestedKind?: VehicleKind, requestedColor?: string): Group {
+  private makeVehicle(requestedKind?: VehicleKind, requestedColor?: string): Group {
     const vehicle = new Group();
     vehicle.name = 'traffic-vehicle';
     const seqIndex = this.spawnedCount++;
@@ -997,34 +986,23 @@ export class TrafficSystem {
     model.group.scale.setScalar(VEHICLE_VISUAL_SCALE[kind]);
     model.group.position.y = -0.27;
     vehicle.add(model.group);
-    void bodyMaterial;
     return vehicle;
   }
 
-  private makeLegacyVehicle(bodyMaterial: MeshStandardMaterial): Group {
-    const vehicle = new Group();
-    vehicle.name = 'traffic-vehicle';
-    const body = new Mesh(this.bodyGeometry, bodyMaterial);
-    body.castShadow = true; body.receiveShadow = true; vehicle.add(body);
-    const cabin = new Mesh(this.cabinGeometry, bodyMaterial);
-    cabin.position.set(-0.08, 0.29, 0); cabin.castShadow = true; vehicle.add(cabin);
-    for (const x of [-0.42, 0.42]) for (const z of [-0.26, 0.26]) {
-      const wheel = new Mesh(this.wheelGeometry, this.dark);
-      wheel.rotation.x = Math.PI / 2; wheel.position.set(x, -0.13, z); vehicle.add(wheel);
-    }
-    return vehicle;
+  private publishRoadState(force = false): void {
+    if (!force && this.roadStatePublishElapsed < 0.1) return;
+    this.roadStatePublishElapsed = 0;
+    suburbanGameState.setRoads(this.getRoadStates());
   }
-
-  private publishRoadState(): void { suburbanGameState.setRoads(this.getRoadStates()); }
 
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     this.vehicleModels.dispose();
-    [this.bodyGeometry, this.cabinGeometry, this.wheelGeometry, this.barrierGeometry, this.coneGeometry, this.directionGeometry,
+    [this.barrierGeometry, this.coneGeometry, this.directionGeometry,
       this.chargerBaseGeometry, this.chargerBodyGeometry, this.chargerScreenGeometry, this.chargerStatusGeometry, this.chargerPlugGeometry,
       this.chargerCableGeometry, this.chargeSegmentGeometry].forEach(geometry => geometry.dispose());
-    [...this.materials, this.dark, this.barrierMaterial, this.chargerBodyMaterial, this.chargerScreenMaterial, this.chargerCableMaterial,
+    [this.barrierMaterial, this.chargerBodyMaterial, this.chargerScreenMaterial, this.chargerCableMaterial,
       this.chargeSegmentOnMaterial, this.chargeSegmentOffMaterial, this.directionMaterial, this.greenDirectionMaterial, this.blockedDirectionMaterial]
       .forEach(material => material.dispose());
     this.chargers.forEach(charger => charger.statusMaterial.dispose());

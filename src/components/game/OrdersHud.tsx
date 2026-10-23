@@ -134,6 +134,26 @@ const SUMMARY_MESSAGES = [
   'Orla segura para todas!',
 ];
 
+const END_CREDITS = [
+  { role: 'Visual e história', name: 'Caroline Marrre' },
+  { role: 'Desenvolvimento dos personagens e lógica', name: 'Vitor Ramos' },
+  { role: 'Mapa e elementos do trânsito', name: 'Tiago Vieira' },
+  { role: 'Música, efeitos e cenas', name: 'Pedro Lawal' },
+];
+
+function EndCredits() {
+  return <section className={styles.credits} aria-label="Créditos da fase">
+    <h3>CRÉDITOS</h3>
+    <div className={styles.creditsWindow}>
+      <div className={styles.creditsRoll}>
+        {END_CREDITS.map(credit => <div className={styles.credit} key={credit.role}>
+          <span>{credit.role}</span><b>{credit.name}</b>
+        </div>)}
+      </div>
+    </div>
+  </section>;
+}
+
 function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
@@ -164,6 +184,7 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
           : lost
           ? 'Três missões venceram sem ser concluídas. Cada prazo encerrado tira XP. Jogue novamente e conclua as tarefas antes do tempo acabar.'
           : SUMMARY_MESSAGES[stars]}</p>
+        {allMissionsCompleted && <EndCredits />}
         <dl className={styles.stats}>
           <div><dt>XP</dt><dd>{snapshot.score}</dd></div>
           <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}</dd></div>
