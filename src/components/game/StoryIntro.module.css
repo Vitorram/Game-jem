@@ -82,4 +82,9 @@
   .intro .startButton { margin-top: 22px; }
 }
 
-@media (prefers-reduced-motion: reduce) { .intro * { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) {
+  /* O texto continua sendo revelado pelo relógio do prólogo; removemos apenas
+     efeitos decorativos de CSS que não são necessários para a leitura. */
+  .cursor { animation: none; }
+  .film, .vignette, .exitCurtain { transition: none; }
+}

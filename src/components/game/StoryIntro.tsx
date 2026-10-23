@@ -51,7 +51,9 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
   const beat = SCRIPT[clock.beat];
   const finale = clock.beat === SCRIPT.length - 1;
   const cinema = clock.beat >= 2;
-  const count = reducedMotion ? beat.letters.length : beat.timing.filter(at => at <= clock.time).length;
+  // A digitação do texto é parte da leitura do prólogo, não um movimento de câmera.
+  // Mantemos o efeito mesmo quando o sistema pede movimento reduzido.
+  const count = beat.timing.filter(at => at <= clock.time).length;
   const typed = count === beat.letters.length;
 
   useEffect(() => {

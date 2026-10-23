@@ -36,6 +36,7 @@ type Vehicle = {
   preferredLane: Lane;
   kind: VehicleKind;
   speed: number;
+  crossingCommitted: boolean;
   maxSpeed: number;
   laneChangeFromZ: number;
   laneChangeElapsed: number;
@@ -58,6 +59,8 @@ const VEHICLE_LENGTH = 1.35;
 const VEHICLE_WIDTH = 0.56;
 const SAFE_GAP = 4.2;
 const MIN_BUMPER_GAP = 0.16;
+const TRAFFIC_BRAKING = 4;
+const CROSSING_CAR_CLEARANCE = CROSSING_RULES.roadConflictHalfWidth + VEHICLE_LENGTH / 2;
 const LANE_CHANGE_DURATION = 0.7;
 const LANE_CHANGE_LOOKAHEAD = 9;
 const GREEN_LANE_CAPACITY = 30;
@@ -164,7 +167,7 @@ export class TrafficSystem {
         this.group.add(mesh);
         const maxSpeed = 1.6 + ((vehicleIndex + laneIndex) % 3) * 0.35;
         this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
-          speed: maxSpeed, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
+          speed: maxSpeed, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
           chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
       }
     });
@@ -479,7 +482,8 @@ export class TrafficSystem {
       return {
         id: lane.id,
         direction: lane.direction === lane.normalDirection ? 'NORMAL' : 'REVERSE',
-        status: this.running ? lane.status === 'open' ? 'open' : 'blocked' : 'stopped',
+        status: lane.status === 'blocked' ? 'blocked'
+          : !this.running && vehicles.every(vehicle => vehicle.speed <= CROSSING_RULES.stoppedSpeed) ? 'stopped' : 'open',
         type: lane.type,
         capacity: this.getEffectiveLaneCapacity(lane),
         priority: lane.priority,
@@ -591,7 +595,6 @@ export class TrafficSystem {
 
   toggleRunning(): boolean {
     this.running = !this.running;
-    if (!this.running) this.vehicles.forEach(vehicle => { vehicle.speed = 0; });
     this.publishRoadState(true);
     return this.running;
   }
@@ -623,10 +626,11 @@ export class TrafficSystem {
       const distance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
       // A falha do semáforo pode congelar um carro em cima da faixa. Um carro
       // parado nessa área não deve deixar a travessia presa para sempre.
-      if (Math.abs(vehicle.mesh.position.x - this.pedestrianCrossingX) < CROSSING_RULES.roadConflictHalfWidth) {
+      if (distance >= -CROSSING_CAR_CLEARANCE && distance <= CROSSING_CAR_CLEARANCE) {
         return vehicle.speed <= CROSSING_RULES.stoppedSpeed;
       }
-      return distance < 0 || distance > CROSSING_RULES.roadApproachDistance || vehicle.speed <= CROSSING_RULES.stoppedSpeed;
+      return distance < -CROSSING_CAR_CLEARANCE || distance > CROSSING_RULES.roadApproachDistance
+        || vehicle.speed <= CROSSING_RULES.stoppedSpeed;
     });
   }
 
@@ -688,7 +692,7 @@ export class TrafficSystem {
     this.group.add(mesh);
     const maxSpeed = 1.6 + this.randomTraffic() * 0.7;
     this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
-      speed: 0, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
+      speed: 0, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
       chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
     return true;
   }
@@ -711,7 +715,7 @@ export class TrafficSystem {
     const maxSpeed = 1.7 + this.randomTraffic() * 0.4;
     const chargeRing = this.createChargeRing();
     mesh.add(chargeRing);
-    this.vehicles.push({ mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, maxSpeed,
+    this.vehicles.push({ mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, crossingCommitted: false, maxSpeed,
       laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, chargeTargetIndex,
       chargeElapsed: 0, charging: false, chargeRing });
     return true;
@@ -767,28 +771,39 @@ export class TrafficSystem {
         if (coneAhead || vehicle.lane.status === 'blocked') this.tryChangeLane(vehicle, coneAhead);
         else this.tryReturnToPreferredLane(vehicle);
       }
-      const coneBrake = Number.isFinite(obstructionDistance)
-        ? MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1) : 1;
       const crossingDistance = (this.pedestrianCrossingX - vehicle.mesh.position.x) * vehicle.lane.direction;
       const carsYield = this.guardedCrossing || this.assistedCrossingRequested || this.pedestrianCrossingOccupied
         || (!this.unsafeCrossing && this.waitingPedestrians > 0);
-      const crossingRoom = carsYield && crossingDistance >= CROSSING_RULES.roadStopDistance - .001
+      const crossingStopRequested = !this.running || this.signalFailure || carsYield;
+      const brakingDistance = vehicle.speed * vehicle.speed / (2 * TRAFFIC_BRAKING);
+      if (!vehicle.crossingCommitted && crossingStopRequested && crossingDistance >= -CROSSING_CAR_CLEARANCE
+        && (crossingDistance <= CROSSING_CAR_CLEARANCE
+          || vehicle.speed > KEEP_CLEAR_SPEED && crossingDistance <= CROSSING_RULES.roadStopDistance + brakingDistance)) {
+        vehicle.crossingCommitted = true;
+      }
+      if (vehicle.crossingCommitted && crossingDistance < -CROSSING_CAR_CLEARANCE) vehicle.crossingCommitted = false;
+      const stopBeforeCrossing = crossingStopRequested && crossingDistance >= -CROSSING_CAR_CLEARANCE && !vehicle.crossingCommitted;
+      const crossingRoom = stopBeforeCrossing
         ? Math.max(0, crossingDistance - CROSSING_RULES.roadStopDistance) : Infinity;
+      const coneBrake = vehicle.crossingCommitted || !Number.isFinite(obstructionDistance) ? 1
+        : MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1);
       const keepClearRoom = this.keepClearRoom(vehicle, crossingDistance);
-      const playerBrake = this.getPlayerBrake(vehicle);
+      const playerBrake = vehicle.crossingCommitted ? 1 : this.getPlayerBrake(vehicle);
       // Interditar a pista retém quem ainda vai chegar ao ponto bloqueado; quem já
       // entrou na área de conflito ou passou dela segue até sair do mapa.
       const pastBlock = vehicle.lane.status === 'blocked' && this.blockAnchorX !== null
         && (this.blockAnchorX - vehicle.mesh.position.x) * vehicle.lane.direction < CROSSING_RULES.roadConflictHalfWidth;
-      const laneAvailable = vehicle.lane.status === 'open' || pastBlock;
-      let targetSpeed = this.running && laneAvailable && !this.signalFailure && !charging.stopped
+      const laneAvailable = vehicle.lane.status === 'open' || pastBlock || vehicle.crossingCommitted;
+      let targetSpeed = laneAvailable && !stopBeforeCrossing && !charging.stopped
         ? vehicle.maxSpeed * following * coneBrake * playerBrake * charging.brake : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
-      const stoppedAtCone = Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
-      const room = Math.min(crossingRoom, keepClearRoom, Math.max(0, gap - MIN_BUMPER_GAP), Number.isFinite(obstructionDistance) ? Math.max(0, obstructionDistance - CONE_STOP_DISTANCE) : Infinity,
+      const stoppedAtCone = !vehicle.crossingCommitted && Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
+      const coneRoom = vehicle.crossingCommitted || !Number.isFinite(obstructionDistance)
+        ? Infinity : Math.max(0, obstructionDistance - CONE_STOP_DISTANCE);
+      const room = Math.min(crossingRoom, keepClearRoom, Math.max(0, gap - MIN_BUMPER_GAP), coneRoom,
         charging.stopDistance);
-      const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt);
+      const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt, 1.8, TRAFFIC_BRAKING);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
       vehicle.mesh.position.x += vehicle.lane.direction * travel;

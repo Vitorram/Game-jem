@@ -37,6 +37,8 @@ export class Game {
   }
   private resizeObserver: ResizeObserver;
   private intro?: gsap.core.Tween;
+  private orlaIntro?: gsap.core.Tween;
+  private readonly orlaIntroOffset = { value: 0 };
   private closeView = false;
   get isCloseView(): boolean { return this.closeView; }
   private readonly cameraTarget = new Vector3(0, 0, 0);
@@ -172,6 +174,17 @@ export class Game {
       this.closeView = false;
       this.onPlayerSelected?.(orla.player.id);
       orla.configureCamera(this.camera, this.camera.aspect, this.closeView);
+      // A Orla também recebe a aproximação de câmera na entrada. O deslocamento
+      // é aplicado depois do enquadramento normal para não ser sobrescrito pelo follow.
+      this.orlaIntro?.kill();
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      this.orlaIntroOffset.value = reducedMotion ? 0 : 11;
+      this.orlaIntro = gsap.to(this.orlaIntroOffset, {
+        value: 0,
+        duration: reducedMotion ? 0 : 1.5,
+        ease: 'power2.inOut',
+        onComplete: () => { this.orlaIntro = undefined; },
+      });
       this.changeStatus('playing');
       return;
     }
@@ -297,6 +310,9 @@ export class Game {
     this.onRepairPuzzleChange?.(false);
     this.intro?.kill();
     this.intro = undefined;
+    this.orlaIntro?.kill();
+    this.orlaIntro = undefined;
+    this.orlaIntroOffset.value = 0;
     this.closeView = false;
     if (this.session) sessionStore.unbind(this.session);
     this.session = undefined;
@@ -464,6 +480,10 @@ export class Game {
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) {
       current.updateCamera(this.camera, delta, this.closeView);
+      if (this.orlaIntroOffset.value > 0) {
+        this.camera.position.y += this.orlaIntroOffset.value;
+        this.camera.position.z += this.orlaIntroOffset.value * 0.72;
+      }
       return;
     }
     if (this.intro?.isActive()) return;
@@ -490,8 +510,10 @@ export class Game {
 
     if (status === 'paused') {
       this.intro?.pause();
+      this.orlaIntro?.pause();
     } else {
       this.intro?.resume();
+      this.orlaIntro?.resume();
     }
 
     this.onStatus(status);
@@ -708,6 +730,8 @@ export class Game {
     this.renderer.setAnimationLoop(null);
 
     this.intro?.kill();
+    this.orlaIntro?.kill();
+    this.orlaIntroOffset.value = 0;
 
     this.resizeObserver.disconnect();
 
