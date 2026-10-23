@@ -94,6 +94,13 @@ class SessionStore {
     if (events.length) this.publish(session.snapshot(), events);
   }
 
+  archiveCompleted(definitionId: string): void {
+    const session = this.session;
+    const order = session?.snapshot().orders.find(item => item.definitionId === definitionId);
+    if (!session || !order || order.completedSteps !== order.riskIds.length) return;
+    this.publish(session.snapshot(), session.archiveCompleted(order.id));
+  }
+
   /** Chame uma vez por frame com o tempo real decorrido, em ms (sem o teto da física). */
   tick(deltaMs: number): void {
     const session = this.session;

@@ -19,6 +19,8 @@ export type SessionConfig = {
   orders: readonly OrderDefinition[];
   /** Agenda finita, na mesma ordem do catálogo. Sem repetição nem vitória antecipada. */
   scheduledAtMs?: readonly number[];
+  /** Em campanhas guiadas, só há um chamado e o próximo espera o arquivamento. */
+  sequential?: boolean;
 };
 
 export type ActiveOrder = {
@@ -89,7 +91,7 @@ export class GameSession {
     this.reset();
     this.status = 'playing';
     const events: SessionEvent[] = [{ type: 'status', status: this.status }];
-    if (this.nextArrival() === 0) this.issueOrder(events);
+    if (this.config.sequential || this.nextArrival() === 0) this.issueOrder(events);
     return events;
   }
 
@@ -128,6 +130,10 @@ export class GameSession {
   advance(deltaMs: number): SessionEvent[] {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) throw new Error('Delta de tempo inválido.');
     if (this.status !== 'playing' || deltaMs === 0) return [];
+    if (this.config.sequential) {
+      this.elapsedMs += deltaMs;
+      return [];
+    }
     const target = Math.min(this.config.phaseDurationMs, this.elapsedMs + deltaMs);
     const events: SessionEvent[] = [];
     while (this.elapsedMs < target) {
@@ -166,8 +172,23 @@ export class GameSession {
       const points = order.basePoints + speedBonus;
       this.score += points;
       this.completedOrders++;
-      this.orders.splice(this.orders.indexOf(order), 1);
+      if (!this.config.sequential) this.orders.splice(this.orders.indexOf(order), 1);
       events.push({ type: 'order-completed', orderId, basePoints: order.basePoints, speedBonus, points });
+    }
+    return events;
+  }
+
+  /** Arquiva um chamado concluído e só então libera o próximo da fila. */
+  archiveCompleted(orderId: number): SessionEvent[] {
+    if (!this.config.sequential || this.status !== 'playing') return [];
+    const order = this.orders.find(item => item.id === orderId);
+    if (!order || order.completedSteps !== order.riskIds.length) return [];
+    this.orders.splice(this.orders.indexOf(order), 1);
+    const events: SessionEvent[] = [];
+    if (this.issuedOrders < this.config.orders.length) this.issueOrder(events);
+    else if (this.orders.length === 0) {
+      this.status = 'finished';
+      events.push({ type: 'status', status: this.status });
     }
     return events;
   }

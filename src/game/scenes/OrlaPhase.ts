@@ -16,8 +16,8 @@ const distance = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.z - b.z);
 export class OrlaPhase {
   readonly group = new Group();
   private elapsedMs = 0;
-  private readonly started = new Set<string>();
-  private readonly activated = new Set<string>();
+  private eventIndex = 0;
+  private dispatchStartedAt: number | null = null;
   private readonly completedSteps = new Set<number>();
   private crossingBaseline = 0;
   private crossingProtected = false;
@@ -70,42 +70,66 @@ export class OrlaPhase {
     antenna.position.y = 1;
     this.sensor.add(box, antenna);
     this.group.add(this.sensor);
+    this.issueNext();
     this.publishMetrics();
+  }
+
+  teamDispatched(): void {
+    const event = ORLA_EVENTS[this.eventIndex];
+    const problem = event && this.problem(event.id);
+    if (!event || !problem || problem.status === 'RESOLVED'
+      || !event.teams.every(team => problem.dispatchedTeams.includes(team))) return;
+    if (this.dispatchStartedAt === null) {
+      this.dispatchStartedAt = this.elapsedMs;
+      this.patch(event.id, { instruction: event.warning, startedAtMs: this.elapsedMs });
+    }
+  }
+
+  archiveResolved(id: string): boolean {
+    const event = ORLA_EVENTS[this.eventIndex];
+    const problem = event && this.problem(event.id);
+    if (!event || event.id !== id || problem?.status !== 'RESOLVED') return false;
+    suburbanGameState.setProblems(suburbanGameState.snapshot().problems.filter(item => item.id !== id));
+    suburbanGameState.selectProblem(null);
+    this.eventIndex++;
+    this.dispatchStartedAt = null;
+    this.issueNext();
+    return true;
+  }
+
+  private issueNext(): void {
+    const event = ORLA_EVENTS[this.eventIndex];
+    if (!event) return;
+    suburbanGameState.setProblems([{ id: event.id,
+      type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
+      label: event.title, position: { ...event.position }, status: 'ACTIVE', stage: 'warning',
+      requiredTeams: [...event.teams], dispatchedTeams: [],
+      instruction: 'Novo chamado recebido. Analista: confira o relatório e acione a equipe indicada.' }]);
+    suburbanGameState.selectProblem(null);
   }
 
   advance(elapsedMs: number): void {
     this.elapsedMs = elapsedMs;
-    for (const event of ORLA_EVENTS) {
-      if (elapsedMs < event.atMs) continue;
-      if (!this.started.has(event.id)) {
-        this.started.add(event.id);
-        const problems = suburbanGameState.snapshot().problems;
-        problems.push({ id: event.id, type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
-          label: event.title, position: { ...event.position }, status: 'ACTIVE', stage: 'warning',
-          requiredTeams: [...event.teams], dispatchedTeams: [...event.teams],
-          instruction: event.warning, startedAtMs: event.atMs });
-        suburbanGameState.setProblems(problems);
-        if (event.id === 'unsafe-crossing') {
-          this.pedestrians.setCrossingIncident(true);
-          this.traffic.setUnsafeCrossing(true);
-        }
-        if (event.id === 'minor-collision') this.traffic.warnCollision();
+    const event = ORLA_EVENTS[this.eventIndex];
+    const active = event && this.problem(event.id);
+    if (event && active && active.stage === 'warning' && this.dispatchStartedAt !== null
+      && elapsedMs >= this.dispatchStartedAt + event.warningMs) {
+      this.patch(event.id, { stage: 'active', instruction: event.instruction });
+      if (event.id === 'unsafe-crossing') {
+        this.pedestrians.setCrossingIncident(true);
+        this.traffic.setUnsafeCrossing(true);
       }
-      if (elapsedMs >= event.atMs + event.warningMs && !this.activated.has(event.id)) {
-        this.activated.add(event.id);
-        this.patch(event.id, { stage: 'active', instruction: event.instruction });
-        if (event.id === 'minor-collision') {
-          this.traffic.startCollision();
-          const position = this.traffic.getIncidentPosition();
-          if (position) this.patch(event.id, { position });
-        }
+      if (event.id === 'minor-collision') {
+        this.traffic.warnCollision();
+        this.traffic.startCollision();
+        const position = this.traffic.getIncidentPosition();
+        if (position) this.patch(event.id, { position });
       }
     }
     const rush = this.problem('rush-hour');
-    const recovering = elapsedMs >= ORLA_RECOVERY_MS;
-    const rushDemand = rush && rush.status !== 'RESOLVED'
-      ? Math.min(1, 0.2 + (elapsedMs - 150_000) / 18_000) : 0.25;
-    this.traffic.setScheduledDemand(recovering ? 0.05 : rushDemand);
+    const rushDemand = rush && rush.stage === 'active' && rush.status !== 'RESOLVED'
+      ? Math.min(1, 0.35 + (elapsedMs - (rush.startedAtMs ?? elapsedMs)) / 18_000) : 0.2;
+    this.traffic.setScheduledDemand(rushDemand);
     this.publishMetrics();
   }
 
@@ -141,11 +165,12 @@ export class OrlaPhase {
         && (problem.id !== 'minor-collision' || this.traffic.isIncidentProtected());
       if (safe && problem) {
         this.service.elapsed += dt;
-        const duration = problem.id === 'sensor-failure' ? 4 : 3;
+        const duration = problem.id === 'sensor-failure' ? 1.25 : 1.5;
         this.patch(problem.id, { instruction: `${problem.id === 'sensor-failure' ? 'Instalando sensor' : 'Liberando veículo'}: ${Math.min(100, Math.floor(this.service.elapsed / duration * 100))}%. Permaneça no local.` });
         if (this.service.elapsed >= duration) {
-          if (problem.id === 'minor-collision') this.traffic.clearCollision();
-          this.resolve(problem.id, problem.id === 'sensor-failure' ? 401 : 502);
+          this.patch(problem.id, { instruction: problem.id === 'sensor-failure'
+            ? 'Sensor preparado. Calibre o equipamento.' : 'Veículo isolado. Reconecte os sistemas para liberar a faixa.' });
+          this.openRepair(problem.id === 'sensor-failure' ? 'sensor' : 'car');
           this.service = null;
         }
       } else if (problem) {
@@ -162,7 +187,14 @@ export class OrlaPhase {
       const state = suburbanGameState.snapshot();
       const problem = state.problems.find(item => item.id === state.selectedProblemId && item.status !== 'RESOLVED')
         ?? state.problems.find(item => item.status !== 'RESOLVED');
-      if (problem) suburbanGameState.selectProblem(problem.id);
+      if (problem) {
+        suburbanGameState.selectProblem(problem.id);
+        const nextTeam = problem.requiredTeams?.find(team => !problem.dispatchedTeams.includes(team));
+        if (nextTeam) {
+          suburbanGameState.dispatchTeam(problem.id, nextTeam);
+          this.teamDispatched();
+        }
+      }
       return;
     }
     if (player.id === 2) {
@@ -336,7 +368,7 @@ export class OrlaPhase {
 
   private resolve(id: string, step: number): void {
     this.step(id, step);
-    this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência resolvida. Continue acompanhando a Orla.' });
+    this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência resolvida. Volte ao sistema da Analista para arquivar o relatório e receber XP.' });
   }
 
   private publishMetrics(): void {

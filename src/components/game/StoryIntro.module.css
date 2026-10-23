@@ -1,0 +1,85 @@
+.intro {
+  --gold: #e8c77d;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  overflow: hidden;
+  background: #000;
+  color: #f5f5f2;
+  font-family: Arial, Helvetica, sans-serif;
+  isolation: isolate;
+  outline: none;
+}
+
+.intro button { font: inherit; cursor: pointer; }
+.intro button:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
+
+.film { position: absolute; z-index: 0; inset: 0; opacity: 0; background: #000; transition: opacity 1.4s ease; }
+.cinema .film { opacity: 1; }
+.world { position: absolute; inset: 0; overflow: hidden; background: #18282a; }
+.world canvas { display: block; width: 100%; height: 100%; }
+.vignette { position: absolute; z-index: 0; inset: 0; pointer-events: none; background: linear-gradient(180deg, #0009 0%, #0004 42%, #0009 100%); opacity: 0; transition: opacity 1s ease; }
+.cinema .vignette { opacity: 1; }
+.fallback { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(#25393a 0 42%, #bdab82 43% 53%, #353b38 54%); }
+.fallback::before { content: ''; position: absolute; left: 0; right: 0; top: 55%; height: 2px; background: repeating-linear-gradient(90deg, #eee4b5 0 36px, transparent 36px 64px); }
+.fallback i, .fallback b, .fallback span { position: absolute; top: 59%; width: 7vw; height: 3vw; min-width: 48px; min-height: 22px; border-radius: 8px; background: #d26e52; box-shadow: 0 6px 0 #452f2a; }
+.fallback i { left: 48%; transform: rotate(-8deg); }.fallback b { left: 56%; top: 66%; background: #398f78; transform: rotate(4deg); }.fallback span { left: 42%; top: 66%; width: 3px; height: 4vw; min-width: 3px; min-height: 26px; border-radius: 0; background: #e8c77d; }
+
+.topbar {
+  position: absolute;
+  z-index: 2;
+  inset: 14px 4vw auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.signature { display: flex; align-items: center; gap: 10px; color: #d1cec5; font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.signature b { display: grid; place-items: center; width: 23px; height: 23px; border: 1px solid #e8c77d80; color: var(--gold); font-size: 15px; }
+.signature i { width: 1px; height: 12px; margin-left: 3px; background: #444; }
+.signature small { color: #92958e; font-size: 9px; font-weight: 400; }
+.topbar nav { display: flex; gap: 4px; }
+.topbar button, .continue { padding: 8px 10px; border: 1px solid transparent; background: transparent; color: #aeb0ad; font-size: 10px; transition: color .2s; }
+.topbar button:hover, .continue:hover { color: white; }
+.topbar button[aria-pressed="true"] { color: var(--gold); }
+
+.narrative {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  width: min(800px, 78vw);
+  transform: translate(-50%, -50%);
+  animation: narrative-in .85s ease both;
+}
+
+.narrative p { min-height: 4.6em; margin: 0; color: #f5f5f2; font-size: clamp(25px, 3.1vw, 40px); font-weight: 400; line-height: 1.5; letter-spacing: -.035em; white-space: pre-line; }
+.narrative p > span:first-child { padding: .06em .14em; background: rgb(0 0 0 / 78%); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.cursor { display: inline-block; margin-left: 3px; color: #d8c69b; animation: cursor-blink 1s steps(2, start) infinite; }
+.titleReveal { margin: 0 0 24px; animation: title-in 1.2s ease both; }
+.titleReveal h1 { margin: 0; color: #fff5d9; font-size: clamp(43px, 8vw, 88px); font-weight: 700; letter-spacing: -.07em; line-height: 1; }
+.intro .startButton { display: inline-flex; align-items: center; justify-content: space-between; gap: 40px; min-width: 230px; margin-top: 30px; padding: 14px 18px; border: 1px solid #e8c77d; background: #e8c77d; color: #151515; font-size: 12px; font-weight: 700; transition: background .2s; }
+.intro .startButton:hover { background: #f6dfa8; }
+.continue { position: absolute; right: 4vw; bottom: 20px; color: #aeb0ad; }
+.continue span, .startButton span { padding-left: 12px; color: #b49a63; }
+.exitCurtain { position: absolute; z-index: 5; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .6s ease; }
+.exiting .exitCurtain { opacity: 1; pointer-events: auto; }
+
+@keyframes narrative-in { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
+@keyframes cursor-blink { 50% { opacity: 0; } }
+@keyframes title-in { from { opacity: 0; filter: blur(8px); transform: translateY(10px); } to { opacity: 1; filter: blur(0); transform: translateY(0); } }
+
+@media (max-width: 650px) {
+  .topbar { inset: 12px 14px auto; }
+  .signature { gap: 7px; font-size: 9px; }
+  .signature i, .signature small { display: none; }
+  .topbar nav { gap: 0; }
+  .topbar button { padding: 8px 6px; font-size: 9px; }
+  .narrative { width: 82vw; }
+  .narrative p { min-height: 6.4em; font-size: clamp(23px, 6vw, 30px); }
+  .continue { right: 14px; bottom: 12px; }
+  .intro .startButton { margin-top: 22px; }
+}
+
+@media (prefers-reduced-motion: reduce) { .intro * { animation: none !important; transition: none !important; } }

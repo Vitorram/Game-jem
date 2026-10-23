@@ -244,6 +244,7 @@ export class Fase1OrlaScene implements GameScene {
       const selected = state.problems.find(problem => problem.id === state.selectedProblemId);
       if (!selected?.requiredTeams?.includes(team) || selected.dispatchedTeams.includes(team)) return false;
       suburbanGameState.dispatchTeam(selected.id, team);
+      this.phase.teamDispatched();
       return true;
     }
     const pole = suburbanGameState.snapshot().problems.find(problem => problem.id === 'broken-light-pole-1');
@@ -328,6 +329,11 @@ export class Fase1OrlaScene implements GameScene {
     const expectedRole = type === 'crossing' || type === 'traffic' ? 'mobilidade' : 'infraestrutura';
     if (this.disposed || this.player.role !== expectedRole) return;
     this.phase?.completePuzzle(type);
+  }
+
+  archiveResolvedProblem(id: string): boolean {
+    if (this.disposed || this.player.role !== 'analista') return false;
+    return this.phase?.archiveResolved(id) ?? false;
   }
 
   resetPoleAfterTutorialRepair(): void {
@@ -434,7 +440,7 @@ export class Fase1OrlaScene implements GameScene {
     this.activeMobility.update(dt);
     this.phase?.update(dt, this.player);
     const signalFault = suburbanGameState.snapshot().problems.find(problem => problem.id === 'traffic-signal-failure');
-    this.trafficSignals.setFaulty(!!signalFault && signalFault.status !== 'RESOLVED');
+    this.trafficSignals.setFaulty(!!signalFault && signalFault.status !== 'RESOLVED' && signalFault.stage === 'active');
     this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {

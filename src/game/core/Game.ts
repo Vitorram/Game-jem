@@ -315,6 +315,15 @@ export class Game {
     suburbanGameState.selectProblem(id);
   }
 
+  archiveResolvedProblem(id: string): boolean {
+    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    const scene = this.scenes.current;
+    if (!(scene instanceof Fase1OrlaScene) || !scene.archiveResolvedProblem(id)) return false;
+    sessionStore.archiveCompleted(id);
+    this.checkSessionEnd();
+    return true;
+  }
+
   useMobilityHotkey(key: string): boolean {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
@@ -486,6 +495,13 @@ export class Game {
     if (this.status === 'playing') {
       this.scenes.update(delta);
       this.updateCamera(delta);
+    }
+
+    const currentScene = this.scenes.current;
+    if (this.status === 'playing' && currentScene instanceof Fase1OrlaScene
+      && currentScene.player.role !== 'analista'
+      && suburbanGameState.snapshot().problems.some(problem => problem.status === 'RESOLVED')) {
+      this.selectPlayer(3);
     }
 
     const current = this.scenes.current;

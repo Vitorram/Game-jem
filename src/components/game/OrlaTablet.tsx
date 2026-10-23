@@ -45,7 +45,7 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
   const nextTeam = requiredTeams.find(team => !issue?.dispatchedTeams.includes(team.id));
   const resolved = !issue || issue.status === 'RESOLVED';
   const activeCount = problems.filter(problem => problem.status !== 'RESOLVED').length;
-  const actionLabel = resolved ? 'OCORRÊNCIA RESOLVIDA' : !selected ? 'SELECIONE UMA OCORRÊNCIA' : state.phase ? 'MARCAR OBJETIVO DA EQUIPE' : !selectedInGame ? 'CONFIRMAR OCORRÊNCIA' : nextTeam ? `ACIONAR ${nextTeam.label.toLocaleUpperCase('pt-BR')}` : 'EQUIPES ACIONADAS';
+  const actionLabel = resolved ? 'ARQUIVAR CHAMADO · RECEBER XP' : !selected ? 'SELECIONE UMA OCORRÊNCIA' : !selectedInGame ? 'CONFIRMAR OCORRÊNCIA' : nextTeam ? `ACIONAR ${nextTeam.label.toLocaleUpperCase('pt-BR')}` : 'EQUIPES ACIONADAS';
   const infrastructureDispatched = issue?.dispatchedTeams.includes('infraestrutura') ?? false;
   const mobilityDispatched = issue?.dispatchedTeams.includes('mobilidade') ?? false;
 
@@ -132,10 +132,10 @@ export default function OrlaTablet({ onAction, tutorialStep, onTutorialProgress 
               </div>;
             })}
           </div>
-          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={resolved || !selected || (!state.phase && !nextTeam && selectedInGame)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}>
-            <span>{resolved ? '✦' : !selectedInGame ? '◉' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'OK' : 'E'}</kbd>
+          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && !nextTeam && selectedInGame)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}>
+            <span>{resolved ? '✦' : !selectedInGame ? '◉' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : 'E'}</kbd>
           </button>
-          <small className="tablet-action-hint">{resolved ? 'Ocorrência encerrada.' : !selected ? 'Selecione um alerta para iniciar o atendimento.' : !selectedInGame ? 'Confirme a ocorrência para liberar o atendimento.' : 'Acione a próxima equipe para continuar o plano.'}</small>
+          <small className="tablet-action-hint">{resolved ? 'Relatório concluído. Arquive para registrar a experiência e liberar o próximo chamado.' : !selected ? 'Selecione o chamado atual para iniciar o atendimento.' : !selectedInGame ? 'Confirme a ocorrência para liberar o atendimento.' : 'Acione a próxima equipe para continuar o plano.'}</small>
         </div>
       </div>
       <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>

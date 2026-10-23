@@ -209,6 +209,8 @@ const TRAFFIC_INITIAL_PIECES: TrafficPiece[] = [
   { id: 'road-a', row: 4, column: 1, kind: 'straight', rotation: 0 },
   { id: 'road-b', row: 4, column: 2, kind: 'curve', rotation: 0 },
   { id: 'road-c', row: 3, column: 2, kind: 'straight', rotation: 1 },
+  { id: 'road-f', row: 3, column: 3, kind: 'curve', rotation: 0 },
+  { id: 'road-g', row: 2, column: 3, kind: 'straight', rotation: 0 },
   { id: 'road-d', row: 2, column: 2, kind: 'curve', rotation: 0 },
   { id: 'road-e', row: 2, column: 1, kind: 'curve', rotation: 2 },
   { id: 'destination', row: 1, column: 1, kind: 'destination', rotation: 0 },
@@ -239,7 +241,7 @@ function traceTrafficRoute(pieces: TrafficPiece[]): { path: string[]; complete: 
     const next = byCell.get(`${current.row + delta.row},${current.column + delta.column}`);
     if (!next || visited.has(next.id) || !trafficPorts(next).includes(opposite(direction))) return { path, complete: false };
     path.push(next.id);
-    if (next.kind === 'destination') return { path, complete: path.length === pieces.length };
+    if (next.kind === 'destination') return { path, complete: true };
     visited.add(next.id);
     const exit = trafficPorts(next).find(port => port !== opposite(direction));
     if (exit === undefined) return { path, complete: false };
@@ -286,10 +288,12 @@ function TrafficFlowPuzzle({ paused, onComplete, onCancel }: { paused: boolean; 
       ? { ...piece, rotation: (piece.rotation + 1) % 4 } : piece));
   };
   const pieceByCell = new Map(pieces.map(piece => [`${piece.row},${piece.column}`, piece]));
-  const routeIds = new Set(route.path);
+  // O caminho só acende ao chegar à saída: o jogador deduz as conexões pelos trechos.
+  const routeIds = solved ? new Set(route.path) : new Set<string>();
   const labels: Record<TrafficPiece['id'], string> = {
     origin: 'origem do fluxo', 'road-a': 'trecho reto A', 'road-b': 'curva B',
-    'road-c': 'trecho reto C', 'road-d': 'curva D', 'road-e': 'curva E', destination: 'destino do fluxo',
+    'road-c': 'trecho reto C', 'road-d': 'curva D', 'road-e': 'curva E',
+    'road-f': 'curva F', 'road-g': 'trecho reto G', destination: 'destino do fluxo',
   };
 
   return <div className="repair-puzzle-overlay" style={paused ? { display: 'none' } : undefined} role="dialog" aria-modal="true" aria-labelledby="traffic-flow-title">
@@ -318,9 +322,9 @@ function TrafficFlowPuzzle({ paused, onComplete, onCancel }: { paused: boolean; 
         </div>
       </div>
       <div className={`repair-puzzle-status flow-repair-status${solved ? ' is-on' : ''}`} role="status" aria-live="polite">
-        <i className={solved ? 'is-on' : ''} />{solved ? 'ROTA VALIDADA · FLUXO RESTABELECIDO' : route.path.length > 1 ? `Rota conectada parcialmente · ${route.path.length - 1}/6 trechos. Gire as peças destacadas até a saída.` : 'Rota interrompida. Gire os trechos disponíveis para alcançar a saída.'}
+        <i className={solved ? 'is-on' : ''} />{solved ? 'ROTA VALIDADA · FLUXO RESTABELECIDO' : 'Gire os trechos para conectar a origem à saída.'}
       </div>
-      <footer className="repair-puzzle-footer"><span>{solved ? 'SISTEMA OPERACIONAL' : `${Math.max(0, route.path.length - 1)}/6 TRECHOS CONECTADOS`}</span><span>ROTA DE ESCOAMENTO · VIA DE ESCAPE</span></footer>
+      <footer className="repair-puzzle-footer"><span>{solved ? 'FLUXO RESTABELECIDO' : 'TOQUE PARA GIRAR'}</span><span>7 TRECHOS</span></footer>
     </section>
   </div>;
 }

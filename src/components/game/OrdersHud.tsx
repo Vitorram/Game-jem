@@ -5,7 +5,7 @@ import { gsap } from 'gsap';
 import type { SessionEvent, SessionSnapshot } from '@/game/session/GameSession';
 import { sessionStore, starsFor, type SessionView } from '@/game/session/sessionStore';
 import styles from './OrdersHud.module.css';
-import { ORLA_EVENTS, ORLA_EVENT_STEPS, ORLA_RECOVERY_MS } from '@/game/session/orlaEvents';
+import { ORLA_EVENTS, ORLA_EVENT_STEPS } from '@/game/session/orlaEvents';
 import { suburbanGameState, type UrbanProblem } from '@/game/core/GameState';
 
 type HudOrder = SessionSnapshot['orders'][number];
@@ -77,8 +77,8 @@ function Coin({ score }: { score: number }) {
     return () => { tween?.kill(); };
   }, [score]);
   return (
-    <div ref={root} className={styles.coin} role="status" aria-label={`Pontuação: ${score}`}>
-      <span className={styles.coinFace} aria-hidden="true">$</span>
+    <div ref={root} className={styles.coin} role="status" aria-label={`Experiência: ${score} XP`}>
+      <span className={styles.coinFace} aria-hidden="true">XP</span>
       <b>{score}</b>
     </div>
   );
@@ -87,7 +87,7 @@ function Coin({ score }: { score: number }) {
 function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | 'info' } | null {
   switch (event.type) {
     case 'order-completed':
-      return { tone: 'good', text: `Missão cumprida! +${event.points}${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
+      return { tone: 'good', text: `Ocorrência resolvida! +${event.points} XP${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
     case 'order-expired':
       return { tone: 'bad', text: `Prazo encerrado −${event.penalty}` };
     case 'order-arrived':
@@ -146,14 +146,14 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
   return (
     <div ref={root} className={styles.summary} role="dialog" aria-modal="true" aria-label="Fim de fase">
       <div className={styles.card}>
-        <h2>{snapshot.completedOrders === ORLA_EVENTS.length ? 'Orla recuperada!' : 'Fim dos seis minutos'}</h2>
+        <h2>Orla recuperada!</h2>
         <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
           {[1, 2, 3].map(n => <span key={n} className={styles.star} data-on={n <= stars}>★</span>)}
         </div>
         <p className={styles.verdict}>{SUMMARY_MESSAGES[stars]}</p>
         <dl className={styles.stats}>
-          <div><dt>Pontos</dt><dd>{snapshot.score}</dd></div>
-          <div><dt>Missões</dt><dd>{snapshot.completedOrders}</dd></div>
+          <div><dt>XP</dt><dd>{snapshot.score}</dd></div>
+          <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}</dd></div>
           <div><dt>Não concluídas</dt><dd>{snapshot.expiredOrders}</dd></div>
         </dl>
         <button type="button" className={styles.primary} onClick={() => sessionStore.restart()}>Jogar de novo</button>
@@ -177,7 +177,8 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
   if (!snapshot) return null;
 
   const frozen = paused || snapshot.status !== 'playing';
-  const urgent = snapshot.status === 'playing' && snapshot.remainingMs <= 30_000;
+  const urgent = snapshot.status === 'playing' && snapshot.remainingMs > 0 && snapshot.remainingMs <= 30_000;
+  const overtime = Math.max(0, snapshot.elapsedMs - 360_000);
   return (
     <>
       <div className={styles.strip} aria-label="Pedidos da fase">
@@ -187,14 +188,13 @@ export default function OrdersHud({ paused, showDebug = false, onMenu }: { pause
             <Ticket key={order.id} order={order} frozen={frozen} problem={world.problems.find(problem => problem.id === order.definitionId)} />
           ))}
         </ol>
-        <div className={styles.clock} data-urgent={urgent || undefined} role="timer" aria-label="Tempo restante da fase">
-          <span aria-hidden="true">⏱</span> {formatTime(snapshot.remainingMs)}
+        <div className={styles.clock} data-urgent={urgent || undefined} role="timer" aria-label={overtime ? 'Tempo além da meta de seis minutos' : 'Tempo restante da meta de seis minutos'}>
+          <span aria-hidden="true">⏱</span> {overtime ? `+${formatTime(overtime)}` : formatTime(snapshot.remainingMs)}
         </div>
         <div className={styles.phaseStatus} role="status">
-          {snapshot.elapsedMs >= ORLA_RECOVERY_MS
-            ? 'RECUPERAÇÃO · resolva pendências, recolha cones e use 1 para normalizar'
-            : snapshot.elapsedMs < 30_000 ? 'ORLA TRANQUILA · primeiro aviso em 0:30'
-              : `${snapshot.completedOrders}/5 ocorrências resolvidas`}
+          {snapshot.completedOrders === ORLA_EVENTS.length
+            ? 'OPERAÇÃO CONCLUÍDA · todas as ocorrências foram arquivadas'
+            : `CHAMADO ${snapshot.completedOrders + 1}/${ORLA_EVENTS.length} · resolva e arquive para liberar o próximo`}
           {world.phase && <span>{world.phase.waitingPedestrians} pedestres esperando · {world.phase.queuedVehicles} carros na fila</span>}
         </div>
       </div>
