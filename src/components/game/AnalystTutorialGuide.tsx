@@ -107,7 +107,7 @@ export default function AnalystTutorialGuide({ step, onBegin, onComplete, onSkip
       {step === 5 && <button className="analyst-guide-button" onClick={onComplete}>Continuar para Mobilidade <span aria-hidden="true">→</span></button>}
       {isInteractiveStep && <small className="analyst-guide-hint">Use somente o item iluminado para continuar.</small>}
       {(step === 0 || step === 5) && <small className="analyst-guide-required">Esta orientação faz parte do início da fase.</small>}
-      <button type="button" className="analyst-guide-skip" onClick={onSkip}>Pular tutorial</button>
+      <button type="button" className="analyst-guide-skip" aria-keyshortcuts="P" onClick={onSkip}>Pular tutorial <kbd>P</kbd></button>
     </aside>
   </>;
 }

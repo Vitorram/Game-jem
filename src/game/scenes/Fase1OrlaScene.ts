@@ -93,6 +93,7 @@ export class Fase1OrlaScene implements GameScene {
   private readonly cameraTarget = new Vector3();
   private readonly cinematicFocus = new Vector3();
   private readonly cinematicPosition = new Vector3();
+  private readonly followFocus = new Vector3();
   private cameraHeight: number = ORLA_CAMERA.closeHeight;
   private lastObjectiveDistance: number | null = null;
   private missionStep = 0;
@@ -440,15 +441,18 @@ export class Fase1OrlaScene implements GameScene {
     const apron = closeView ? 0 : config.groundApron;
     const halfX = this.map.width / 2 + apron - config.groundPadding;
     const halfZ = this.map.depth / 2 + apron - config.groundPadding;
-    const maxHeight = Math.min(2 * halfX / (maxX - minX), 2 * halfZ / (maxZ - minZ));
+    // Ao sul a calçada andável passa da grade; a câmera precisa poder acompanhar o personagem até lá.
+    const southZ = this.map.depth / 2 + Math.max(apron, this.map.southWalkway + config.southViewMargin) - config.groundPadding;
+    const maxHeight = Math.min(2 * halfX / (maxX - minX), (halfZ + southZ) / (maxZ - minZ));
     const requestedHeight = (closeView ? config.closeHeight : config.wideHeight) * Math.max(1, config.portraitAspect / camera.aspect);
     const height = Math.min(maxHeight, requestedHeight);
     const blend = snap ? 1 : 1 - Math.exp(-config.followSmoothing * Math.max(0, dt));
     this.cameraHeight = Math.min(maxHeight, MathUtils.lerp(this.cameraHeight, height, blend));
-    this.cameraTarget.lerp(this.player.mesh.position, blend);
+    const playerPosition = this.player.mesh.position;
+    this.cameraTarget.lerp(this.followFocus.set(playerPosition.x, playerPosition.y, playerPosition.z + config.followOffsetZ), blend);
     const h = this.cameraHeight;
     this.cameraTarget.x = MathUtils.clamp(this.cameraTarget.x, -halfX - minX * h, halfX - maxX * h);
-    this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, halfZ - maxZ * h);
+    this.cameraTarget.z = MathUtils.clamp(this.cameraTarget.z, -halfZ - minZ * h, southZ - maxZ * h);
     this.cameraTarget.y = 0;
     camera.position.set(this.cameraTarget.x, h, this.cameraTarget.z + h * config.tilt);
     camera.lookAt(this.cameraTarget);

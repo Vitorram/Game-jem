@@ -272,6 +272,10 @@ test('Orla libera os eventos em série nos horários programados e encerra ao co
   assert.equal(game.snapshot().status, 'finished');
 });
 
+test('Orla tolera até 3 chamados expirados; o 4º encerra a fase', () => {
+  assert.equal(ORLA_SESSION_CONFIG.maxExpiredOrders, 4);
+});
+
 test('Orla expira um chamado por vez em série e encerra a fase após o limite de expirações', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
   const { maxExpiredOrders } = ORLA_SESSION_CONFIG;

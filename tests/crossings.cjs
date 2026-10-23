@@ -218,3 +218,26 @@ test('combinação CT-2.2 + CT-2.3: com bloqueios e liberações alternados, nen
     } finally { w.dispose(); }
   }
 });
+
+test('A1: fila cheia na travessia fica na calçada, sem pedestres sobrepostos nem no eixo do grupo', () => {
+  const w = world();
+  try {
+    w.mobility.setCrossingIncident(true);
+    w.mobility.setRoadBatchHold(true);
+    let worstGap = Infinity, maxWaiting = 0;
+    tick(w, 60, () => {
+      const waiting = w.mobility.walkers.filter(p => p.state === 'wait-road');
+      maxWaiting = Math.max(maxWaiting, waiting.length);
+      for (const p of waiting) {
+        assert.ok(p.z > w.mobility.cycleSouthZ + .17, `pedestre esperando sobre a ciclovia (z=${p.z.toFixed(2)})`);
+        assert.ok(p.z < w.mobility.roadNorthEdgeZ - .17, `pedestre esperando na pista (z=${p.z.toFixed(2)})`);
+        assert.ok(Math.abs(p.x - w.traffic.pedestrianCrossingX) > .3, 'quem espera deixa livre o eixo onde o grupo se forma');
+      }
+      for (let i = 0; i < waiting.length; i++) for (let j = i + 1; j < waiting.length; j++) {
+        worstGap = Math.min(worstGap, Math.hypot(waiting[i].x - waiting[j].x, waiting[i].z - waiting[j].z));
+      }
+    });
+    assert.ok(maxWaiting >= 6, `a fila enche durante o incidente (${maxWaiting})`);
+    assert.ok(worstGap >= .45, `pedestres esperando a ${worstGap.toFixed(2)} m uns dos outros`);
+  } finally { w.dispose(); }
+});

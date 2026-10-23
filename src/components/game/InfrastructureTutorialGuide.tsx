@@ -21,19 +21,19 @@ const lessons: Partial<Record<InfrastructureTutorialStep, { eyebrow: string; tit
     eyebrow: 'MECÂNICA · REPARO ELÉTRICO',
     title: 'Abra a oficina do poste',
     body: 'Com o círculo de trabalho livre, pressione E. Na oficina, gire os conectores para levar energia da fonte até a lâmpada. Esta é uma prática: o reparo real ficará para o desafio.',
-    button: 'Entendi · liberar interação',
+    button: 'Entendi',
     key: 'E',
   },
   4: {
     eyebrow: 'HABILIDADE · SENSOR',
     title: 'Instale sensores nos pontos marcados',
-    body: 'Quando aparecer o alerta de monitoramento, siga a seta e pressione E no sensor. Fique perto por quatro segundos para terminar a instalação. Se sair, o serviço pausa e continua ao voltar.',
+    body: 'Quando aparecer o alerta de monitoramento, siga a seta e pressione E no sensor. Fique perto até a instalação terminar. Se sair, o serviço pausa e continua ao voltar.',
     button: 'Próxima habilidade',
   },
   5: {
     eyebrow: 'HABILIDADE · RESPOSTA EM EQUIPE',
     title: 'Libere veículos com segurança',
-    body: 'Na colisão leve, Mobilidade coloca o cone e abre o desvio. Depois, aproxime-se com Infraestrutura, pressione E e permaneça por três segundos para liberar o veículo.',
+    body: 'Na colisão leve, Mobilidade coloca o cone e abre o desvio. Depois, aproxime-se com Infraestrutura, pressione E e permaneça no local até liberar o veículo.',
     button: 'Concluir orientação',
   },
   6: {
@@ -50,8 +50,7 @@ export default function InfrastructureTutorialGuide({ step, onBegin, onContinue,
   const complete = step === 6;
   const progress = step === 0 ? 1 : step === 6 ? 4 : step === 4 ? 2 : step === 5 ? 3 : 2;
   return <>
-    <div className="analyst-guide-scrim mobility-guide-scrim" aria-hidden="true" />
-    <aside className="analyst-guide-card mobility-guide-card" aria-live="polite" aria-label="Tutorial guiado da equipe de Infraestrutura">
+    <aside className="analyst-guide-card mobility-guide-card is-docked" aria-live="polite" aria-label="Tutorial guiado da equipe de Infraestrutura">
       <div className="analyst-guide-head">
         <span className="analyst-guide-avatar infrastructure-guide-avatar" aria-hidden="true">I</span>
         <span><small>{lesson.eyebrow}</small><b>{complete ? 'CONCLUÍDO' : `ETAPA ${progress} DE 4`}</b></span>
@@ -61,8 +60,8 @@ export default function InfrastructureTutorialGuide({ step, onBegin, onContinue,
       <p>{lesson.body}</p>
       {lesson.key && <kbd className="mobility-guide-key">{lesson.key}</kbd>}
       <button className="analyst-guide-button" onClick={step === 0 ? onBegin : complete ? onComplete : onContinue}>{lesson.button} <span aria-hidden="true">→</span></button>
-      <small className="analyst-guide-required">A personagem e o relógio ficam parados nesta instrução.</small>
-      <button type="button" className="analyst-guide-skip" onClick={onSkip}>Pular tutorial</button>
+      <small className="analyst-guide-required">Você pode andar com WASD ou as setas enquanto lê. O relógio só começa depois do treino.</small>
+      <button type="button" className="analyst-guide-skip" aria-keyshortcuts="P" onClick={onSkip}>Pular tutorial <kbd>P</kbd></button>
     </aside>
   </>;
 }

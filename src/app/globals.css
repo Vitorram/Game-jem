@@ -506,6 +506,10 @@ h1 span { color: var(--accent); }
 .is-orla .hud button { background: #fff4d6; color: #4a311c; border: 2px solid #4a311c; box-shadow: 0 3px 0 #4a311c55; }
 .is-orla .character-selector { left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%); flex-direction: row; z-index: 5; gap: 6px; }
 .is-orla .character-selector button { background: #fff4d6; color: #4a311c; border: 2px solid #4a311c; box-shadow: 0 4px 0 #4a311c55; min-height: 46px; }
+.character-selector button.needs-attention { position: relative; outline: 3px solid #f3a139; outline-offset: 2px; animation: analyst-attention .9s ease-in-out infinite alternate; }
+.character-selector button.needs-attention::after { content: '!'; position: absolute; top: -9px; right: -9px; display: grid; place-items: center; width: 20px; height: 20px; border: 2px solid #233d44; border-radius: 50%; background: #f3a139; color: #233d44; font: 1000 12px Arial,sans-serif; }
+@keyframes analyst-attention { from { outline-color: #f3a139; } to { outline-color: #fff1c4; } }
+@media (prefers-reduced-motion: reduce) { .character-selector button.needs-attention { animation: none; } }
 .is-orla .character-selector button[aria-pressed="true"] { background: #ffd35e; transform: translateY(-4px); box-shadow: 0 7px 0 #4a311c55; }
 .is-orla .game-objective-hud { top: 160px; left: 16px; max-width: 320px; padding: 12px; border-radius: 12px; background: #173c42ed; border-left: 4px solid #ffd35e; font-family: inherit; letter-spacing: normal; }
 .is-orla .game-objective-hud b { font-size: 12px; }
@@ -807,6 +811,12 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
 .infrastructure-guide-avatar { background: #5684a3; box-shadow: 0 3px 0 #34576f; }
 .mobility-guide-scrim { inset: 0; width: 100vw; height: 100dvh; background: #030a0df0; backdrop-filter: blur(3px); }
 .mobility-guide-card { top: 50%; left: 50%; width: min(520px, calc(100vw - 24px)); transform: translate(-50%, -50%); }
+/* Cartão do treino encaixado no canto, sem máscara: o jogo continua visível e jogável atrás. */
+.mobility-guide-card.is-docked { top: 78px; left: 16px; width: min(360px, calc(100vw - 32px)); padding: 14px; transform: none; box-shadow: 0 5px 0 #0b202b,0 12px 30px #0006,inset 0 0 0 2px #fff9; }
+.mobility-guide-card.is-docked h2 { margin-top: 10px; font-size: 18px; }
+.mobility-guide-card.is-docked p { font-size: 12px; }
+.mobility-guide-card.is-docked .mobility-guide-key { width: 42px; height: 36px; margin-top: 10px; font-size: 17px; }
+@media (max-width: 560px) { .mobility-guide-card.is-docked { top: 64px; left: 8px; width: calc(100vw - 16px); } }
 .mobility-guide-key { display: grid; width: 52px; height: 45px; margin: 14px auto 0; place-items: center; border: 3px solid #203941; border-radius: 9px; background: #fff8e6; color: #263f45; box-shadow: 0 4px 0 #a07838; font: 1000 21px Arial,sans-serif; }
 .mobility-guide-card .analyst-guide-progress { gap: 3px; }
 .mobility-guide-card .analyst-guide-progress i { width: 12px; }
@@ -822,6 +832,7 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
 .analyst-guide-required { display: block; margin-top: 10px; color: #788174; font: 700 9px Arial,sans-serif; }
 .analyst-guide-skip { display: block; min-height: 36px; margin: 8px 0 0 auto; padding: 6px 10px; border: 2px solid transparent; border-radius: 8px; background: transparent; color: #53665e; font: 1000 10px Arial,sans-serif; letter-spacing: .04em; text-decoration: underline; cursor: pointer; }
 .analyst-guide-skip:hover { color: #203b43; }
+.analyst-guide-skip kbd { margin-left: 4px; padding: 1px 5px; border: 1px solid #788174; border-radius: 4px; font: 1000 9px Arial,sans-serif; text-decoration: none; }
 .analyst-guide-skip:focus-visible { outline: 3px solid #f3a139; outline-offset: 2px; }
 .analyst-guide-button { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 43px; margin-top: 16px; padding: 9px 13px; border: 3px solid #203941; border-radius: 10px; background: #edb94e; color: #233d44; box-shadow: 0 4px 0 #a07838; font: 1000 11px Arial,sans-serif; cursor: pointer; }
 .analyst-guide-button:hover,.analyst-guide-button:focus-visible { outline: 3px solid #f3a139; outline-offset: 3px; transform: translateY(-1px); }

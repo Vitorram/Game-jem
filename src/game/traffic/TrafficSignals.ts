@@ -60,6 +60,9 @@ export class TrafficSignals {
     this.addSignal(-0.74, northCurbZ, 1, -1);
     // Sentido Oeste (carros vêm de +X): pórtico na Calçada Sul, braço sobre pista Oeste, foco para +X
     this.addSignal(2.74, southCurbZ, -1, 1);
+    // Os postes ficam na calçada: pedestres NPC desviam deles como do resto do mobiliário.
+    map.addObstacle(-0.74, northCurbZ, 0.16);
+    map.addObstacle(2.74, southCurbZ, 0.16);
 
     this.syncBulbs(this.phaseIndex());
   }

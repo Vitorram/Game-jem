@@ -244,3 +244,30 @@ Nada abaixo foi implementado. Os testes automatizados estão terminados, e a lis
 14. Commits separados: tráfego e travessia, bug do serviço pausado, regras CT-2.2 a CT-3.2, geometria da avenida, pular tutorial, testes e relatório.
 15. Um script `check` que rode `npm test` e `tsc --noEmit` juntos (os testes removem os tipos).
 16. Trocar ou anotar o `PLANO_DE_TESTES_E_ANALISE_UI_UX.md`, cujo diagnóstico está parcialmente superado.
+
+## 9. Melhorias implementadas (blocos A, B e D)
+
+`npm test`: **120/120**, `tsc --noEmit` limpo. O bloco E ficou de fora a pedido, e o bloco C aguarda decisão.
+
+| Item | O que mudou |
+|---|---|
+| A1 Pedestres empilhados | Fila da avenida em 2 fileiras × 6 colunas dentro da calçada, fora do eixo onde o grupo se forma e longe do poste do semáforo. Cada pedestre mira o lugar livre mais próximo e só reserva ao chegar. Postes de semáforo viraram obstáculos. |
+| A2 Área vazia ao sul | "Frente urbana" fora da área jogável: quarteirão baixo com lojas e toldos, telhados sustentáveis (solar, verde, caixa d'água), árvores de calçada e praça em frente à travessia. Altura limitada para não esconder a avenida. |
+| A3 Barra cobre a avenida | A câmera mira 2 m ao sul do personagem (`followOffsetZ`), e a avenida sobe na tela. |
+| A4 Tablet reabrindo | O jogo leva à Analista uma vez por chamado novo e uma vez por chamado resolvido, sem nunca desfazer uma escolha manual. Pendência fica sinalizada no botão "Analista" com "!", contorno e texto para leitor de tela. |
+| B5 Tutorial sem bloqueio | Mobilidade e Infraestrutura andam livremente em todo o treino. Cartão compacto no canto, sem máscara. Textos com durações antigas corrigidos. Tutorial da Analista mantido. |
+| B6 Acessibilidade | `tests/components.cjs` renderiza componentes com o SWC do Next (sem dependência nova) e checa `aria-live`, botões com nome, cor junto com símbolo e texto, e cliques só em elementos focáveis. |
+| B7 Contraste do pictograma | Raio do carro elétrico passou a âmbar escuro (`#b97400`): 1,39:1 → 3,53:1 sobre o carro. |
+| B8 Atalho de pular | Tecla **P** (Esc segue pausando), com `aria-keyshortcuts`. |
+| D11 Rodadas variadas | Três sementes aleatórias com quadros irregulares e picos de 100–250 ms; sair no meio da partida e recomeçar devolve a Orla limpa. |
+| D12 Alcançabilidade | Com o mobiliário real, saída sul nos dois sentidos e as filas de ciclovia e avenida são alcançáveis a partir de toda a largura do mapa. |
+| D13 Navegador | 2 min no Edge: heap estável em ~30 MB, sem erros nem tarefas longas durante o jogo. O FPS medido usa renderização por CPU e não é representativo. A frente urbana não mudou o FPS no teste A/B. |
+
+**Pendente de decisão (bloco C):** limite de 3 chamados expirados e fim antecipado ao concluir os 10 chamados.
+
+### Ajustes finais
+- **Bloco C decidido:** `maxExpiredOrders` passou de 3 para **4** (o jogador tolera 3 chamados perdidos). O fim antecipado ao concluir os 10 chamados foi mantido.
+- **Calçada sul ampliada:** a área andável vai 1,3 m além da grade (`southWalkway` em `orlaMap.ts`), cerca de 2,1 m de calçada no total, até uma faixa de grama sob as árvores que marca o limite. A câmera acompanha o personagem até lá, também na visão de perto (`southViewMargin`).
+- **"Personagem parado na faixa verde" no navegador de teste:** não é bug. O navegador sem GPU roda a ~4 FPS, e o passo de física é limitado a 0,05 s por quadro, então tudo se move cerca de 5× mais devagar. Em Node, a travessia completa funciona.
+
+`npm test`: **122/122**, `tsc --noEmit` limpo.

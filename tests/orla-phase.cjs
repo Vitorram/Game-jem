@@ -338,7 +338,8 @@ test('resgate do entregador: proteger a travessia e só reabrir a via quando ele
     for (let i = 0; i < 40 && sessionOrder(game, 'cyclist-assist')?.completedSteps < 1; i++) game.run(1);
     assert.ok(sessionOrder(game, 'cyclist-assist'), 'o chamado não pode expirar durante o resgate');
     assert.equal(sessionOrder(game, 'cyclist-assist').completedSteps, 1, 'travessia do entregador é o primeiro passo');
-    for (let i = 0; i < 40 && problem('cyclist-assist').status !== 'RESOLVED'; i++) {
+    // O prazo do chamado é de 60 s; o laço só limita o teste, o que importa é resolver antes de expirar.
+    for (let i = 0; i < 55 && problem('cyclist-assist').status !== 'RESOLVED'; i++) {
       game.run(1);
       game.scene.useMobilityHotkey('Digit1');
     }
@@ -393,4 +394,46 @@ test('CT-6.2: sessão de ~6 minutos a 60 fps mantém objetos limitados, posiçõ
     const msPerFrame = elapsedWork / frames;
     assert.ok(msPerFrame < 16, `custo médio por quadro ${msPerFrame.toFixed(2)} ms`);
   } finally { game.scene.dispose(); }
+});
+
+test('D11: rodadas com outras sementes e quadros irregulares (inclusive picos) concluem sem travar nem gerar NaN', () => {
+  const frames = [1 / 60, 1 / 60, 1 / 30, 1 / 45, 0.1, 1 / 60, 0.25, 1 / 120];
+  for (const [trafficSeed, walkerSeed] of [[7, 991], [31337, 5], [424242, 77777]]) {
+    suburbanGameState.reset(); // como o Game.start faz a cada partida
+    const game = phase();
+    orderIds.clear();
+    game.scene.traffic.trafficRandomSeed = trafficSeed;
+    game.scene.activeMobility.randomSeed = walkerSeed;
+    const arrivedAt = new Map();
+    try {
+      let frame = 0;
+      while (game.session.snapshot().status === 'playing' && frame < 40_000) {
+        const dt = frames[frame++ % frames.length];
+        for (const event of game.session.advance(dt * 1000)) {
+          if (event.type === 'order-expired') game.scene.expirePhaseOrder(orderIds.get(event.orderId));
+        }
+        const snapshot = game.session.snapshot();
+        game.scene.advancePhase(snapshot.elapsedMs);
+        game.scene.update(dt);
+        for (const order of snapshot.orders) {
+          orderIds.set(order.id, order.definitionId);
+          if (!arrivedAt.has(order.id)) arrivedAt.set(order.id, snapshot.elapsedMs);
+          if (snapshot.elapsedMs - arrivedAt.get(order.id) >= 15_000) {
+            for (const step of order.riskIds) game.session.resolveRisk(order.id, step);
+            game.session.archiveCompleted(order.id);
+            game.scene.expirePhaseOrder(order.definitionId);
+          }
+        }
+        if (frame % 300 === 0) {
+          assert.ok(game.scene.traffic.vehicles.every(v => Number.isFinite(v.mesh.position.x) && Number.isFinite(v.speed)), `semente ${trafficSeed}: carro com NaN`);
+          assert.ok(game.scene.activeMobility.walkers.every(w => Number.isFinite(w.x) && Number.isFinite(w.z)), `semente ${walkerSeed}: pedestre com NaN`);
+        }
+      }
+      const result = game.session.snapshot();
+      assert.equal(result.status, 'finished', `sementes ${trafficSeed}/${walkerSeed}: a fase termina`);
+      assert.equal(result.completedOrders, ORLA_EVENTS.length);
+      assert.equal(result.expiredOrders, 0);
+      assert.equal(suburbanGameState.snapshot().problems.length, 0, 'nenhum chamado fica pendurado na fase');
+    } finally { game.scene.dispose(); }
+  }
 });

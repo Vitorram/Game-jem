@@ -9,7 +9,7 @@ import { NpcModels, type NpcVisual } from './NpcModels';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 
 type WalkerState = 'approach-cycle' | 'wait-cycle' | 'cross-cycle' | 'approach-road' | 'wait-road' | 'form-road' | 'cross-road' | 'exit';
-type Walker = { slot: number; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1 };
+type Walker = { slot: number; roadSlot: number | null; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1 };
 type Cyclist = { visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1 };
 type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; safeElapsed: number };
 
@@ -18,6 +18,8 @@ const SIDEWALK_Y = 0.02;
 const CYCLIST_SAFE_GAP = 1.55;
 const WALKER_SAFE_GAP = 0.85;
 const WALKER_RADIUS = 0.17;
+const ROAD_WAIT_COLUMNS = [-0.55, 0.55, -1.05, 1.05, 1.55, 2.05] as const;
+const ROAD_WAIT_SLOTS = ROAD_WAIT_COLUMNS.length * 2;
 /** Perto do destino o pedestre ignora o mobiliário para conseguir chegar à posição exata da fila. */
 const FURNITURE_RELEASE_DISTANCE = 0.9;
 const CYCLIST_YIELD_LOOKAHEAD = 6;
@@ -280,7 +282,7 @@ export class ActiveMobilitySystem {
     mesh.position.set(x, SIDEWALK_Y, z);
     this.group.add(mesh);
     const exitDirection: 1 | -1 = this.random() > .5 ? 1 : -1;
-    this.walkers.push({ visual, mesh, slot, arrived: 0, batchIndex: 0, x, z, speed: .72 + this.random() * .22,
+    this.walkers.push({ visual, mesh, slot, roadSlot: null, arrived: 0, batchIndex: 0, x, z, speed: .72 + this.random() * .22,
       state: fromBeach ? 'approach-cycle' : 'approach-road', exitDirection });
   }
 
@@ -454,6 +456,30 @@ export class ActiveMobilitySystem {
     }
   }
 
+  /**
+   * Lugar de espera na calçada norte: duas fileiras dentro da calçada (sem invadir
+   * a ciclovia) e seis colunas fora do eixo da faixa, onde o grupo se forma em fila.
+   * As colunas da esquerda param antes do poste do semáforo.
+   */
+  private nearestFreeRoadSlot(walker: Walker): number {
+    const taken = new Set(this.walkers.filter(other => other !== walker && other.state === 'wait-road').map(other => other.roadSlot));
+    let best = -1, bestDistance = Infinity;
+    for (let slot = 0; slot < ROAD_WAIT_SLOTS; slot++) {
+      if (taken.has(slot)) continue;
+      const position = this.roadWaitPosition(slot);
+      const distance = Math.hypot(position.x - walker.x, position.z - walker.z);
+      if (distance < bestDistance) { best = slot; bestDistance = distance; }
+    }
+    return best >= 0 ? best : ROAD_WAIT_SLOTS;
+  }
+
+  private roadWaitPosition(slot: number): { x: number; z: number } {
+    return {
+      x: CROSSING_X + ROAD_WAIT_COLUMNS[slot % ROAD_WAIT_COLUMNS.length],
+      z: this.roadQueueZ - Math.floor(slot / ROAD_WAIT_COLUMNS.length) * .65,
+    };
+  }
+
   private roadQueuePosition(batchIndex: number): { x: number; z: number } {
     return {
       x: CROSSING_X,
@@ -492,9 +518,12 @@ export class ActiveMobilitySystem {
           break;
         case 'approach-road':
           {
-            const target = { x: queueX, z: this.roadQueueZ - Math.floor(walker.slot / 3) * .65 };
+            // Mira o lugar livre mais perto de si e só o reserva ao chegar: quem está
+            // longe não toma o lugar de quem já está perto da faixa.
+            const slot = this.nearestFreeRoadSlot(walker);
+            const target = this.roadWaitPosition(slot);
             if (this.moveToward(walker, target.x, target.z, dt)) {
-              walker.state = 'wait-road'; walker.arrived = this.elapsed;
+              walker.state = 'wait-road'; walker.arrived = this.elapsed; walker.roadSlot = slot;
             } else this.avoidFurniture(walker, target);
           }
           break;

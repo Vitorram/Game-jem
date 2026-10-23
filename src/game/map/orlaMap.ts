@@ -28,4 +28,6 @@ export const ORLA_MAP = {
   ],
   itemSources: [{ column: 11, row: 5, item: 'cone' }],
   spawns: [{ column: 8, row: 6 }, { column: 10, row: 6 }, { column: 12, row: 6 }],
+  // A calçada sul continua 1,3 m além da grade, até a faixa de grama das árvores (GridMapView).
+  southWalkway: 1.3,
 } as const satisfies MapDefinition;

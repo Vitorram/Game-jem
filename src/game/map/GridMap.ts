@@ -20,6 +20,8 @@ export type MapDefinition = {
   legend: Readonly<Record<string, TileKind>>;
   spawns: readonly TileCell[];
   itemSources?: readonly (TileCell & { item: ItemId })[];
+  /** Metros de calçada andável além da borda sul da grade (o chão já existe lá fora). */
+  southWalkway?: number;
 };
 
 /** Centro da grade na origem; colunas crescem em +X e linhas em +Z. */
@@ -31,6 +33,7 @@ export class GridMap {
   readonly tiles: readonly TileKind[];
   readonly spawns: readonly Point[];
   readonly itemSources: readonly Readonly<TileCell & { item: ItemId }>[];
+  readonly southWalkway: number;
   /** Mobiliário urbano (postes, lixeiras, bancos, coqueiros) que os pedestres NPC devem contornar. */
   readonly obstacles: Obstacle[] = [];
 
@@ -48,6 +51,8 @@ export class GridMap {
       return kind;
     })));
     const seen = new Set<string>();
+    this.southWalkway = definition.southWalkway ?? 0;
+    if (!Number.isFinite(this.southWalkway) || this.southWalkway < 0) throw new Error('Calçada sul inválida.');
     this.itemSources = Object.freeze((definition.itemSources ?? []).map(source => {
       const key = `${source.column},${source.row}`;
       if (this.tileAt(source.column, source.row) !== 'itemBox' || !Object.hasOwn(ITEM_TYPES, source.item) || seen.has(key)) {
@@ -93,7 +98,7 @@ export class GridMap {
     const r = this.playerRadius;
     const xLimit = this.width / 2 - r, zLimit = this.depth / 2 - r;
     let x = Math.max(-xLimit, Math.min(xLimit, to.x));
-    let z = Math.max(-zLimit, Math.min(zLimit, to.z));
+    let z = Math.max(-zLimit, Math.min(zLimit + this.southWalkway, to.z));
     for (let row = 0; row < this.rows; row++) for (let column = 0; column < this.columns; column++) {
       if (!this.isSolid(column, row)) continue;
       const center = this.cellCenter(column, row), half = this.tileSize / 2;
