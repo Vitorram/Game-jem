@@ -213,7 +213,7 @@ export class Game {
     if (this.disposed || !this.mandatoryTutorialActive) return;
     this.tutorialStage = 30 + step;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1);
+    if (current instanceof Fase1OrlaScene) current.setTutorialMovementEnabled(step === 1 || step === 4 || step === 5);
   }
 
   getInfrastructureTutorialStep(): number | null {
@@ -303,7 +303,7 @@ export class Game {
     if (this.mandatoryTutorialActive
       && !((this.tutorialStage >= 2 && this.tutorialStage <= 4)
         || this.tutorialStage === 13 || this.tutorialStage === 17
-        || this.tutorialStage === 33)) return;
+        || this.tutorialStage === 33 || this.tutorialStage === 35)) return;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) current.interact();
   }
