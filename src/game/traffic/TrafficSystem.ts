@@ -4,7 +4,7 @@ import {
 import type { GridMap } from '../map/GridMap';
 import { ROAD_LAYOUT } from '../map/roadLayout';
 import { suburbanGameState, type RoadState } from '../core/GameState';
-import { ORLA_CROSSING } from '../config';
+import { ORLA_CROSSING, ORLA_SCENERY_MARGIN } from '../config';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 import { VehicleModels, VEHICLE_VISUAL_SCALE, type VehicleKind } from './VehicleModels';
 
@@ -56,6 +56,7 @@ export type WorkZoneReadiness = {
 
 const INITIAL_VEHICLES_PER_LANE = 1;
 const MAX_VEHICLES_PER_LANE = 7;
+const MAX_GREEN_VEHICLES = 6;
 const VEHICLE_LENGTH = 1.35;
 const VEHICLE_WIDTH = 0.56;
 const SAFE_GAP = 4.2;
@@ -119,6 +120,15 @@ export class TrafficSystem {
   private readonly chargers: ElectricCharger[];
   private readonly minX: number;
   private readonly width: number;
+  /**
+   * Trecho percorrido pelos veículos: a grade mais o cenário estendido dos dois lados.
+   * Entram e saem além do que a câmera alcança, nunca surgindo ou sumindo na tela.
+   */
+  private readonly roadMinX: number;
+  private readonly roadSpan: number;
+  /** Limites por faixa escalados para o trecho longo: a densidade na tela continua a mesma. */
+  private readonly maxVehiclesPerLane: number;
+  private readonly maxGreenVehicles: number;
   private running = true;
   private electricDetour = false;
   private electricSpawnClock = 7;
@@ -161,6 +171,10 @@ export class TrafficSystem {
     this.group.name = 'traffic-flow';
     this.width = map.width;
     this.minX = -map.width / 2;
+    this.roadMinX = this.minX - ORLA_SCENERY_MARGIN - VEHICLE_LENGTH;
+    this.roadSpan = this.width + 2 * (ORLA_SCENERY_MARGIN + VEHICLE_LENGTH);
+    this.maxVehiclesPerLane = Math.ceil(MAX_VEHICLES_PER_LANE * this.roadSpan / this.width);
+    this.maxGreenVehicles = Math.ceil(MAX_GREEN_VEHICLES * this.roadSpan / this.width);
     const arrowShape = new Shape();
     arrowShape.moveTo(-0.38, -0.16); arrowShape.lineTo(0.05, -0.16); arrowShape.lineTo(0.05, -0.3);
     arrowShape.lineTo(0.42, 0); arrowShape.lineTo(0.05, 0.3); arrowShape.lineTo(0.05, 0.16); arrowShape.lineTo(-0.38, 0.16); arrowShape.closePath();
@@ -204,8 +218,10 @@ export class TrafficSystem {
     const arrows = new Group();
     arrows.name = `direction-markers-${id}`;
     const count = type === 'GREEN' ? 6 : 8;
-    for (let i = 0; i < count; i++) {
-      const arrowX = this.minX + this.width * (i + 0.5) / count;
+    const spacing = this.width / count;
+    const extra = Math.floor(ORLA_SCENERY_MARGIN / spacing);
+    for (let i = -extra; i < count + extra; i++) {
+      const arrowX = this.minX + spacing * (i + 0.5);
       if (Math.abs(arrowX - this.pedestrianCrossingX) < 2.15) continue;
       const marker = new Mesh(this.directionGeometry, type === 'GREEN' ? this.greenDirectionMaterial : this.directionMaterial);
       marker.rotation.x = -Math.PI / 2;
@@ -332,7 +348,7 @@ export class TrafficSystem {
   isCrossingGuarded(): boolean { return this.guardedCrossing; }
 
   getQueuedVehicleCount(): number {
-    return this.vehicles.filter(vehicle => vehicle !== this.incidentVehicle && vehicle.speed < 0.25).length;
+    return this.vehicles.filter(vehicle => vehicle !== this.incidentVehicle && vehicle.speed < 0.25 && this.isOnMap(vehicle)).length;
   }
 
   getMovingVehicleCount(): number { return this.vehicles.filter(vehicle => vehicle.speed > 0.4).length; }
@@ -413,7 +429,7 @@ export class TrafficSystem {
     this.towTruckTargetX = this.incidentVehicle.mesh.position.x - lane.direction * 2.35;
     this.towTruck = this.makeVehicle('truck', '#e5a739');
     this.towTruck.name = 'orla-tow-truck';
-    const entryX = lane.direction === 1 ? this.minX - 4 : this.minX + this.width + 4;
+    const entryX = lane.direction === 1 ? this.roadMinX : this.roadMinX + this.roadSpan;
     this.towTruck.position.set(entryX, 0.27, lane.z);
     this.towTruck.rotation.y = lane.direction === 1 ? 0 : Math.PI;
     const flatbed = new Mesh(this.towBedGeometry, this.towEquipmentMaterial);
@@ -465,8 +481,8 @@ export class TrafficSystem {
     if (this.towTruckState === 'departing') {
       this.towTruck.position.x += this.towTruckDirection * 4.2 * dt;
       const outside = this.towTruckDirection === 1
-        ? this.towTruck.position.x > this.minX + this.width + 4
-        : this.towTruck.position.x < this.minX - 4;
+        ? this.towTruck.position.x > this.roadMinX + this.roadSpan
+        : this.towTruck.position.x < this.roadMinX;
       if (outside) {
         this.removeTowTruck();
         this.towTruckState = 'completed';
@@ -603,7 +619,7 @@ export class TrafficSystem {
 
   getRoadStates(): RoadState[] {
     return this.lanes.map(lane => {
-      const vehicles = this.vehicles.filter(vehicle => vehicle.lane === lane);
+      const vehicles = this.vehicles.filter(vehicle => vehicle.lane === lane && this.isOnMap(vehicle));
       const congestion = this.getLaneCongestion(lane);
       return {
         id: lane.id,
@@ -804,8 +820,8 @@ export class TrafficSystem {
   }
 
   private trySpawnVehicle(lane: Lane, spawnX?: number): boolean {
-    if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= MAX_VEHICLES_PER_LANE) return false;
-    const entryX = spawnX ?? (lane.direction === 1 ? this.minX + VEHICLE_LENGTH / 2 : this.minX + this.width - VEHICLE_LENGTH / 2);
+    if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= this.maxVehiclesPerLane) return false;
+    const entryX = spawnX ?? (lane.direction === 1 ? this.roadMinX : this.roadMinX + this.roadSpan);
     const entryIsClear = this.vehicles.every(vehicle => {
       if (Math.abs(vehicle.mesh.position.z - lane.z) >= 0.72) return true;
       return Math.abs(vehicle.mesh.position.x - entryX) >= SAFE_GAP;
@@ -825,8 +841,8 @@ export class TrafficSystem {
 
   private spawnElectricVehicle(lane: Lane, spawnX?: number, targetIndex?: number): boolean {
     if (lane.type !== 'GREEN' && lane.type !== 'PRINCIPAL') return false;
-    if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= (lane.type === 'GREEN' ? 6 : MAX_VEHICLES_PER_LANE)) return false;
-    const entryX = spawnX ?? (lane.direction === 1 ? this.minX + VEHICLE_LENGTH / 2 : this.minX + this.width - VEHICLE_LENGTH / 2);
+    if (this.vehicles.filter(vehicle => vehicle.lane === lane).length >= (lane.type === 'GREEN' ? this.maxGreenVehicles : this.maxVehiclesPerLane)) return false;
+    const entryX = spawnX ?? (lane.direction === 1 ? this.roadMinX : this.roadMinX + this.roadSpan);
     if (!this.vehicles.every(vehicle => Math.abs(vehicle.mesh.position.z - lane.z) >= 0.72
       || Math.abs(vehicle.mesh.position.x - entryX) >= SAFE_GAP)) return false;
     const sequence = this.electricSpawnIndex++;
@@ -942,8 +958,8 @@ export class TrafficSystem {
       } else {
         vehicle.mesh.position.z = vehicle.lane.z;
       }
-      if ((vehicle.lane.direction === 1 && vehicle.mesh.position.x > this.minX + this.width + VEHICLE_LENGTH / 2)
-        || (vehicle.lane.direction === -1 && vehicle.mesh.position.x < this.minX - VEHICLE_LENGTH / 2)) {
+      if ((vehicle.lane.direction === 1 && vehicle.mesh.position.x > this.roadMinX + this.roadSpan)
+        || (vehicle.lane.direction === -1 && vehicle.mesh.position.x < this.roadMinX)) {
         this.removeVehicle(vehicle);
       }
     }
@@ -1066,13 +1082,19 @@ export class TrafficSystem {
     });
   }
 
+  /** Métricas de trânsito olham só o trecho jogável, não a fila no cenário estendido. */
+  private isOnMap(vehicle: Vehicle): boolean {
+    const x = vehicle.mesh.position.x;
+    return x >= this.minX && x <= this.minX + this.width;
+  }
+
   private distanceToPoint(fromX: number, toX: number, direction: 1 | -1): number {
     const delta = direction === 1 ? toX - fromX : fromX - toX;
-    return (delta + this.width) % this.width;
+    return (delta + this.roadSpan) % this.roadSpan;
   }
 
   private getLaneCongestion(lane: Lane): number {
-    const vehicles = this.vehicles.filter(vehicle => vehicle.lane === lane);
+    const vehicles = this.vehicles.filter(vehicle => vehicle.lane === lane && this.isOnMap(vehicle));
     const speedCongestion = vehicles.length
       ? vehicles.reduce((sum, vehicle) => sum + (1 - vehicle.speed / vehicle.maxSpeed), 0) / vehicles.length : 0;
     const laneCapacity = Math.max(1, Math.floor(this.getEffectiveLaneCapacity(lane) / 15));
@@ -1121,7 +1143,7 @@ export class TrafficSystem {
 
   private directionalDistance(from: Vehicle, to: Vehicle): number {
     const raw = to.mesh.position.x - from.mesh.position.x;
-    return from.lane.direction === 1 ? (raw + this.width) % this.width : (-raw + this.width) % this.width;
+    return from.lane.direction === 1 ? (raw + this.roadSpan) % this.roadSpan : (-raw + this.roadSpan) % this.roadSpan;
   }
 
   private nearestAhead(vehicle: Vehicle): { vehicle: Vehicle; distance: number } | null {
@@ -1137,7 +1159,7 @@ export class TrafficSystem {
   }
 
   private distanceToVehicleAhead(vehicle: Vehicle): number {
-    return Math.min(this.width, this.nearestAhead(vehicle)?.distance ?? this.width);
+    return Math.min(this.roadSpan, this.nearestAhead(vehicle)?.distance ?? this.roadSpan);
   }
 
   /**

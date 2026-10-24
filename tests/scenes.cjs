@@ -498,7 +498,7 @@ test('CT-3.2: mobiliário e vegetação da Orla são registrados como obstáculo
 test('CT-4.1: faixa elétrica tem ~1,2 m e dá folga lateral ao veículo sem invadir as vizinhas', () => {
   const orla = new Fase1OrlaScene();
   try {
-    const stripe = orla.scene.getObjectByName('electric-lane-2');
+    const stripe = orla.scene.getObjectByName('electric-lane');
     assert.ok(stripe, 'a faixa elétrica é desenhada');
     const width = stripe.scale.z;
     assert.ok(width >= 1.2 && width <= 1.3, `largura da faixa elétrica: ${width}`);
@@ -556,7 +556,8 @@ test('combinação CT-3.1 + acidente: nenhum veículo parado da fila pode ser at
     const insideAny = point => stopped.some(other => Math.abs(point.x - other.mesh.position.x) < halfLength - 1e-6
       && Math.abs(point.z - other.mesh.position.z) < halfWidth - 1e-6);
     let checked = 0;
-    for (const vehicle of stopped) {
+    // A fila pode seguir pelo cenário estendido; ali a Mobilidade não chega.
+    for (const vehicle of stopped.filter(item => Math.abs(item.mesh.position.x) <= orla.map.width / 2)) {
       const { x, z } = vehicle.mesh.position;
       for (const from of [{ x: x - halfLength - 0.5, z }, { x: x + halfLength + 0.5, z }, { x, z: z - halfWidth - 0.5 }, { x, z: z + halfWidth + 0.5 }]) {
         // Na fila, o ponto de partida pode cair dentro do carro vizinho; só vale partir de fora de todos.
@@ -676,7 +677,8 @@ test('D12: com o mobiliário real, todo caminho de pedestre chega ao destino', (
       park();
       Object.assign(walker, { state: 'exit', exitDirection: direction, speed: 0.8, z: mobility.southWalkZ,
         x: direction === 1 ? mobility.minX + 0.6 : mobility.maxX - 0.6 });
-      const time = runUntil(() => !mobility.walkers.includes(walker), 80);
+      // Some só depois do cenário estendido, fora da tela (ORLA_SCENERY_MARGIN além da grade).
+      const time = runUntil(() => !mobility.walkers.includes(walker), 120);
       assert.ok(Number.isFinite(time), `saída sul no sentido ${direction > 0 ? 'leste' : 'oeste'} ficou presa (x=${walker.x.toFixed(2)})`);
       mobility.walkers.unshift(walker); // devolve o pedestre para a próxima rodada
     }

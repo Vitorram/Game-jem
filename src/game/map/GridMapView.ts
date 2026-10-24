@@ -17,7 +17,7 @@ import {
   Vector3,
 } from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
-import { GRID_CONFIG, ORLA_CROSSING } from '../config';
+import { GRID_CONFIG, ORLA_CROSSING, ORLA_SCENERY_MARGIN } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 import { ROAD_LAYOUT } from './roadLayout';
 import { TextureLibrary, type TextureKey } from './proceduralTextures';
@@ -34,7 +34,6 @@ const MARK_COLORS = {
   dash: '#f7e9b0',
   edge: '#f4f1ea',
   bike: '#fbe6da',
-  electric: '#178568',
 } as const;
 
 type MarkKind = keyof typeof MARK_COLORS;
@@ -61,6 +60,7 @@ const BUMP_SCALE: Partial<Record<TextureKey, number>> = {
   wetSand: 0.01,
   promenade: 0.012,
   road: 0.01,
+  electricRoad: 0.01,
   cycleway: 0.008,
   sea: 0.006,
   plaster: 0.015,
@@ -86,8 +86,11 @@ const SEA_HIGH = new Color('#55d0e2');
 /** O mar fica mais baixo que a areia, o que desenha a borda da praia. */
 const SEA_DROP = 0.12;
 
-/** Quanto o chão se estende além do mapa, para não aparecer o vazio do fundo. */
+/** Chão liso além do cenário estendido (ORLA_SCENERY_MARGIN), para não aparecer o vazio do fundo. */
 const APRON = 30;
+
+/** Folga entre a calçada sul andável e a faixa de grama das árvores. */
+const SOUTH_VERGE_GAP = 0.05;
 
 /** Objetos ocupam 94% do tile: ficam como blocos separados, estilo brinquedo. */
 const OBJECT_FILL = 0.94;
@@ -143,6 +146,11 @@ function makeRandom(seed: number): () => number {
     state = (state * 16807) % 2147483647;
     return (state - 1) / 2147483646;
   };
+}
+
+/** Resto sempre positivo: as colunas além da borda oeste são negativas. */
+function mod(value: number, size: number): number {
+  return ((value % size) + size) % size;
 }
 
 /** Dona da geometria e dos materiais compartilhados pelos tiles. */
@@ -254,8 +262,18 @@ export class GridMapView {
   private time = 0;
   private disposed = false;
 
+  /**
+   * Colunas desenhadas, incluindo o cenário além da grade (ORLA_SCENERY_MARGIN em
+   * cada lado): faixas, canteiro e calçadas seguem até sair do enquadramento.
+   */
+  private readonly firstColumn: number;
+  private readonly endColumn: number;
+
   constructor(private readonly map: GridMap) {
     this.group.name = 'orla-ground';
+    const extraColumns = Math.ceil(ORLA_SCENERY_MARGIN / map.tileSize);
+    this.firstColumn = -extraColumns;
+    this.endColumn = map.columns + extraColumns;
 
     this.seaWaves = [
       this.seaMaterial('wave:0', 1, 1, false),
@@ -265,8 +283,8 @@ export class GridMapView {
     const slab = GRID_CONFIG.floorThickness;
 
     for (let row = 0; row < map.rows; row++) {
-      for (let column = 0; column < map.columns; column++) {
-        const kind = map.tileAt(column, row)!;
+      for (let column = this.firstColumn; column < this.endColumn; column++) {
+        const kind = this.tileAt(column, row)!;
         const type = TILE_TYPES[kind];
         const center = map.cellCenter(column, row);
         const isObject = type.height > 0;
@@ -280,9 +298,11 @@ export class GridMapView {
           this.floorMaterial(floorKind, column, row),
         );
 
+        // Fora da grade é só cenário: não conta como tile do mapa.
+        const inGrid = column >= 0 && column < map.columns;
         floor.name = isObject
           ? `floor-${column}-${row}`
-          : `tile-${column}-${row}-${kind}`;
+          : `${inGrid ? 'tile' : 'scenery'}-${column}-${row}-${kind}`;
 
         floor.scale.set(map.tileSize, slab, map.tileSize);
 
@@ -304,12 +324,12 @@ export class GridMapView {
           this.addCurb(column, row, center);
         } else {
           this.addMarkings(kind, column, row, center);
-          if (kind === 'ground' && map.tileAt(column, row - 1) === 'sea') {
+          if (kind === 'ground' && this.tileAt(column, row - 1) === 'sea') {
             this.addWetSand(column, row, center);
           }
         }
 
-        if (kind === 'promenade' && map.tileAt(column, row + 1) === 'cycleway') {
+        if (kind === 'promenade' && this.tileAt(column, row + 1) === 'cycleway') {
           this.addCurb(column, row, center);
         } else if (kind === 'cycleway' && this.isSidewalk(column, row + 1)) {
           this.addCurb(column, row, center);
@@ -323,6 +343,7 @@ export class GridMapView {
     this.addBeachAmbience();
     this.addPromenadeAmbience();
     this.addSidewalkFurniture();
+    this.addElectricLane();
     this.addRoadMedian();
     this.addSouthSidewalk();
     this.addSouthCityFront();
@@ -422,8 +443,13 @@ export class GridMapView {
    * Restringe a ciclovia a 2m (Row 7) e desenha o Row 8 como Calçada Norte.
    */
   private isSidewalk(column: number, row: number): boolean {
-    return this.map.tileAt(column, row) === 'cycleway'
-      && this.map.tileAt(column, row + 1) === 'road';
+    return this.tileAt(column, row) === 'cycleway'
+      && this.tileAt(column, row + 1) === 'road';
+  }
+
+  /** Tile da grade; fora dela repete a coluna da borda, que é igual em todas as linhas. */
+  private tileAt(column: number, row: number): TileKind | undefined {
+    return this.map.tileAt(Math.min(Math.max(column, 0), this.map.columns - 1), row);
   }
 
   /** Índice da linha usada como calçada, ou null se o mapa não tiver uma. */
@@ -436,12 +462,12 @@ export class GridMapView {
 
   /** Rua de verdade: exclui a linha usada como calçada. */
   private isRoadSurface(column: number, row: number): boolean {
-    return this.map.tileAt(column, row) === 'road';
+    return this.tileAt(column, row) === 'road';
   }
 
   /** Tile usado para escolher textura de piso, já aplicando objetos e calçada. */
   private visualKind(column: number, row: number): TileKind {
-    const kind = this.map.tileAt(column, row);
+    const kind = this.tileAt(column, row);
     if (kind === undefined) return 'promenade';
     if (TILE_TYPES[kind].height > 0) return 'promenade';
     return this.isSidewalk(column, row) ? 'promenade' : kind;
@@ -529,15 +555,15 @@ export class GridMapView {
     column: number,
     row: number,
   ): MeshStandardMaterial {
-    if (kind === 'sea') return this.seaWaves[(column + row) % 2];
+    if (kind === 'sea') return this.seaWaves[mod(column + row, 2)];
 
     const texture = TILE_TEXTURE[kind];
     const span = TEXTURE_SPAN[texture] ?? 1;
     if (span === 1) return this.material(`floor:${kind}`, '#ffffff', { texture });
 
     // Cada tile mostra o seu pedaço da textura maior, para o desenho atravessar os tiles.
-    const sliceX = column % span;
-    const sliceY = row % span;
+    const sliceX = mod(column, span);
+    const sliceY = mod(row, span);
     return this.material(`floor:${kind}:${sliceX}:${sliceY}`, '#ffffff', {
       texture,
       repeatX: 1 / span,
@@ -691,8 +717,8 @@ export class GridMapView {
     const candidates: { x: number; z: number }[] = [];
 
     for (let row = 0; row < this.map.rows; row++) {
-      for (let column = 0; column < this.map.columns; column++) {
-        if (this.map.tileAt(column, row) !== 'ground') continue;
+      for (let column = this.firstColumn; column < this.endColumn; column++) {
+        if (this.tileAt(column, row) !== 'ground') continue;
         candidates.push(this.map.cellCenter(column, row));
       }
     }
@@ -754,8 +780,8 @@ export class GridMapView {
     const cells: { column: number; row: number; x: number; z: number }[] = [];
 
     for (let row = minRow; row < this.map.rows; row++) {
-      for (let column = 0; column < this.map.columns; column++) {
-        if (this.map.tileAt(column, row) !== 'ground') continue;
+      for (let column = this.firstColumn; column < this.endColumn; column++) {
+        if (this.tileAt(column, row) !== 'ground') continue;
 
         const center = this.map.cellCenter(column, row);
         cells.push({ column, row, x: center.x, z: center.z });
@@ -771,6 +797,7 @@ export class GridMapView {
     if (!cells.length) return;
 
     const random = makeRandom(9187);
+    const density = (this.endColumn - this.firstColumn) / this.map.columns;
     const used = new Set<string>();
     const takeCell = (minimumDistance: number): { column: number; row: number; x: number; z: number } | null => {
       for (let attempt = 0; attempt < 80; attempt++) {
@@ -793,7 +820,7 @@ export class GridMapView {
       return null;
     };
 
-    for (let index = 0; index < BEACH_DECORATION_COUNT.palms; index++) {
+    for (let index = 0; index < Math.round(BEACH_DECORATION_COUNT.palms * density); index++) {
       const cell = takeCell(1.35);
       if (!cell) break;
 
@@ -805,7 +832,7 @@ export class GridMapView {
       );
     }
 
-    for (let index = 0; index < BEACH_DECORATION_COUNT.umbrellas; index++) {
+    for (let index = 0; index < Math.round(BEACH_DECORATION_COUNT.umbrellas * density); index++) {
       const cell = takeCell(1.1);
       if (!cell) break;
 
@@ -933,20 +960,20 @@ export class GridMapView {
   /** Bancos, lixeiras e postes em tiles de calçadão próximos à ciclovia. */
   private addPromenadeAmbience(): void {
     const row = 6;
-    const promenadeRow = this.map.tileAt(0, row) === 'promenade' ? row : 5;
+    const promenadeRow = this.tileAt(0, row) === 'promenade' ? row : 5;
 
-    for (let column = 1; column < this.map.columns; column += 3) {
-      if (this.map.tileAt(column, promenadeRow) !== 'promenade') continue;
+    for (let column = 1 - 3 * Math.floor((1 - this.firstColumn) / 3); column < this.endColumn; column += 3) {
+      if (this.tileAt(column, promenadeRow) !== 'promenade') continue;
       if (column >= 8 && column <= 13) continue;
 
       const center = this.map.cellCenter(column, promenadeRow);
-      this.addBench(center.x, center.z + this.map.tileSize * 0.21, column % 2 === 0);
+      this.addBench(center.x, center.z + this.map.tileSize * 0.21, mod(column, 2) === 0);
 
-      if (column % 6 === 1) {
+      if (mod(column, 6) === 1) {
         this.addLamp(center.x - this.map.tileSize * 0.33, center.z - this.map.tileSize * 0.25);
       }
 
-      if (column % 6 === 4) {
+      if (mod(column, 6) === 4) {
         this.addBin(center.x + this.map.tileSize * 0.34, center.z - this.map.tileSize * 0.18);
       }
     }
@@ -1099,7 +1126,7 @@ export class GridMapView {
     const sandRows: number[] = [];
 
     for (let row = 0; row < this.map.rows; row++) {
-      if (this.map.tileAt(16, row) === 'ground') sandRows.push(row);
+      if (this.tileAt(16, row) === 'ground') sandRows.push(row);
     }
 
     const row = sandRows[sandRows.length - 1];
@@ -1243,8 +1270,8 @@ export class GridMapView {
     const seaCells: { x: number; z: number }[] = [];
 
     for (let row = 0; row < this.map.rows; row++) {
-      for (let column = 0; column < this.map.columns; column++) {
-        if (this.map.tileAt(column, row) !== 'sea') continue;
+      for (let column = this.firstColumn; column < this.endColumn; column++) {
+        if (this.tileAt(column, row) !== 'sea') continue;
         seaCells.push(this.map.cellCenter(column, row));
       }
     }
@@ -1252,8 +1279,9 @@ export class GridMapView {
     if (!seaCells.length) return;
 
     const random = makeRandom(3451);
+    const buoys = Math.round(8 * (this.endColumn - this.firstColumn) / this.map.columns);
 
-    for (let index = 0; index < 8; index++) {
+    for (let index = 0; index < buoys; index++) {
       const cell = seaCells[Math.floor(random() * seaCells.length)];
       this.addBuoy(
         cell.x + (random() - 0.5) * this.map.tileSize * 0.7,
@@ -1323,7 +1351,7 @@ export class GridMapView {
     row: number,
     center: { x: number; z: number },
   ): void {
-    const below = this.map.tileAt(column, row + 1);
+    const below = this.tileAt(column, row + 1);
 
     if (below === undefined || below === 'sea') return;
 
@@ -1423,13 +1451,12 @@ export class GridMapView {
         this.line(`edge-bottom-${column}-${row}`, 'edge', center.x, roadNorthZ + ROAD_LAYOUT.bottomEdge, size, 0.08);
       }
 
-      // Avenida Verde (Z = 6.00 a 6.92): faixa exclusiva, com símbolos de elétrico.
-      if (column !== 1 && column !== 11 && column !== 20) {
+      // Avenida Verde: o piso pintado é contínuo (addElectricLane); aqui só bordas e símbolos.
+      if (column !== 11) {
         const { greenCenter, greenWidth } = ROAD_LAYOUT;
-        this.line(`electric-lane-${column}`, 'electric', center.x, roadNorthZ + greenCenter, size, greenWidth);
         this.line(`electric-lane-edge-${column}`, 'edge', center.x, roadNorthZ + 0.06, size, 0.055);
         this.line(`electric-lane-edge-south-${column}`, 'edge', center.x, roadNorthZ + greenCenter + greenWidth / 2 - 0.04, size, 0.055);
-        if (column % 4 === 2) this.addElectricPictogram(center.x, roadNorthZ + greenCenter);
+        if (mod(column, 4) === 2) this.addElectricPictogram(center.x, roadNorthZ + greenCenter);
       }
 
       // Divisórias tracejadas brancas entre Faixa 1 e Faixa 2 (Leste em Z=7.88, Oeste em Z=10.24)
@@ -1449,18 +1476,41 @@ export class GridMapView {
         if (Math.abs(dashX - crossingX) < 1.35) continue;
         this.line(`bike-dash-${column}-${row}-${dx}`, 'dash', dashX, center.z, size * 0.24, 0.065);
       }
-      if (column % 4 === 2 && column !== 11) {
+      if (mod(column, 4) === 2 && column !== 11) {
         this.addBikePictogram(center.x, center.z - 0.48, -1);
         this.addBikePictogram(center.x, center.z + 0.48, 1);
       }
     }
   }
 
+  /**
+   * Faixa exclusiva de elétricos: asfalto pintado de verde, rente às outras pistas
+   * e numa peça só de ponta a ponta do cenário, inclusive sob a travessia.
+   */
+  private addElectricLane(): void {
+    const { tileSize, rows } = this.map;
+    if (this.tileAt(0, rows - 1) !== 'road') return;
+    const { greenCenter, greenWidth } = ROAD_LAYOUT;
+    const roadNorthZ = this.map.depth / 2 - tileSize * 3;
+    const length = (this.endColumn - this.firstColumn) * tileSize;
+    const lane = new Mesh(this.flat, this.material('electric-lane', '#ffffff', {
+      texture: 'electricRoad',
+      repeatX: length / tileSize,
+      repeatY: greenWidth / tileSize,
+    }));
+    lane.name = 'electric-lane';
+    // 2 mm acima do asfalto: só o bastante para não disputar profundidade com o tile.
+    lane.scale.set(length, 0.002, greenWidth);
+    lane.position.set(this.map.cellCenter(this.firstColumn, 0).x - tileSize / 2 + length / 2, 0.001, roadNorthZ + greenCenter);
+    lane.receiveShadow = true;
+    this.group.add(lane);
+  }
+
   private addElectricPictogram(x: number, z: number): void {
     const material = this.material('mark:electric-pictogram', '#f2fae9', { texture: 'grain', coloredTexture: false });
     const icon = new Group();
     icon.name = 'electric-car-pictogram';
-    icon.position.set(x, 0.033, z);
+    icon.position.set(x, 0.018, z);
     // Dimensionado para a faixa de 1,2 m: ~0,8 m de carro, legível na câmera do jogo.
     icon.scale.setScalar(1.3);
     const body = new Mesh(this.flat, material);
@@ -1518,7 +1568,7 @@ export class GridMapView {
     const grassGeo = this.roundedBox(size * 0.89, 0.045, 0.27, 0.015);
     const lampHoodGeo = this.roundedBox(0.24, 0.055, 0.34, 0.018);
 
-    for (let column = 0; column < this.map.columns; column++) {
+    for (let column = this.firstColumn; column < this.endColumn; column++) {
       const center = this.map.cellCenter(column, this.map.rows - 1);
       if (column === 11) {
         const refuge = new Mesh(this.flat, curbMat);
@@ -1560,7 +1610,7 @@ export class GridMapView {
 
         const mainFoliage = new Mesh(
           this.pebble,
-          (column + idx) % 2 === 0 ? this.ambienceMaterials.palmLeafLight : this.ambienceMaterials.palmLeaf,
+          mod(column + idx, 2) === 0 ? this.ambienceMaterials.palmLeafLight : this.ambienceMaterials.palmLeaf,
         );
         mainFoliage.scale.set(0.24, 0.17, 0.13);
         mainFoliage.position.set(0, 0.04, 0);
@@ -1571,7 +1621,7 @@ export class GridMapView {
         for (const side of [-1, 1]) {
           const lobe = new Mesh(
             this.pebble,
-            (column + idx) % 2 === 0 ? this.ambienceMaterials.palmLeaf : this.ambienceMaterials.palmLeafLight,
+            mod(column + idx, 2) === 0 ? this.ambienceMaterials.palmLeaf : this.ambienceMaterials.palmLeafLight,
           );
           lobe.scale.set(0.16, 0.13, 0.11);
           lobe.position.set(side * 0.14, 0.02, side * 0.02);
@@ -1579,8 +1629,8 @@ export class GridMapView {
           cluster.add(lobe);
         }
 
-        if ((column + idx) % 2 === 0) {
-          const flowerMat = this.umbrellaMaterials[(column + idx) % this.umbrellaMaterials.length];
+        if (mod(column + idx, 2) === 0) {
+          const flowerMat = this.umbrellaMaterials[mod(column + idx, this.umbrellaMaterials.length)];
           for (const fx of [-0.07, 0.07]) {
             const blossom = new Mesh(this.pebble, flowerMat);
             blossom.scale.set(0.065, 0.055, 0.065);
@@ -1593,7 +1643,7 @@ export class GridMapView {
       }
 
       // Postes de iluminação dupla estilo boulevard costeiro
-      if (column % 5 === 2) {
+      if (mod(column, 5) === 2) {
         const lamp = new Group();
         lamp.name = `median-lamp-${column}`;
         lamp.position.set(center.x, 0.11, medianZ);
@@ -1636,72 +1686,51 @@ export class GridMapView {
   private addSouthSidewalk(): void {
     const { columns, rows, width, depth, tileSize } = this.map;
     const southRow = rows - 1;
-    if (this.map.tileAt(0, southRow) !== 'road') return;
+    if (this.tileAt(0, southRow) !== 'road') return;
 
-    const sidewalkDepth = 0.8;
     // A avenida ocupa ROAD_LAYOUT.bottomEdge a partir do seu bordo norte.
     // Começávamos o passeio 24 cm antes desse limite, cobrindo a faixa externa
     // e deixando parte dos carros por cima da calçada.
     const roadNorthZ = depth / 2 - tileSize * 3;
     const roadSouthEdgeZ = roadNorthZ + ROAD_LAYOUT.bottomEdge;
-    const sidewalkCenterZ = roadSouthEdgeZ + sidewalkDepth / 2;
-    const curbZ = roadSouthEdgeZ + 0.06;
-    const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
-    // A calçada sul é mais rasa que um tile: recorta a textura em vez de achatar as ondas.
+    // Uma peça só, do meio-fio até a grama das árvores e de ponta a ponta do cenário:
+    // recortes por tile ou emendas com o apron quebravam as ondas do calçadão.
+    const sidewalkSouthZ = Math.max(roadSouthEdgeZ + 0.8, depth / 2 + this.map.southWalkway + SOUTH_VERGE_GAP);
+    const sidewalkDepth = sidewalkSouthZ - roadSouthEdgeZ;
+    const sidewalkWidth = width + 2 * (ORLA_SCENERY_MARGIN + APRON);
     const sidewalkSpan = (TEXTURE_SPAN[TILE_TEXTURE.promenade] ?? 1) * tileSize;
-    const sidewalkRepeatY = sidewalkDepth / sidewalkSpan;
-    const sidewalkMaterial = (column: number) => {
-      const slices = Math.round(sidewalkSpan / tileSize);
-      const slice = column % slices;
-      return this.material(`south-sidewalk:${slice}`, '#ffffff', {
-        texture: TILE_TEXTURE.promenade,
-        repeatX: 1 / slices,
-        repeatY: sidewalkRepeatY,
-        offsetX: slice / slices,
-      });
-    };
+    const pavement = new Mesh(this.flat, this.material('south-sidewalk', '#ffffff', {
+      texture: TILE_TEXTURE.promenade,
+      repeatX: sidewalkWidth / sidewalkSpan,
+      repeatY: sidewalkDepth / sidewalkSpan,
+    }));
+    pavement.name = 'south-sidewalk';
+    pavement.scale.set(sidewalkWidth, 0.036, sidewalkDepth);
+    pavement.position.set(0, 0.018, roadSouthEdgeZ + sidewalkDepth / 2);
+    pavement.receiveShadow = true;
+    this.group.add(pavement);
 
-    for (let column = 0; column < columns; column++) {
-      const center = this.map.cellCenter(column, southRow);
-
-      const pavement = new Mesh(this.flat, sidewalkMaterial(column));
-      pavement.name = `south-sidewalk-${column}`;
-      pavement.scale.set(tileSize, 0.036, sidewalkDepth);
-      pavement.position.set(center.x, 0.018, sidewalkCenterZ);
-      pavement.receiveShadow = true;
-      this.group.add(pavement);
-
-      if (column !== 11) {
-        const curb = new Mesh(this.flat, curbMat);
-        curb.name = `south-curb-${column}`;
-        curb.scale.set(tileSize, 0.095, 0.12);
-        curb.position.set(center.x, 0.048, curbZ);
-        curb.castShadow = true;
-        curb.receiveShadow = true;
-        this.group.add(curb);
-      }
+    // Meio-fio contínuo, interrompido só na rampa da travessia (coluna 11).
+    const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
+    const crossing = this.map.cellCenter(11, southRow).x;
+    for (const [side, from, to] of [
+      ['w', -sidewalkWidth / 2, crossing - tileSize / 2],
+      ['e', crossing + tileSize / 2, sidewalkWidth / 2],
+    ] as const) {
+      const curb = new Mesh(this.flat, curbMat);
+      curb.name = `south-curb-${side}`;
+      curb.scale.set(to - from, 0.095, 0.12);
+      curb.position.set((from + to) / 2, 0.048, roadSouthEdgeZ + 0.06);
+      curb.castShadow = true;
+      curb.receiveShadow = true;
+      this.group.add(curb);
     }
 
-    // Estende a calçada sul e o meio-fio para as bordas oeste e leste do apron
-    for (const [side, x] of [['w', -width / 2 - APRON / 2], ['e', width / 2 + APRON / 2]] as const) {
-      const apronMat = this.material(
-        `south-sidewalk-apron:${Math.round(APRON)}`,
-        '#ffffff',
-        { texture: TILE_TEXTURE.promenade, repeatX: APRON / sidewalkSpan, repeatY: sidewalkRepeatY },
-      );
-      const extPavement = new Mesh(this.flat, apronMat);
-      extPavement.name = `south-sidewalk-apron-${side}`;
-      extPavement.scale.set(APRON, 0.036, sidewalkDepth);
-      extPavement.position.set(x, 0.018, sidewalkCenterZ);
-      extPavement.receiveShadow = true;
-
-      const extCurb = new Mesh(this.flat, curbMat);
-      extCurb.name = `south-curb-apron-${side}`;
-      extCurb.scale.set(APRON, 0.095, 0.12);
-      extCurb.position.set(x, 0.048, curbZ);
-      extCurb.receiveShadow = true;
-
-      this.group.add(extPavement, extCurb);
+    // Postes continuam no cenário estendido, no mesmo passo de 6 tiles.
+    for (let column = this.firstColumn; column < this.endColumn; column++) {
+      if ((column < 0 || column >= columns) && mod(column - 3, 6) === 0) {
+        this.addLamp(this.map.cellCenter(column, southRow).x, roadSouthEdgeZ + 0.3);
+      }
     }
 
     // Mobiliário urbano da calçada inferior (bancos voltados à via, postes de pedestre e lixeiras)
@@ -1731,7 +1760,7 @@ export class GridMapView {
     const crossingX = ORLA_CROSSING.centerX;
     const frontZ = southEdgeZ + 2.65;
     const lotDepth = 4.6;
-    const reach = this.map.width / 2 + 12;
+    const reach = this.map.width / 2 + ORLA_SCENERY_MARGIN;
     const plazaHalf = 2.6;
     const facades = ['#e9b872', '#7fb7a4', '#e58f6f', '#9fb6d8', '#f1e3c8'];
     const awnings = ['#c4553f', '#2f7f74', '#d89b2b', '#41658f'];
@@ -1754,8 +1783,10 @@ export class GridMapView {
     // Praça em frente à travessia: piso claro, bancos e árvores marcando a chegada.
     const plaza = new Mesh(this.flat, this.material('city:plaza', '#efe6d2', { texture: 'grain', coloredTexture: false }));
     plaza.name = 'city-plaza';
-    plaza.scale.set(plazaHalf * 2, 0.02, lotDepth + 1.2);
-    plaza.position.set(crossingX, 0.01, frontZ + lotDepth / 2 - 0.6);
+    // Começa onde termina a calçada sul, sem deixar fresta do apron entre as duas.
+    const plazaNorth = southEdgeZ + this.map.southWalkway + SOUTH_VERGE_GAP;
+    plaza.scale.set(plazaHalf * 2, 0.02, frontZ + lotDepth - plazaNorth);
+    plaza.position.set(crossingX, 0.01, (plazaNorth + frontZ + lotDepth) / 2);
     plaza.receiveShadow = true;
     this.group.add(plaza);
     this.addBench(crossingX - 1.1, frontZ + 1.4, false);
@@ -1763,7 +1794,7 @@ export class GridMapView {
 
     const treeZ = southEdgeZ + 1.75;
     // Faixa de grama sob as árvores: marca o fim da calçada andável (map.southWalkway).
-    const vergeNorth = southEdgeZ + this.map.southWalkway + 0.05, vergeDepth = 0.8;
+    const vergeNorth = southEdgeZ + this.map.southWalkway + SOUTH_VERGE_GAP, vergeDepth = 0.8;
     const verge = this.material('city:verge', '#7fae5d', { texture: 'grain', coloredTexture: false });
     for (const [name, from, to] of [['w', -reach, crossingX - plazaHalf], ['e', crossingX + plazaHalf, reach]] as const) {
       const strip = new Mesh(this.flat, verge);
@@ -1888,7 +1919,7 @@ export class GridMapView {
       w: number,
       d: number,
     ) => {
-      const kind = this.map.tileAt(column, row)!;
+      const kind = this.tileAt(column, row)!;
       const isSouthApron = name.startsWith('s');
       const floorKind: TileKind = isSouthApron ? 'promenade' : this.visualKind(column, row);
 
@@ -1897,7 +1928,7 @@ export class GridMapView {
           `apron-sea:${Math.round(w)}x${Math.round(d)}`,
           Math.max(1, Math.round(w / tileSize)),
           Math.max(1, Math.round(d / tileSize)),
-          (column + row) % 2 === 1,
+          mod(column + row, 2) === 1,
         )
         : this.material(
           `apron:${floorKind}:${Math.round(w)}x${Math.round(d)}`,
@@ -1919,8 +1950,10 @@ export class GridMapView {
       this.group.add(mesh);
     };
 
-    const west = -width / 2 - APRON / 2;
-    const east = width / 2 + APRON / 2;
+    // O apron começa onde termina o cenário estendido pelas colunas extras.
+    const reach = width / 2 + ORLA_SCENERY_MARGIN;
+    const west = -reach - APRON / 2;
+    const east = reach + APRON / 2;
     const north = -depth / 2 - APRON / 2;
     const south = depth / 2 + APRON / 2;
 
@@ -1930,15 +1963,14 @@ export class GridMapView {
       strip(`e-${row}`, columns - 1, row, east, z, APRON, tileSize);
     }
 
-    for (let column = 0; column < columns; column++) {
+    for (let column = this.firstColumn; column < this.endColumn; column++) {
       const x = this.map.cellCenter(column, 0).x;
       strip(`n-${column}`, column, 0, x, north, tileSize, APRON);
-      strip(`s-${column}`, column, rows - 1, x, south, tileSize, APRON);
     }
 
     strip('nw', 0, 0, west, north, APRON, APRON);
     strip('ne', columns - 1, 0, east, north, APRON, APRON);
-    strip('sw', 0, rows - 1, west, south, APRON, APRON);
-    strip('se', columns - 1, rows - 1, east, south, APRON, APRON);
+    // Ao sul, uma faixa só: por tile, cada recorte repetia a mesma metade das ondas.
+    strip('s', 0, rows - 1, 0, south, 2 * (reach + APRON), APRON);
   }
 }

@@ -28,6 +28,13 @@ export const ORLA_CONFIG = {
   },
 } as const;
 
+/**
+ * Quanto o cenário da Orla continua além da grade jogável em cada lado (m). A câmera
+ * aberta nunca mostra mais que isso, e carros e ciclistas entram e saem depois desse
+ * limite, ou seja, sempre fora da tela.
+ */
+export const ORLA_SCENERY_MARGIN = 30;
+
 /** Mesma óptica e seguimento do laboratório. O limite do chão pode reduzir a altura. */
 export const ORLA_CAMERA = {
   fov: GAME_CONFIG.cameraFov,
@@ -47,7 +54,7 @@ export const ORLA_CAMERA = {
   followOffsetZ: 2,
   /** Chão mostrado além da calçada sul andável, para o personagem não encostar na borda da tela. */
   southViewMargin: 2,
-  groundApron: 30,
+  groundApron: ORLA_SCENERY_MARGIN,
 } as const;
 
 export const GRID_CONFIG = {
