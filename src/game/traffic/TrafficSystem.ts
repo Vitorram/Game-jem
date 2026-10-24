@@ -30,6 +30,7 @@ type Lane = {
 };
 type ConeObstacle = { lane: Lane; mesh: Mesh; x: number };
 type Vehicle = {
+  id: string;
   mesh: Group;
   lane: Lane;
   homeLane: Lane;
@@ -44,6 +45,23 @@ type Vehicle = {
   chargeElapsed: number;
   charging: boolean;
   chargeRing: Group | null;
+  lastProgressAt: number;
+  stoppedSince: number | null;
+  stopReason: TrafficStopReason;
+};
+export type TrafficStopReason = 'none' | 'incident' | 'manual-stop' | 'lane-blocked' | 'crossing'
+  | 'cone' | 'vehicle-ahead' | 'charging' | 'player';
+export type TrafficDiagnostics = {
+  elapsedSeconds: number;
+  activeVehicles: number;
+  movingVehicles: number;
+  spawnedVehicles: number;
+  exitedVehicles: number;
+  stoppedVehicles: { id: string; laneId: string; reason: TrafficStopReason; stoppedForSeconds: number; lastProgressSecondsAgo: number }[];
+  lanes: { id: string; status: Lane['status']; direction: 1 | -1; vehicles: number; moving: number }[];
+  crossing: { phase: 'green' | 'yellow' | 'red'; waitingPedestrians: number; occupied: boolean; guarded: boolean; assisted: boolean };
+  occurrences: string[];
+  persistentInvalidBlocks: string[];
 };
 type ElectricCharger = { x: number; z: number; group: Group; statusLight: Mesh; statusMaterial: MeshStandardMaterial; broken: boolean };
 export type TowTruckState = 'idle' | 'approaching' | 'loading' | 'departing' | 'completed';
@@ -162,6 +180,10 @@ export class TrafficSystem {
   private blockAnchorX: number | null = null;
   private readonly vehicleModels = new VehicleModels();
   private spawnedCount = 0;
+  private vehicleIdSequence = 0;
+  private createdVehicleCount = 0;
+  private exitedVehicleCount = 0;
+  private elapsedSeconds = 0;
   private disposed = false;
   private roadStatePublishElapsed = 0;
 
@@ -201,9 +223,11 @@ export class TrafficSystem {
         mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
         this.group.add(mesh);
         const maxSpeed = 1.6 + ((vehicleIndex + laneIndex) % 3) * 0.35;
-        this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+        this.vehicles.push({ id: this.nextVehicleId(), mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
           speed: maxSpeed, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
-          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
+          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null,
+          lastProgressAt: 0, stoppedSince: null, stopReason: 'none' });
+        this.createdVehicleCount++;
       }
     });
     const greenLane = this.lanes.find(lane => lane.type === 'GREEN')!;
@@ -346,6 +370,10 @@ export class TrafficSystem {
   setCrossingGuarded(guarded: boolean): void { this.guardedCrossing = guarded; }
   setAssistedCrossingRequested(requested: boolean): void { this.assistedCrossingRequested = requested; }
   isCrossingGuarded(): boolean { return this.guardedCrossing; }
+  isCrossingStopActive(): boolean {
+    return !this.running || this.signalFailure || this.guardedCrossing || this.assistedCrossingRequested
+      || this.pedestrianCrossingOccupied || (!this.unsafeCrossing && this.waitingPedestrians > 0);
+  }
 
   getQueuedVehicleCount(): number {
     return this.vehicles.filter(vehicle => vehicle !== this.incidentVehicle && vehicle.speed < 0.25 && this.isOnMap(vehicle)).length;
@@ -390,6 +418,8 @@ export class TrafficSystem {
     this.incidentVehicle = vehicle;
     this.collisionWarningVehicle = null;
     vehicle.speed = 0;
+    vehicle.stoppedSince = this.elapsedSeconds;
+    vehicle.stopReason = 'incident';
   }
 
   /** Enguiça um carro numa faixa real para que a fila se forme atrás dele. */
@@ -403,10 +433,12 @@ export class TrafficSystem {
         mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
         this.group.add(mesh);
         const maxSpeed = 1.8;
-        this.collisionWarningVehicle = { mesh, lane, homeLane: lane, preferredLane: lane, kind: 'sedan',
+        this.collisionWarningVehicle = { id: this.nextVehicleId(), mesh, lane, homeLane: lane, preferredLane: lane, kind: 'sedan',
           speed: maxSpeed, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
-          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null };
+          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null,
+          lastProgressAt: this.elapsedSeconds, stoppedSince: null, stopReason: 'none' };
         this.vehicles.push(this.collisionWarningVehicle);
+        this.createdVehicleCount++;
         for (const x of [-0.8, 0.8]) {
           const light = new Mesh(this.barrierGeometry, this.barrierMaterial);
           light.position.set(x, 0.55, 0);
@@ -833,9 +865,11 @@ export class TrafficSystem {
     mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
     this.group.add(mesh);
     const maxSpeed = 1.6 + this.randomTraffic() * 0.7;
-    this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+    this.vehicles.push({ id: this.nextVehicleId(), mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
       speed: 0, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
-      chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
+      chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null,
+      lastProgressAt: this.elapsedSeconds, stoppedSince: null, stopReason: 'none' });
+    this.createdVehicleCount++;
     return true;
   }
 
@@ -857,9 +891,11 @@ export class TrafficSystem {
     const maxSpeed = 1.7 + this.randomTraffic() * 0.4;
     const chargeRing = this.createChargeRing();
     mesh.add(chargeRing);
-    this.vehicles.push({ mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, crossingCommitted: false, maxSpeed,
+    this.vehicles.push({ id: this.nextVehicleId(), mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, crossingCommitted: false, maxSpeed,
       laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, chargeTargetIndex,
-      chargeElapsed: 0, charging: false, chargeRing });
+      chargeElapsed: 0, charging: false, chargeRing, lastProgressAt: this.elapsedSeconds,
+      stoppedSince: null, stopReason: 'none' });
+    this.createdVehicleCount++;
     return true;
   }
 
@@ -885,6 +921,8 @@ export class TrafficSystem {
     return (this.trafficRandomSeed - 1) / 2147483646;
   }
 
+  private nextVehicleId(): string { return `vehicle-${++this.vehicleIdSequence}`; }
+
   private removeVehicle(vehicle: Vehicle): void {
     this.group.remove(vehicle.mesh);
     vehicle.mesh.clear();
@@ -895,6 +933,7 @@ export class TrafficSystem {
   update(delta: number): void {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, 0.05);
+    this.elapsedSeconds += dt;
     this.roadStatePublishElapsed += dt;
     this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
@@ -950,6 +989,21 @@ export class TrafficSystem {
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
       vehicle.mesh.position.x += vehicle.lane.direction * travel;
+      const stopReason: TrafficStopReason = !this.running ? 'manual-stop'
+        : charging.stopped ? 'charging'
+          : vehicle.lane.status === 'blocked' && !pastBlock ? 'lane-blocked'
+            : stopBeforeCrossing || crossingRoom <= .001 ? 'crossing'
+              : stoppedAtCone || coneRoom <= .001 ? 'cone'
+                : gap <= MIN_BUMPER_GAP || following <= .001 ? 'vehicle-ahead'
+                  : playerBrake <= .001 ? 'player' : 'none';
+      if (travel > .001) {
+        vehicle.lastProgressAt = this.elapsedSeconds;
+        vehicle.stoppedSince = null;
+        vehicle.stopReason = 'none';
+      } else if (vehicle.speed <= CROSSING_RULES.stoppedSpeed) {
+        vehicle.stoppedSince ??= this.elapsedSeconds;
+        vehicle.stopReason = stopReason;
+      }
       if (vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) {
         vehicle.laneChangeElapsed = Math.min(LANE_CHANGE_DURATION, vehicle.laneChangeElapsed + dt);
         const progress = vehicle.laneChangeElapsed / LANE_CHANGE_DURATION;
@@ -961,9 +1015,44 @@ export class TrafficSystem {
       if ((vehicle.lane.direction === 1 && vehicle.mesh.position.x > this.roadMinX + this.roadSpan)
         || (vehicle.lane.direction === -1 && vehicle.mesh.position.x < this.roadMinX)) {
         this.removeVehicle(vehicle);
+        this.exitedVehicleCount++;
       }
     }
     this.publishRoadState();
+  }
+
+  /** Snapshot barato e sem referências mutáveis para testes e diagnóstico de desenvolvimento. */
+  getDiagnostics(): TrafficDiagnostics {
+    const stoppedVehicles = this.vehicles.filter(vehicle => vehicle.speed <= CROSSING_RULES.stoppedSpeed).map(vehicle => ({
+      id: vehicle.id,
+      laneId: vehicle.lane.id,
+      reason: vehicle === this.incidentVehicle ? 'incident' as const : vehicle.stopReason,
+      stoppedForSeconds: Math.max(0, this.elapsedSeconds - (vehicle.stoppedSince ?? this.elapsedSeconds)),
+      lastProgressSecondsAgo: Math.max(0, this.elapsedSeconds - vehicle.lastProgressAt),
+    }));
+    const persistentInvalidBlocks = stoppedVehicles
+      .filter(vehicle => vehicle.stoppedForSeconds >= 45
+        && !['incident', 'manual-stop', 'lane-blocked', 'charging'].includes(vehicle.reason))
+      .map(vehicle => `${vehicle.id}:${vehicle.reason}:${vehicle.stoppedForSeconds.toFixed(1)}s`);
+    return {
+      elapsedSeconds: this.elapsedSeconds,
+      activeVehicles: this.vehicles.length,
+      movingVehicles: this.getMovingVehicleCount(),
+      spawnedVehicles: this.createdVehicleCount,
+      exitedVehicles: this.exitedVehicleCount,
+      stoppedVehicles,
+      lanes: this.lanes.map(lane => {
+        const vehicles = this.vehicles.filter(vehicle => vehicle.lane === lane);
+        return { id: lane.id, status: lane.status, direction: lane.direction,
+          vehicles: vehicles.length, moving: vehicles.filter(vehicle => vehicle.speed > .4).length };
+      }),
+      crossing: { phase: this.crossingSignalPhase, waitingPedestrians: this.waitingPedestrians,
+        occupied: this.pedestrianCrossingOccupied, guarded: this.guardedCrossing, assisted: this.assistedCrossingRequested },
+      occurrences: [this.incidentVehicle ? 'vehicle-incident' : null,
+        this.towTruckState !== 'idle' && this.towTruckState !== 'completed' ? `tow-${this.towTruckState}` : null]
+        .filter((value): value is string => value !== null),
+      persistentInvalidBlocks,
+    };
   }
 
   /** Freia ao ver o personagem a pé na própria faixa, logo à frente. */

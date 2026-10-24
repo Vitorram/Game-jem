@@ -15,10 +15,10 @@ import { ItemVisuals } from '../items/ItemVisuals';
 import { RiskWorkflow, type RiskSnapshot } from '../risks/RiskWorkflow';
 import { ORLA_RISKS, ORLA_ROUTE } from '../risks/riskData';
 import { ORLA_MAP } from '../map/orlaMap';
-import { TrafficSystem } from '../traffic/TrafficSystem';
+import { TrafficSystem, type TrafficDiagnostics } from '../traffic/TrafficSystem';
 import type { MobilityRoadAction } from '../traffic/TrafficSystem';
 import { TrafficSignals } from '../traffic/TrafficSignals';
-import { ActiveMobilitySystem } from '../traffic/ActiveMobilitySystem';
+import { ActiveMobilitySystem, type MobilityDiagnostics } from '../traffic/ActiveMobilitySystem';
 import { BrokenPoleMarker } from '../problems/BrokenPoleMarker';
 import { TeamObjectiveMarker } from '../problems/TeamObjectiveMarker';
 import { AnalystCabin } from './AnalystCabin';
@@ -33,6 +33,13 @@ export type MobilityTutorialSnapshot = {
   facingConeCrate: boolean;
 };
 export type InfrastructureTutorialSnapshot = { readyToRepair: boolean };
+export type OrlaTrafficDiagnostics = {
+  traffic: TrafficDiagnostics;
+  mobility: MobilityDiagnostics;
+  activeOccurrences: { id: string; status: string; stage: string }[];
+  persistentInvalidBlocks: string[];
+};
+const TRAFFIC_DIAGNOSTICS_ENABLED = process.env.NODE_ENV === 'development';
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
@@ -110,6 +117,9 @@ export class Fase1OrlaScene implements GameScene {
   private localCoopInput: { getAxis: () => { x: number; z: number }; isSprinting: () => boolean } | null = null;
   private localCoopPlayerId: PlayerId | null = null;
   private localCoopTabletOpen = false;
+  private diagnosticsElapsed = 0;
+  private nextDiagnosticsReportAt = 30;
+  private lastDiagnosticsWarning = '';
 
   startPhase(onStep: (id: string, step: number) => void): void {
     if (this.phase) return;
@@ -555,6 +565,7 @@ export class Fase1OrlaScene implements GameScene {
     this.traffic.update(dt);
     this.activeMobility.update(dt);
     this.phase?.update(dt, this.player);
+    this.updateTrafficDiagnostics(dt);
     this.trafficSignals.setFaulty(this.phase?.isSignalFaulty() ?? false);
     this.trafficSignals.update();
     this.updateProblemPresentation();
@@ -570,6 +581,35 @@ export class Fase1OrlaScene implements GameScene {
       player.update(dt, playerAxis, movementResolver, sprinting);
     }
     if (!this.tutorialCollisionProtected && !recovering && this.collisionInvulnerability <= 0) this.checkPlayerCollision();
+  }
+
+  getTrafficDiagnostics(): OrlaTrafficDiagnostics {
+    const traffic = this.traffic.getDiagnostics();
+    const mobility = this.activeMobility.getDiagnostics();
+    const activeOccurrences = suburbanGameState.getProblems()
+      .filter(problem => problem.status !== 'RESOLVED')
+      .map(problem => ({ id: problem.id, status: problem.status, stage: problem.stage ?? 'active' }));
+    const staleBatchHold = mobility.roadBatchHeld
+      && !activeOccurrences.some(problem => problem.id === 'traffic-signal-failure' || problem.id === 'cyclist-assist')
+      ? ['pedestrian-batch-held-without-occurrence'] : [];
+    return { traffic, mobility, activeOccurrences,
+      persistentInvalidBlocks: [...traffic.persistentInvalidBlocks, ...mobility.persistentInvalidBlocks, ...staleBatchHold] };
+  }
+
+  private updateTrafficDiagnostics(dt: number): void {
+    if (!TRAFFIC_DIAGNOSTICS_ENABLED || dt <= 0) return;
+    this.diagnosticsElapsed += dt;
+    if (this.diagnosticsElapsed < 5) return;
+    const diagnostics = this.getTrafficDiagnostics();
+    const signature = diagnostics.persistentInvalidBlocks.join('|');
+    if (signature && signature !== this.lastDiagnosticsWarning) {
+      console.warn('[SUBURBAN traffic] bloqueio persistente detectado', diagnostics);
+      this.lastDiagnosticsWarning = signature;
+    } else if (!signature && this.diagnosticsElapsed >= this.nextDiagnosticsReportAt) {
+      console.debug('[SUBURBAN traffic] diagnóstico periódico', diagnostics);
+      this.nextDiagnosticsReportAt = this.diagnosticsElapsed + 30;
+      this.lastDiagnosticsWarning = '';
+    }
   }
 
   private checkPlayerCollision(): void {

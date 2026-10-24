@@ -160,6 +160,9 @@ export class OrlaPhase {
     const event = ORLA_EVENTS[this.eventIndex];
     const problem = event && this.problem(event.id);
     if (!event || event.id !== id || problem?.status !== 'RESOLVED') return false;
+    // O relatório é a última barreira de segurança: nenhum controle temporário da
+    // ocorrência anterior pode vazar para o próximo chamado.
+    this.clearEventEffects(id);
     suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
     suburbanGameState.selectProblem(null);
     this.eventIndex++;
@@ -534,7 +537,7 @@ export class OrlaPhase {
           this.traffic.setCrossingGuarded(false);
           this.traffic.setAssistedCrossingRequested(false);
           this.pedestrians.setWalkerSpawningPaused(false);
-          this.pedestrians.setRoadBatchHold(true);
+          this.pedestrians.setRoadBatchHold(false);
           this.traffic.applyMobilityAction(roadId, 'release');
           this.resolve(rescue.id, 702);
           if (this.rescueBubble) {
@@ -774,7 +777,21 @@ export class OrlaPhase {
 
   private resolve(id: string, step: number): void {
     this.step(id, step);
+    this.releaseResolvedTrafficControls(id);
     this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência resolvida. Volte ao sistema da Analista para arquivar o relatório e receber XP.' });
+  }
+
+  /** Libera apenas controles que já não têm condição legítima para permanecer ativos. */
+  private releaseResolvedTrafficControls(id: string): void {
+    if (id === 'minor-collision' || id === 'roadside-breakdown') this.traffic.resetRoadInterventions();
+    if (id === 'cyclist-assist') {
+      this.traffic.setCrossingGuarded(false);
+      this.traffic.setAssistedCrossingRequested(false);
+      this.pedestrians.setWalkerSpawningPaused(false);
+      this.pedestrians.setRoadBatchHold(false);
+      this.rescueProtected = false;
+    }
+    if (id === 'ev-charger-repair') this.traffic.setElectricDiversion(false);
   }
 
   private publishMetrics(): void {
