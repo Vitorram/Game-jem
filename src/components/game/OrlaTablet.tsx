@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 'use client';
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -197,9 +196,6 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
 
       if (column < 0 || row < 0 || column >= MAP_COLUMNS || row >= MAP_ROWS) continue;
 
-=======
-      if (column < 0 || row < 0 || column >= MAP_COLUMNS || row >= MAP_ROWS) continue;
->>>>>>> b48902433eeb07912e24e089e36dc33e7a0b55eb
       const key = `${row},${column}`;
       result.set(key, [...(result.get(key) ?? []), problem]);
     }
@@ -216,9 +212,8 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
           : <span className="tablet-battery" aria-label="Bateria cheia"><i /><i /><i /><i /></span>}
       </header>
       <div className="tablet-content">
-        <div className="tablet-map-column" data-tutorial-context={tutorialOnList ? 'true' : undefined}>
+        <div className="tablet-map-column">
           <div className="tablet-section-title"><span>01 / MAPA DA ÁREA</span><b>SETOR ORLA</b></div>
-<<<<<<< HEAD
           <div className="tablet-map-frame">
             <div className="tablet-map tablet-map-stage" role="grid" aria-label="Mini mapa da Orla" style={mapStyle}>
               {ORLA_MAP.rows.flatMap((row, rowIndex) => Array.from(row, (kind, column) => {
@@ -242,67 +237,33 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
             </div>
             <div className="tablet-map-compass">N <i>▲</i></div>
             <div className="tablet-map-scale"><i /> {SCALE_METERS} m</div>
-=======
-          <div className="tablet-map-stage" style={mapStyle}>
-            <div className="tablet-map-frame">
-              <div className="tablet-map" role="grid" aria-label="Mini mapa da Orla">
-                {ORLA_MAP.rows.flatMap((row, rowIndex) => Array.from(row, (kind, column) => {
-                  const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
-                  const tileClass = kind === '-' && rowIndex === SIDEWALK_ROW ? 'sidewalk' : tiles[kind] ?? 'sand';
-                  const trafficZoneTile = kind === 'R' ? ' traffic-zone zone-' + trafficZone : '';
-                  const pedestrianZoneTile = rowIndex === SIDEWALK_ROW && Math.abs(column - CROSSING_COLUMN) <= 1 ? ' pedestrian-zone zone-' + pedestrianZone : '';
-                  return <div key={rowIndex + '-' + column} role="gridcell" className={'map-tile ' + tileClass + trafficZoneTile + pedestrianZoneTile + (issues.length ? ' has-incident' : '')}>
-                    {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { analyze(issues[0].id); event.currentTarget.blur(); }}>
-                      <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>
-                    </button>}
-                    {!issues.length && ['B', 'C', 'E'].includes(kind) && <span className={`map-object object-${kind.toLowerCase()}`}>{kind === 'B' ? '▰' : kind === 'C' ? '□' : '⌂'}</span>}
-                  </div>;
-                }))}
-                <span className="map-road-marks" style={roadMarksStyle} aria-hidden="true" />
-                <span className="map-crossing cycle-crossing" style={cycleCrossingStyle} aria-hidden="true" />
-                <span className="map-crossing tactile-cycle-edge" style={tactileEdgeStyle} aria-hidden="true" />
-                <span className="map-crossing north-curb-ramp" style={curbRampStyle} aria-hidden="true" />
-                <span className="map-crossing road-crossing" style={roadCrossingStyle} aria-hidden="true" />
-              </div>
-              <div className="tablet-map-compass">N <i>▲</i></div>
-              <div className="tablet-map-scale"><i style={{ width: `calc(${(SCALE_METERS / MAP_WIDTH) * 100} * var(--map-width) / 100)` }} /> {SCALE_METERS} m</div>
-            </div>
->>>>>>> b48902433eeb07912e24e089e36dc33e7a0b55eb
           </div>
-          <div className="tablet-map-footer">
-            <div className="tablet-flow-zones" aria-label="Condições de circulação">
-              <span className={'flow-zone ' + trafficZone} aria-label={'Veículos: ' + queuedVehicles + ' na fila, condição ' + zoneLabel[trafficZone].toLocaleLowerCase('pt-BR')}>
-                <i aria-hidden="true">🚗</i><b>{queuedVehicles}</b><small>CARROS · {zoneLabel[trafficZone]}</small>
-              </span>
-              <span className={'flow-zone ' + pedestrianZone} aria-label={'Pedestres: ' + waitingPedestrians + ' esperando, condição ' + zoneLabel[pedestrianZone].toLocaleLowerCase('pt-BR')}>
-                <i aria-hidden="true">🚶</i><b>{waitingPedestrians}</b><small>PEDESTRES · {zoneLabel[pedestrianZone]}</small>
-              </span>
-            </div>
-            <div className="tablet-map-legend"><span><i className="legend-sea" /> MAR</span><span><i className="legend-prom" /> CALÇADÃO</span><span><i className="legend-cycle" /> CICLOVIA</span><span><i className="legend-road" /> AVENIDA</span><span><i className="legend-electric" /> AV. VERDE</span><span><i className="legend-alert">!</i> ALERTA</span></div>
+          <div className="tablet-flow-zones" aria-label="Condições de circulação">
+            <span className={'flow-zone ' + trafficZone} aria-label={'Veículos: ' + queuedVehicles + ' na fila, condição ' + zoneLabel[trafficZone].toLocaleLowerCase('pt-BR')}>
+              <i aria-hidden="true">🚗</i><b>{queuedVehicles}</b><small>CARROS · {zoneLabel[trafficZone]}</small>
+            </span>
+            <span className={'flow-zone ' + pedestrianZone} aria-label={'Pedestres: ' + waitingPedestrians + ' esperando, condição ' + zoneLabel[pedestrianZone].toLocaleLowerCase('pt-BR')}>
+              <i aria-hidden="true">🚶</i><b>{waitingPedestrians}</b><small>PEDESTRES · {zoneLabel[pedestrianZone]}</small>
+            </span>
+          </div>
+          <div className="tablet-map-legend"><span><i className="legend-sea" /> MAR</span><span><i className="legend-green" /> CALÇADÃO</span><span><i className="legend-cycle" /> CICLOVIA</span><span><i className="legend-road" /> AVENIDA</span><span><i className="legend-electric" /> AVENIDA VERDE</span><span><i className="legend-alert">!</i> ALERTA</span></div>
           <div className="tablet-map-callout"><span className="callout-dot" /> {String(activeCount).padStart(2, '0')} {activeCount === 1 ? 'OCORRÊNCIA ATIVA' : 'OCORRÊNCIAS ATIVAS'}</div>
-          </div>
-          <div className="tablet-section-title tablet-list-title"><span>OCORRÊNCIAS</span><b className="active-tag"><i /> {activeCount} ATIVA{activeCount === 1 ? '' : 'S'}</b></div>
-          <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
-            {problems.map(problem => {
-              const tutorialTarget = tutorialOnList && problem.status !== 'RESOLVED';
-              return <button key={problem.id} role="listitem" data-tutorial-target={tutorialTarget ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialTarget ? ' tutorial-focus' : ''}`} onClick={event => { analyze(problem.id); event.currentTarget.blur(); }}>
-                <span className="incident-icon">{problem.type === 'broken-light-pole' || problem.type === 'ev-charger-repair' ? 'ϟ' : '!'}</span>
-                <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.towStatus && problem.towStatus !== 'not-called' ? problem.towStatus === 'done' ? 'VIA LIBERADA' : problem.towStatus === 'loading' ? 'GUINCHO NO LOCAL' : 'GUINCHO A CAMINHO' : problemStatus(problem)}</small><b>{problemTitle(problem)}</b><em>{problemLocation(problem)}{problem.id === 'roadside-breakdown' ? ' · faixa bloqueada' : ` · ${problem.dispatchedTeams.length}/${problem.requiredTeams?.length ?? 2} equipes`}</em></span>
-                <span className="incident-chevron">›</span>
-              </button>;
-            })}
-            {!problems.length && <div className="tablet-empty-list">A central está monitorando. O próximo chamado chega no horário previsto.</div>}
-          </div>
         </div>
 
-        <div className="tablet-incident-column" data-tutorial-context={tutorialOnAction ? 'true' : undefined}>
-          <div className="tablet-section-title">
-            <span>02 / ATENDIMENTO</span>
-            <div className="tablet-workflow" aria-label="Fluxo de atendimento">
-              <span data-state={!issue ? 'waiting' : issue.analyzed ? 'done' : 'current'}><i>1</i><b>Analisar chamado</b></span>
-              <em aria-hidden="true">›</em>
-              <span data-state={!issue ? 'waiting' : allDispatched ? 'done' : issue.analyzed ? 'current' : 'waiting'}><i>2</i><b>Solicitar reforço</b></span>
-            </div>
+        <div className="tablet-incident-column">
+          <div className="tablet-section-title"><span>02 / CENTRAL DE OCORRÊNCIAS</span><b className="active-tag"><i /> {activeCount} ATIVA{activeCount === 1 ? '' : 'S'}</b></div>
+          <div className="tablet-workflow" aria-label="Fluxo de atendimento">
+            <span data-state={!issue ? 'waiting' : issue.analyzed ? 'done' : 'current'}><i>1</i><b>{isTowIssue ? 'Analisar pane' : 'Analisar chamado'}</b></span>
+            <em aria-hidden="true">›</em>
+            <span data-state={!issue ? 'waiting' : isTowIssue ? issue.towStatus === 'done' || resolved ? 'done' : issue.towStatus === 'not-called' && issue.analyzed ? 'current' : issue.towStatus === 'not-called' ? 'waiting' : 'current' : allDispatched ? 'done' : issue.analyzed ? 'current' : 'waiting'}><i>2</i><b>{isTowIssue ? 'Chamar guincho' : 'Solicitar reforço'}</b></span>
+          </div>
+          <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
+            {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { analyze(problem.id); event.currentTarget.blur(); }}>
+              <span className="incident-icon">{problem.type === 'broken-light-pole' || problem.type === 'ev-charger-repair' ? 'ϟ' : '!'}</span>
+              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.towStatus && problem.towStatus !== 'not-called' ? problem.towStatus === 'done' ? 'VIA LIBERADA' : problem.towStatus === 'loading' ? 'GUINCHO NO LOCAL' : 'GUINCHO A CAMINHO' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.id === 'roadside-breakdown' ? 'Av. da Orla · faixa bloqueada' : problem.type === 'broken-light-pole' ? 'Av. da Orla' : problem.type === 'ev-charger-repair' ? 'Avenida Verde' : 'Setor Orla'}{problem.id === 'roadside-breakdown' ? '' : ` · ${problem.dispatchedTeams.length}/${problem.requiredTeams?.length ?? 2} equipes`}</em></span>
+              <span className="incident-chevron">›</span>
+            </button>)}
+            {!problems.length && <div className="tablet-empty-list">A central está monitorando. O próximo chamado chega no horário previsto.</div>}
           </div>
           <div className={`tablet-detail-card${!selected || !issue ? ' is-unselected' : ''}`}>
             <div className="tablet-detail-heading"><span className="detail-alert">!</span><div><small>RELATÓRIO DE CAMPO</small><b>{selected && issue ? problemTitle(issue) : 'Selecione uma ocorrência'}</b></div></div>
@@ -312,12 +273,7 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
                 ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
                 : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
               : 'Escolha um alerta na lista ou no mapa para abrir os detalhes e preparar o atendimento.'}</p>
-            {selected && issue && <dl className="tablet-detail-facts">
-              <div><dt>LOCAL</dt><dd>{problemLocation(issue)}</dd></div>
-              <div><dt>CATEGORIA</dt><dd>{problemCategory(issue)}</dd></div>
-              <div><dt>SITUAÇÃO</dt><dd>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : isTowIssue && issue.towStatus !== 'not-called' ? towProgressLabel : 'RISCO EM ANÁLISE'}</dd></div>
-              <div><dt>EQUIPES</dt><dd>{isTowIssue ? 'ATENDIMENTO DA ANALISTA' : `${issue.dispatchedTeams.length}/${requiredTeams.length} ACIONADAS`}</dd></div>
-            </dl>}
+            {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : isTowIssue && issue.towStatus !== 'not-called' ? towProgressLabel : 'RISCO EM ANÁLISE'}</span><span>{isTowIssue ? 'ATENDIMENTO DA ANALISTA' : `${issue.dispatchedTeams.length}/${requiredTeams.length} EQUIPES ACIONADAS`}</span></div>}
           </div>
           <div className="tablet-team-title"><span>{isTowIssue ? 'CONTATO DE EMERGÊNCIA' : 'PLANO DE RESPOSTA'}</span><small>{isTowIssue ? 'REBOQUE' : `${issue?.dispatchedTeams.length ?? 0}/${requiredTeams.length} EQUIPES`}</small></div>
           {isTowIssue ? <div className="tow-status-card"><span className="tow-status-icon">{issue?.towStatus === 'done' ? '✓' : '↗'}</span><span><b>{towProgressLabel}</b><small>{issue?.towStatus === 'not-called' ? 'Analise o chamado e consulte os contatos disponíveis.' : issue?.towStatus === 'en-route' ? 'O veículo de apoio está se aproximando.' : issue?.towStatus === 'loading' ? 'O carro está sendo preso à plataforma.' : 'O guincho está retirando o carro da avenida.'}</small></span></div> : <div className="tablet-teams">
@@ -330,18 +286,9 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
                 <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : taskLabel}</small></span>
               </div>;
             })}
-<<<<<<< HEAD
           </div>}
           <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && (isTowIssue ? !!issue?.analyzed && !canCallTow : allDispatched && tutorialStep == null))} onClick={event => { if (isTowIssue && issue?.analyzed && canCallTow) { setPhoneFeedback(''); setPhoneOpen(true); } else onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : isTowIssue && canCallTow ? '☎' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : isTowIssue && canCallTow ? '☎' : 'E'}</kbd></button>
           <small className="tablet-action-hint">{!issue ? 'Aguarde o próximo chamado da central.' : resolved ? 'Relatório concluído. Arquive para registrar XP e liberar o próximo chamado.' : isTowIssue ? !issue.analyzed ? 'Leia o registro da pane para abrir os contatos de emergência.' : canCallTow ? 'Escolha o serviço correto na lista telefônica para enviar o guincho.' : 'Acompanhe a chegada e aguarde o reboque liberar a faixa.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relatório e confirme a análise para continuar.' : allDispatched ? 'Reforço solicitado. Escolha uma equipe liberada para agir.' : 'Análise concluída. Solicite reforço para liberar a equipe.'}</small>
-=======
-            {!requiredTeams.length && <div className="tablet-empty-list">Nenhuma equipe necessária no momento.</div>}
-          </div>
-          <div className="tablet-action-dock">
-            <button data-tutorial-target={tutorialOnAction ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialOnAction ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && (isTowIssue ? !!issue?.analyzed && !canCallTow : allDispatched && tutorialStep == null))} onClick={event => { if (isTowIssue && issue?.analyzed && canCallTow) { setPhoneFeedback(''); setPhoneOpen(true); } else onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : isTowIssue && canCallTow ? '☎' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : isTowIssue && canCallTow ? '☎' : 'E'}</kbd></button>
-            <small className="tablet-action-hint">{!issue ? 'Aguarde o próximo chamado da central.' : resolved ? 'Relatório concluído. Arquive para registrar XP e liberar o próximo chamado.' : isTowIssue ? !issue.analyzed ? 'Leia o registro da pane para abrir os contatos de emergência.' : canCallTow ? 'Escolha o serviço correto na lista telefônica para enviar o guincho.' : 'Acompanhe a chegada e aguarde o reboque liberar a faixa.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relatório e confirme a análise para continuar.' : allDispatched ? 'Reforço solicitado. Escolha uma equipe liberada para agir.' : 'Análise concluída. Solicite reforço para liberar a equipe.'}</small>
-          </div>
->>>>>>> b48902433eeb07912e24e089e36dc33e7a0b55eb
         </div>
       </div>
       <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>
