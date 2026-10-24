@@ -432,8 +432,8 @@ export class Player {
       leg.end.rotation.x = -leg.root.rotation.x - knee;
     }
     if (this.tablet.visible) {
-      // A analista pode andar com o tablet; inclina a cabeca e segura o tablet
-      // com leve balanco de caminhada nos bracos.
+      // Com o tablet aberto a personagem fica parada (Fase1OrlaScene); o balanço
+      // nos braços só aparece durante a desaceleração ao abrir.
       this.head.rotation.x = 0.22 - move * 0.04;
       for (const arm of this.arms) {
         const tabletSwing = Math.sin(this.gait + (arm.side === 1 ? Math.PI : 0)) * 0.06 * move;

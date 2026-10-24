@@ -126,10 +126,12 @@ test('Client: movimentos e ações só saem durante partida válida e nunca fals
   session(ws, 'playing'); client.move('infraestrutura', 1, 2, 0);
   assert.deepEqual(ws.sent.at(-1), { type: 'move', x: 1, z: 2, yaw: 0 });
   ws.message({ type: 'pause', paused: true, by: 'Bia' });
-  client.action({ type: 'repair-complete' }); assert.equal(ws.sent.length, 1);
+  client.move('infraestrutura', 3, 3, 0); assert.equal(ws.sent.length, 1, 'movimento não sai na pausa');
+  client.action({ type: 'repair-complete' });
+  assert.deepEqual(ws.sent.at(-1), { type: 'action', action: { type: 'repair-complete' } }, 'ação já aplicada localmente segue mesmo na pausa');
   ws.message({ type: 'session-ended', code: 'PLAYER_LEFT', message: 'A equipe saiu.' });
   assert.equal(client.hasSession('id1', 'ABCD1234'), false);
-  client.move('analista', 2, 3, 0); assert.equal(ws.sent.length, 1); client.disconnect();
+  client.move('analista', 2, 3, 0); assert.equal(ws.sent.length, 2); client.disconnect();
 });
 test('Client: composição da equipe espelha o servidor e permissões da central compartilhada', () => {
   const { coopTeamMode, coopHasAnalystAccess, COOP_MIN_PLAYERS, COOP_MAX_PLAYERS } = CoopClientModule;
@@ -189,6 +191,25 @@ test('Client e servidor reais: dupla inicia, entra no tutorial e recebe análise
   m.action({ type: 'analyze', problemId: 'traffic-signal-failure' });
   const action = await received;
   assert.equal(action.role, 'mobilidade'); assert.equal(action.action.type, 'analyze');
+});
+test('Client: entra sem personagem e aceita vagas ainda em escolha, sem aceitar papel repetido', async () => {
+  const { coopTeamMode } = CoopClientModule;
+  assert.equal(coopTeamMode([{ role: 'mobilidade' }, { role: null }]), null);
+  const { client, ws } = await connected();
+  const creating = client.createRoom('Ana');
+  assert.deepEqual(ws.sent.at(-1), { type: 'create-room', name: 'Ana', isPublic: true, requestId: ws.sent.at(-1).requestId }, 'nenhum papel é enviado antes da sala');
+  ws.message({ type: 'joined', id: 'id1', role: null, code: 'ABCD1234', host: true });
+  ws.message({ type: 'ack', requestId: ws.sent.at(-1).requestId }); await creating;
+  const choosing = [{ ...player, role: null, ready: false }, { ...player, id: 'id2', role: null, ready: false, host: false }];
+  ws.message({ type: 'room', code: 'ABCD1234', phase: 'lobby', isPublic: true, paused: false, mode: null, players: choosing });
+  assert.equal(client.state, 'connected', 'duas pessoas escolhendo ao mesmo tempo é válido');
+  assert.equal(client.currentRoom.players[0].role, null);
+  const joining = client.join('WXYZ5678', 'Bia');
+  assert.equal('role' in ws.sent.at(-1), false);
+  ws.message({ type: 'ack', requestId: ws.sent.at(-1).requestId }); await joining;
+  const duplicated = [{ ...player, role: 'mobilidade' }, { ...player, id: 'id2', role: 'mobilidade', host: false }];
+  ws.message({ type: 'room', code: 'ABCD1234', phase: 'lobby', isPublic: true, paused: false, players: duplicated });
+  assert.equal(client.state, 'disconnected', 'papel repetido continua sendo protocolo inválido');
 });
 test('Client e servidor reais: criação, listagem, papel ocupado e confirmação de entrada', async t => {
   global.WebSocket = realWebSocket;

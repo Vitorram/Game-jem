@@ -1,7 +1,8 @@
 export type CoopRole = 'analista' | 'mobilidade' | 'infraestrutura';
 /** 'trio': cada papel com uma pessoa. 'duo': Mobilidade + Infraestrutura dividem o tablet da Analista. */
 export type CoopTeamMode = 'trio' | 'duo';
-export type CoopPlayer = { id: string; name: string; role: CoopRole; ready: boolean; tutorialReady: boolean; host: boolean };
+/** `role` é null enquanto a pessoa ainda escolhe a personagem dentro da sala. */
+export type CoopPlayer = { id: string; name: string; role: CoopRole | null; ready: boolean; tutorialReady: boolean; host: boolean };
 export type CoopRoom = {
   code: string; phase: 'lobby' | 'story' | 'tutorial' | 'playing'; isPublic: boolean; paused: boolean; players: CoopPlayer[];
   mode?: CoopTeamMode | null; sharedAnalyst?: boolean;
@@ -15,7 +16,8 @@ export type CoopAction =
   | { type: 'call-tow'; problemId: string }
   | { type: 'mobility-hotkey'; key: string; pose: { x: number; z: number; yaw: number } }
   | { type: 'repair-complete' }
-  | { type: 'problem-select'; problemId: string | null };
+  | { type: 'problem-select'; problemId: string | null }
+  | { type: 'tablet'; open: boolean };
 export type CoopConnectionState = 'connecting' | 'connected' | 'disconnected';
 export type CoopMessage =
   | { type: 'open' }
@@ -23,7 +25,7 @@ export type CoopMessage =
   | { type: 'ack'; requestId: string }
   | { type: 'left' }
   | { type: 'session-ended'; code: string; message: string }
-  | { type: 'joined'; id: string; role: CoopRole; code: string; host: boolean }
+  | { type: 'joined'; id: string; role: CoopRole | null; code: string; host: boolean }
   | ({ type: 'room' } & CoopRoom)
   | { type: 'rooms'; rooms: CoopRoomListing[] }
   | { type: 'game-start'; room: string; startDelayMs: number; players: CoopPlayer[]; mode?: CoopTeamMode; sharedAnalyst?: boolean }
@@ -46,6 +48,7 @@ export const COOP_MAX_PLAYERS = roles.length;
 export const COOP_DUO_ROLES: readonly CoopRole[] = ['mobilidade', 'infraestrutura'];
 /** Mesma regra do servidor (backend/protocol.mjs): o lobby só a usa para orientar, quem decide é o servidor. */
 export function coopTeamMode(members: readonly Pick<CoopPlayer, 'role'>[]): CoopTeamMode | null {
+  if (members.some(member => !member.role)) return null;
   const unique = new Set(members.map(member => member.role));
   if (unique.size !== members.length) return null;
   if (members.length === COOP_MAX_PLAYERS && roles.every(role => unique.has(role as CoopRole))) return 'trio';
@@ -57,12 +60,13 @@ const optionalBoolean = (value: unknown) => value === undefined || typeof value 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 1024;
 const validRole = (value: unknown) => typeof value === 'string' && roles.includes(value);
+const validSeat = (value: unknown) => value === null || validRole(value);
 const validPose = (value: unknown) => record(value) && ['x', 'z', 'yaw'].every(key => Number.isFinite(value[key]));
 const players = (value: unknown): boolean => Array.isArray(value) && value.length <= 3 && value.every(player =>
-  record(player) && string(player.id) && string(player.name) && validRole(player.role)
+  record(player) && string(player.id) && string(player.name) && validSeat(player.role)
   && ['ready', 'tutorialReady', 'host'].every(key => typeof player[key] === 'boolean'))
   && new Set(value.map(player => player.id)).size === value.length
-  && new Set(value.map(player => player.role)).size === value.length;
+  && new Set(value.filter(player => player.role !== null).map(player => player.role)).size === value.filter(player => player.role !== null).length;
 const listing = (value: unknown) => record(value) && string(value.code) && typeof value.phase === 'string' && phases.includes(value.phase) && players(value.players) && validMode(value.mode);
 function validAction(value: unknown): boolean {
   if (!record(value)) return false;
@@ -73,6 +77,7 @@ function validAction(value: unknown): boolean {
     case 'repair-complete': return true;
     case 'analyze': case 'archive': case 'call-tow': return string(value.problemId);
     case 'problem-select': return value.problemId === null || string(value.problemId);
+    case 'tablet': return typeof value.open === 'boolean';
     default: return false;
   }
 }
@@ -83,7 +88,7 @@ function isServerMessage(value: unknown): value is CoopMessage {
     case 'left': return true;
     case 'error': return string(value.code) && string(value.message) && (value.requestId === undefined || string(value.requestId));
     case 'session-ended': return string(value.code) && string(value.message);
-    case 'joined': return string(value.id) && validRole(value.role) && string(value.code) && typeof value.host === 'boolean';
+    case 'joined': return string(value.id) && validSeat(value.role) && string(value.code) && typeof value.host === 'boolean';
     case 'room': return listing(value) && typeof value.isPublic === 'boolean' && typeof value.paused === 'boolean' && optionalBoolean(value.sharedAnalyst);
     case 'rooms': return Array.isArray(value.rooms) && value.rooms.every(listing);
     case 'game-start': return string(value.room) && players(value.players) && typeof value.startDelayMs === 'number' && value.startDelayMs >= 0 && value.startDelayMs <= 10000
@@ -111,7 +116,7 @@ export class CoopClient {
   private readonly listeners = new Set<Listener>();
   private readonly pending = new Map<string, Pending>();
   private sequence = 0;
-  private identity: { id: string; code: string; role: CoopRole } | null = null;
+  private identity: { id: string; code: string; role: CoopRole | null } | null = null;
   private room: CoopRoom | null = null;
   private connectionState: CoopConnectionState = 'disconnected';
   constructor(readonly url = defaultUrl(), private readonly timeoutMs = 8000) {}
@@ -195,9 +200,10 @@ export class CoopClient {
       catch { this.disconnect('Não foi possível enviar o comando. Entre novamente na sala.'); }
     });
   }
-  createRoom(name: string, role: CoopRole, isPublic = true): Promise<void> { return this.request({ type: 'create-room', name, role, isPublic }); }
-  join(code: string, name: string, role: CoopRole): Promise<void> { return this.request({ type: 'join', code, name, role }); }
-  joinOpen(code: string, name: string, role: CoopRole): Promise<void> { return this.request({ type: 'join-open', code, name, role }); }
+  // Sem papel, a pessoa entra "escolhendo" e define a personagem na sala com setRole.
+  createRoom(name: string, role: CoopRole | null = null, isPublic = true): Promise<void> { return this.request({ type: 'create-room', name, isPublic, ...(role ? { role } : {}) }); }
+  join(code: string, name: string, role: CoopRole | null = null): Promise<void> { return this.request({ type: 'join', code, name, ...(role ? { role } : {}) }); }
+  joinOpen(code: string, name: string, role: CoopRole | null = null): Promise<void> { return this.request({ type: 'join-open', code, name, ...(role ? { role } : {}) }); }
   requestRooms(): Promise<void> { return this.request({ type: 'list-rooms' }); }
   setPublic(isPublic: boolean): Promise<void> { return this.request({ type: 'set-public', isPublic }); }
   setRole(role: CoopRole): Promise<void> { return this.request({ type: 'set-role', role }); }
@@ -208,7 +214,8 @@ export class CoopClient {
   tutorialReady(ready: boolean): Promise<void> { return this.request({ type: 'tutorial-ready', ready }); }
   private gameplay(message: Record<string, unknown>): void {
     if (this.socket?.readyState !== WebSocket.OPEN || this.room?.phase !== 'playing') return;
-    if (this.room.paused && message.type !== 'pause') return;
+    // Ações discretas já foram aplicadas aqui: seguem mesmo em pausa para a parceira não divergir.
+    if (this.room.paused && message.type === 'move') return;
     try { this.socket.send(JSON.stringify(message)); }
     catch { this.disconnect('Conexão perdida ao enviar uma ação.'); }
   }

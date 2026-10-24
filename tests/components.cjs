@@ -87,6 +87,24 @@ test('coop em dupla: tablet identifica a equipe que opera a central compartilhad
   assert.ok(buttons(shared).some(action => action.text.includes('Guardar tablet')), 'cada pessoa guarda o próprio tablet');
 });
 
+test('Lobby coop: antes de entrar na sala só pede o nome; a personagem é escolhida dentro dela', t => {
+  const originalLoad = Module._load;
+  t.mock.method(Module, '_load', function (id, ...args) {
+    if (id === 'next/navigation') return { useRouter: () => ({ push: noop }) };
+    return originalLoad.call(this, id, ...args);
+  });
+  const { renderToStaticMarkup } = require('react-dom/server');
+  const { createElement } = require('react');
+  const lobbyPath = path.join(SRC, 'components', 'coop', 'CoopLobby.tsx');
+  delete require.cache[lobbyPath];
+  const html = renderToStaticMarkup(createElement(require(lobbyPath).default));
+  assert.match(html, /Como podemos te chamar\?/);
+  assert.doesNotMatch(html, /Escolha seu papel|Escolha sua personagem/, 'nenhum seletor de personagem antes da sala');
+  assert.doesNotMatch(html, /aria-pressed/, 'nenhum card de personagem para pré-selecionar');
+  assert.match(html, /escolhe dentro da sala/);
+  for (const label of ['Criar sala', 'Salas abertas', 'Entrar com código']) assert.ok(buttons(html).some(action => action.text.includes(label)), label);
+});
+
 test('CT-6.1: alertas do tablet usam cor junto com símbolo e texto', () => {
   const { suburbanGameState } = require(path.join(SRC, 'game', 'core', 'GameState.ts'));
   suburbanGameState.reset();

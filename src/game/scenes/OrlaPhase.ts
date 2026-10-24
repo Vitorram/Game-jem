@@ -172,9 +172,42 @@ export class OrlaPhase {
     return true;
   }
 
+  /** Posição do chamado na agenda deste cliente: já encerrado, em andamento ou ainda por vir. */
+  eventStatus(id: string): 'past' | 'current' | 'future' | 'unknown' {
+    const index = ORLA_EVENTS.findIndex(event => event.id === id);
+    if (index < 0) return 'unknown';
+    return index < this.eventIndex ? 'past' : index === this.eventIndex ? 'current' : 'future';
+  }
+
+  /**
+   * Coop: a parceira já resolveu e arquivou este chamado, mas a simulação local (trânsito,
+   * pedestres) não chegou ao mesmo resultado. Conclui os passos que faltam e desfaz os
+   * efeitos do evento para que as agendas dos dois clientes voltem a coincidir.
+   */
+  resolveFromPeer(id: string): boolean {
+    const event = ORLA_EVENTS[this.eventIndex];
+    const problem = event && this.problem(event.id);
+    if (!event || event.id !== id || !problem) return false;
+    if (problem.status === 'RESOLVED') return true;
+    this.clearEventEffects(id);
+    for (const step of event.steps) this.step(id, step);
+    this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência concluída pela equipe parceira. Arquivando o relatório.' });
+    return true;
+  }
+
   expireOrder(id: string, continuePhase = true): void {
     const event = ORLA_EVENTS[this.eventIndex];
     if (!event || event.id !== id) return;
+    this.clearEventEffects(id);
+    suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
+    suburbanGameState.selectProblem(null);
+    this.eventIndex++;
+    this.dispatchStartedAt = null;
+    if (continuePhase) this.issueNext();
+  }
+
+  /** Desfaz no mundo o que o evento ligou (falhas, bloqueios, cones), sem mexer na agenda. */
+  private clearEventEffects(id: string): void {
     if (this.service?.id === id) this.service = null;
     if (id === 'traffic-signal-failure') {
       this.traffic.setCrossingGuarded(false);
@@ -201,12 +234,7 @@ export class OrlaPhase {
     this.rushFlowSeconds = 0;
     this.rushElectricDetourUsed = false;
     this.traffic.resetRoadInterventions();
-    suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
-    suburbanGameState.selectProblem(null);
     if (this.items.heldBy(2) === 'cone') this.items.consume(2, 'cone');
-    this.eventIndex++;
-    this.dispatchStartedAt = null;
-    if (continuePhase) this.issueNext();
   }
 
   private issueNext(): void {

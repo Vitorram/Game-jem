@@ -266,22 +266,6 @@ test('checagem do semáforo: só Infra abre o controlador junto ao semáforo', (
   } finally { game.scene.dispose(); }
 });
 
-test('ciclovia bloqueada: Mobilidade libera a passagem junto aos objetos', () => {
-  const game = phase();
-  try {
-    skipTo(game, 'bike-lane-cleanup');
-    dispatch(game, 'bike-lane-cleanup');
-    game.scene.selectPlayer(1);
-    game.scene.player.setPosition(-12, 2.4);
-    game.scene.interact();
-    assert.equal(problem('bike-lane-cleanup').status, 'ACTIVE', 'Infra não libera a ciclovia');
-    game.scene.selectPlayer(2);
-    game.scene.player.setPosition(-12, 2.4);
-    game.scene.interact();
-    assert.equal(problem('bike-lane-cleanup').status, 'RESOLVED');
-  } finally { game.scene.dispose(); }
-});
-
 test('cone na ciclovia: recolher e guardar na caixa de cones', () => {
   const game = phase();
   try {

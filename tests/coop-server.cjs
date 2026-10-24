@@ -67,7 +67,7 @@ test('Limite de salas, limpeza por queda de socket e deduplicação de criação
 test('Autorizações cobrem todas as ações por papel e limites dos payloads de interação', async () => {
   const { authorizeAction, validateMessage } = await import('../backend/protocol.mjs');
   const matrix = {
-    analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'],
+    analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select', 'tablet'],
     mobilidade: ['interact', 'mobility-hotkey'], infraestrutura: ['interact', 'repair-complete'],
   };
   const actions = [...new Set(Object.values(matrix).flat())];
@@ -192,10 +192,11 @@ test('Ações: papel vinculado ao socket, isolamento entre salas, pausa e dedupl
   assert.equal((await i.request({ ...message, action: { type: 'interact', axis: { x: 0, z: 0 }, pose: { x: 0, z: 0, yaw: 0 } } })).code, 'REQUEST_CONFLICT');
   await a.request({ type: 'pause', paused: true });
   await m.next('pause');
-  assert.equal((await i.request({ type: 'action', action: { type: 'repair-complete' } })).code, 'GAME_PAUSED');
+  // A ação já foi aplicada em quem a enviou: na pausa ela segue para as demais; só o movimento cai.
+  assert.equal((await i.request({ type: 'action', action: { type: 'repair-complete' } })).type, 'ack');
   await i.request({ type: 'move', x: 5, z: 5, yaw: 0 });
   await a.request({ type: 'list-rooms' }); // Round-trip fence after all preceding messages.
-  assert.equal(a.events.filter(event => event.type === 'action').length, 1);
+  assert.equal(a.events.filter(event => event.type === 'action').length, 2);
   assert.equal(a.events.filter(event => event.type === 'move').length, 1);
   assert.equal(other.events.filter(event => ['move', 'action'].includes(event.type)).length, 0);
   await m.request({ type: 'pause', paused: false });
@@ -279,8 +280,9 @@ test('Composição: trio, dupla Mobilidade + Infraestrutura e regras que impedem
   for (const roles of [[], ['mobilidade'], ['analista', 'mobilidade'], ['analista', 'infraestrutura'], ['mobilidade', 'mobilidade']]) {
     assert.equal(teamMode(roles), null, roles.join('+') || 'sala vazia');
   }
-  assert.deepEqual([...permissionsFor('mobilidade', true)].sort(), ['analyze', 'archive', 'call-tow', 'dispatch', 'interact', 'mobility-hotkey', 'problem-select']);
-  assert.deepEqual([...permissionsFor('infraestrutura', true)].sort(), ['analyze', 'archive', 'call-tow', 'dispatch', 'interact', 'problem-select', 'repair-complete']);
+  assert.deepEqual([...permissionsFor('mobilidade', true)].sort(), ['analyze', 'archive', 'call-tow', 'dispatch', 'interact', 'mobility-hotkey', 'problem-select', 'tablet']);
+  assert.deepEqual([...permissionsFor('infraestrutura', true)].sort(), ['analyze', 'archive', 'call-tow', 'dispatch', 'interact', 'problem-select', 'repair-complete', 'tablet']);
+  assert.equal(permissionsFor('mobilidade').has('tablet'), false, 'no trio só a Analista mostra o tablet');
   assert.deepEqual([...permissionsFor('analista', true)].sort(), [...permissionsFor('analista')].sort(), 'modo em dupla não amplia a Analista');
 });
 
@@ -337,6 +339,7 @@ test('Trio continua com papéis exclusivos: equipes de campo não ganham ações
       assert.equal((await peer.request({ type: 'action', action })).code, 'FORBIDDEN');
     }
   }
+  assert.equal((await m.request({ type: 'action', action: { type: 'tablet', open: true } })).code, 'FORBIDDEN', 'no trio a Mobilidade não tem tablet');
   assert.equal((await a.request({ type: 'action', action: { type: 'analyze', problemId: 'p' } })).type, 'ack');
   assert.equal((await m.next('action')).role, 'analista');
 });
@@ -366,7 +369,10 @@ test('Dupla: backend autoriza a central compartilhada, mantém habilidades exclu
   assert.equal(relayed.filter(item => item === 'dispatch:mobilidade').length, 1, 'a mesma equipe não é acionada duas vezes');
   assert.equal(relayed.filter(item => item === 'archive:traffic-signal-failure').length, 1, 'XP do arquivamento não duplica');
   assert.equal(relayed.filter(item => item === 'analyze:minor-collision').length, 1, 'chamados diferentes não colidem');
-  const unexpected = [...m.events, ...i.events].filter(event => event.type === 'error' && event.code !== 'FORBIDDEN');
+  assert.equal((await i.request({ type: 'action', action: { type: 'tablet', open: true } })).type, 'ack');
+  assert.deepEqual((await m.next(event => event.type === 'action' && event.action.type === 'tablet')).action, { type: 'tablet', open: true });
+  assert.equal((await i.request({ type: 'action', action: { type: 'tablet', open: 'sim' } })).code, 'INVALID_MESSAGE');
+  const unexpected = [...m.events, ...i.events].filter(event => event.type === 'error' && !['FORBIDDEN', 'INVALID_MESSAGE'].includes(event.code));
   assert.deepEqual(unexpected, [], 'repetição absorvida sem erro (um erro derrubaria a sessão no cliente)');
 });
 
@@ -382,4 +388,36 @@ test('Dupla: desconexão encerra a sala para a parceira e libera o servidor', as
   assert.equal((await (await fetch(f.http + '/health')).json()).rooms, 0);
   const late = await f.connect();
   assert.equal((await join(late, code, 'infraestrutura')).code, 'ROOM_NOT_FOUND');
+});
+
+test('Escolha na sala: entra sem personagem, vê as vagas e disputa simultânea da mesma vaga tem uma vencedora', async t => {
+  const { teamMode } = await import('../backend/protocol.mjs');
+  assert.equal(teamMode(['mobilidade', null]), null, 'quem ainda escolhe impede o início');
+  const f = await fixture(t), h = await f.connect(), g = await f.connect(), watcher = await f.connect();
+  assert.equal((await h.request({ type: 'create-room', name: 'Ana', isPublic: true })).type, 'ack');
+  const joined = await h.next('joined');
+  assert.equal(joined.role, null, 'sala criada sem escolher personagem');
+  assert.equal((await h.request({ type: 'ready', ready: true })).code, 'ROLE_REQUIRED', 'não fica pronta sem personagem');
+  await watcher.request({ type: 'list-rooms' });
+  const listed = await watcher.next(message => message.type === 'rooms' && message.rooms.length === 1);
+  assert.deepEqual(listed.rooms[0].players.map(player => player.role), [null]);
+  assert.equal((await g.request({ type: 'join-open', code: joined.code, name: 'Bia' })).type, 'ack');
+  const lobby = await h.next(message => message.type === 'room' && message.players.length === 2);
+  assert.deepEqual(lobby.players.map(player => player.role), [null, null], 'as duas veem a sala com todas as vagas livres');
+  assert.equal(lobby.mode, null);
+  const [first, second] = await Promise.all([
+    h.request({ type: 'set-role', role: 'mobilidade' }), g.request({ type: 'set-role', role: 'mobilidade' }),
+  ]);
+  assert.deepEqual([first.type, second.type].sort(), ['ack', 'error'], 'só uma leva a mesma personagem');
+  assert.equal([first, second].find(result => result.type === 'error').code, 'ROLE_TAKEN');
+  const loser = first.type === 'error' ? h : g, winner = loser === h ? g : h;
+  await winner.request({ type: 'ready', ready: true });
+  assert.equal((await h.request({ type: 'start' })).code, 'TEAM_INCOMPLETE', 'não inicia com alguém escolhendo');
+  assert.match((await h.request({ type: 'start' })).message, /escolher uma personagem/);
+  assert.equal((await loser.request({ type: 'set-role', role: 'infraestrutura' })).type, 'ack');
+  await loser.request({ type: 'ready', ready: true });
+  assert.equal((await h.request({ type: 'start' })).type, 'ack');
+  const start = await g.next('game-start');
+  assert.equal(start.mode, 'duo');
+  assert.ok(start.players.every(player => player.role), 'a partida só começa com todas as personagens escolhidas');
 });

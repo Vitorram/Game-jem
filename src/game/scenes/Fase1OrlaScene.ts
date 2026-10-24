@@ -100,6 +100,8 @@ export class Fase1OrlaScene implements GameScene {
   private returningConeToCrate = false;
   private tutorialMovementEnabled = true;
   private analystTabletOpen = false;
+  private tabletHolderId: PlayerId | null = null;
+  private readonly remoteTablets = new Set<PlayerId>();
   private tutorialCollisionProtected = false;
   private tutorialWorkZonePrepared = false;
   private collisionRecovery: { player: Player; elapsed: number; from: { x: number; z: number }; spawn: { x: number; z: number }; push: { x: number; z: number }; respawned: boolean } | null = null;
@@ -123,6 +125,18 @@ export class Fase1OrlaScene implements GameScene {
   advancePhase(elapsedMs: number): void { this.phase?.advance(elapsedMs); }
   expirePhaseOrder(id: string, continuePhase = true): void { this.phase?.expireOrder(id, continuePhase); }
   phaseIsCinematic(): boolean { return this.phase?.isCinematicActive() ?? false; }
+  phaseEventStatus(id: string): 'past' | 'current' | 'future' | 'unknown' { return this.phase?.eventStatus(id) ?? 'future'; }
+  resolvePhaseOrderFromPeer(id: string): boolean {
+    const resolved = this.phase?.resolveFromPeer(id) ?? false;
+    if (resolved) this.itemVisuals.sync(this.items);
+    return resolved;
+  }
+
+  /** Tablet aberto por outra pessoa no coop: só aparência, a pose dela chega pela rede. */
+  setRemoteTabletOpen(id: PlayerId, open: boolean): void {
+    if (open) this.remoteTablets.add(id); else this.remoteTablets.delete(id);
+    this.players[id - 1]?.setTabletOpen(open || id === this.tabletHolderId);
+  }
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
@@ -504,9 +518,13 @@ export class Fase1OrlaScene implements GameScene {
   /** Em dupla quem segura o tablet é a Mobilidade ou a Infraestrutura local; senão, a Analista. */
   setAnalystTabletOpen(open: boolean, holderId: PlayerId = 3): void {
     this.analystTabletOpen = open && holderId === 3;
+    this.tabletHolderId = open ? holderId : null;
     for (const player of this.players) {
-      player.setTabletOpen((open && player.id === holderId) || (player.id === 3 && this.localCoopTabletOpen));
+      player.setTabletOpen((open && player.id === holderId) || this.remoteTablets.has(player.id)
+        || (player.id === 3 && this.localCoopTabletOpen));
     }
+    // Quem consulta o tablet fica parada no local; o resto do mundo segue normalmente.
+    if (open) this.players[holderId - 1].stopMovement();
   }
 
   setTutorialMovementEnabled(enabled: boolean): void {
@@ -546,8 +564,9 @@ export class Fase1OrlaScene implements GameScene {
         : player.role === 'mobilidade' || player.role === 'analista' ? this.resolveMobilityMovement : this.resolveOrlaMovement;
       const isP2 = this.localCoopInput !== null && this.localCoopPlayerId === player.id && !player.active;
       if (!player.active && !isP2) player.stopMovement();
-      const playerAxis = player.active ? axis : isP2 ? this.localCoopInput!.getAxis() : this.idle;
-      const sprinting = player.active ? this.input.isSprinting() : isP2 ? this.localCoopInput!.isSprinting() : false;
+      const holdingTablet = (player.active && player.id === this.tabletHolderId) || (isP2 && player.id === 3 && this.localCoopTabletOpen);
+      const playerAxis = holdingTablet ? this.idle : player.active ? axis : isP2 ? this.localCoopInput!.getAxis() : this.idle;
+      const sprinting = !holdingTablet && (player.active ? this.input.isSprinting() : isP2 ? this.localCoopInput!.isSprinting() : false);
       player.update(dt, playerAxis, movementResolver, sprinting);
     }
     if (!this.tutorialCollisionProtected && !recovering && this.collisionInvulnerability <= 0) this.checkPlayerCollision();

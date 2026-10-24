@@ -731,7 +731,7 @@ test('Game segue seleção na Orla, reenquadra no resize pausado e restaura labo
   renderer.loop(200);
   assert.ok(!camera.position.equals(fixed));
   assert.ok(camera.quaternion.angleTo(rotation) < 1e-7);
-  assert.equal(tweens.length, 0);
+  assert.equal(tweens.length, 1, 'só a aproximação de entrada da Orla; o acompanhamento não depende de tween');
   game.togglePause();
   host.clientWidth = 390;
   host.clientHeight = 844;
@@ -740,7 +740,7 @@ test('Game segue seleção na Orla, reenquadra no resize pausado e restaura labo
   assert.ok(Number.isFinite(camera.position.length()));
   game.returnToMenu();
   game.start();
-  assert.equal(tweens.length, 1, 'a entrada animada continua no laboratório');
+  assert.equal(tweens.length, 2, 'a entrada animada continua no laboratório');
   game.dispose();
 });
 
@@ -1088,6 +1088,7 @@ test('Analista móvel: ações exigem tablet aberto e atalhos enviam despacho no
   key('Digit1'); key('Digit2');
   assert.equal(dispatch.mock.callCount(), 2);
   assert.deepEqual(actions, [
+    { type: 'tablet', open: true },
     { type: 'dispatch', team: 'infraestrutura' }, { type: 'dispatch', team: 'mobilidade' },
   ]);
   game.interact();
@@ -1158,6 +1159,7 @@ test('coop em dupla: a Mobilidade opera o tablet da central sem perder a própri
     assert.deepEqual(suburbanGameState.findProblem(id).dispatchedTeams, ['infraestrutura', 'mobilidade']);
     assert.equal(hotkey.mock.callCount(), 0, 'com o tablet aberto os números acionam equipes, não habilidades');
     assert.deepEqual(actions, [
+      { type: 'tablet', open: true },
       { type: 'analyze', problemId: id },
       { type: 'dispatch', team: 'infraestrutura', problemId: id },
       { type: 'dispatch', team: 'mobilidade', problemId: id },
@@ -1166,6 +1168,7 @@ test('coop em dupla: a Mobilidade opera o tablet da central sem perder a própri
     pressKey('KeyQ');
     assert.equal(game.isAnalystTabletOpen, false);
     assert.equal(tablet(scene.players[1]), false);
+    assert.deepEqual(actions.at(-1), { type: 'tablet', open: false }, 'a parceira vê o tablet ser guardado');
     pressKey('Digit3');
     assert.equal(hotkey.mock.callCount(), 1, 'guardado o tablet, a Mobilidade volta às próprias habilidades');
     assert.equal(actions.at(-1).type, 'mobility-hotkey');
@@ -1234,6 +1237,64 @@ test('coop em trio: equipes de campo seguem sem tablet e aplicam a análise da A
     assert.equal(suburbanGameState.findProblem(id).analyzed, true);
     assert.deepEqual(suburbanGameState.findProblem(id).dispatchedTeams, ['mobilidade'], 'despacho antigo, sem chamado nomeado, continua aceito');
     assert.equal(suburbanGameState.activeCharacter, 2);
+  } finally { game.dispose(); }
+});
+
+test('coop em dupla: tablet da parceira aparece nela; quem consulta fica parada sem travar a outra', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.startCoopOrlaTutorial(2, { sharedAnalyst: true });
+    game.finishCoopTutorial();
+    const scene = game.scenes.current, renderer = created.at(-1);
+    const tablet = id => scene.players[id - 1].mesh.getObjectByName('analyst-handheld-tablet').visible;
+    game.applyCoopAction('infraestrutura', { type: 'tablet', open: true });
+    assert.equal(tablet(1), true, 'a Infraestrutura remota aparece com o tablet');
+    assert.equal(game.isAnalystTabletOpen, false, 'o tablet dela não abre o meu');
+    game.toggleAnalystTablet();
+    game.toggleAnalystTablet();
+    assert.equal(tablet(1), true, 'abrir e guardar o meu não esconde o dela');
+    game.toggleAnalystTablet();
+    const start = scene.players[1].position.clone();
+    game.input.setTouch(1, 'KeyD');
+    runUntil(renderer, 0, 500);
+    assert.deepEqual(scene.players[1].position, start, 'quem consulta o tablet fica parada');
+    game.applyCoopPose('infraestrutura', 3, 2, 0);
+    assert.equal(scene.players[0].position.x, 3, 'a parceira continua andando com o próprio tablet aberto');
+    game.applyCoopAction('infraestrutura', { type: 'tablet', open: false });
+    assert.equal(tablet(1), false);
+    assert.equal(tablet(2), true);
+  } finally { game.dispose(); }
+});
+
+test('coop: arquivamento da parceira converge a agenda mesmo quando a simulação local não resolveu', t => {
+  const { Game, Element, created } = gameHarness(t);
+  let now = 1_000;
+  t.mock.method(performance, 'now', () => now);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.startCoopOrlaTutorial(1, { sharedAnalyst: true });
+    game.finishCoopTutorial();
+    const scene = game.scenes.current, renderer = created.at(-1), id = ORLA_EVENTS[0].id;
+    let time = runUntil(renderer, 0, ORLA_EVENTS[0].atMs + 100);
+    game.applyCoopAction('mobilidade', { type: 'analyze', problemId: id });
+    for (const team of ORLA_EVENTS[0].teams) game.applyCoopAction('mobilidade', { type: 'dispatch', team, problemId: id });
+    const scoreBefore = sessionStore.getSnapshot().snapshot.score;
+    // Lá o semáforo foi consertado e a travessia terminou; aqui o trânsito ainda não concluiu.
+    game.applyCoopAction('mobilidade', { type: 'archive', problemId: id });
+    time = runUntil(renderer, time + 50, time + 500);
+    assert.ok(suburbanGameState.findProblem(id), 'primeiro dá tempo para a simulação local resolver sozinha');
+    assert.equal(scene.phase.eventIndex, 0);
+    now += 4_000;
+    runUntil(renderer, time + 50, time + 200);
+    assert.equal(suburbanGameState.findProblem(id), undefined, 'depois da tolerância o chamado é concluído e arquivado aqui');
+    assert.equal(scene.phase.eventIndex, 1, 'agenda alinhada com a parceira');
+    assert.equal(scene.traffic.isCrossingGuarded(), false, 'efeitos do chamado desfeitos no mundo');
+    assert.ok(sessionStore.getSnapshot().snapshot.score > scoreBefore, 'XP do chamado registrado também aqui');
+    game.applyCoopAction('mobilidade', { type: 'archive', problemId: id });
+    game.applyCoopAction('mobilidade', { type: 'analyze', problemId: id });
+    assert.equal(scene.phase.eventIndex, 1, 'ações tardias de um chamado já encerrado são descartadas');
+    assert.equal(game.deferredCoopActions.length, 0);
   } finally { game.dispose(); }
 });
 
