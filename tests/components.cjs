@@ -123,3 +123,122 @@ test('CT-4.2: pictograma do carro elétrico tem contraste mínimo de 3:1 (WCAG 1
   // O raio fica desenhado em cima do corpo do carro, então o contraste que importa é com o corpo.
   assert.ok(contrast(bolt, body) >= 3, `raio sobre o carro: ${contrast(bolt, body).toFixed(2)}:1`);
 });
+
+test('StoryIntro: prólogo inicia com a cena 3D ativa desde o primeiro beat e oferece controles acessíveis', () => {
+  const html = render('StoryIntro.tsx', { onComplete: noop });
+  assert.match(html, /role="dialog"[^>]*aria-label="Prólogo do Suburban"/);
+  assert.match(html, /\bcinema\b/, 'cena 3D ativa já no beat inicial');
+  assert.match(html, /data-shot="city"/);
+  const actions = buttons(html);
+  assert.ok(actions.some(a => /Pular/.test(a.text)), 'botão de pular prólogo presente');
+  assert.ok(actions.some(a => /Revelar texto|Continuar/.test(a.text)), 'botão de avanço presente');
+});
+
+test('IntroWorld: monta o cenário do jogo, mantém o tráfego vivo, encena a batida e encadeia os planos de cada beat', t => {
+  const three = require('three');
+  const { ROAD_LAYOUT } = require(path.join(SRC, 'game', 'map', 'roadLayout.ts'));
+  let loop = null, renderedScene = null, renderedCamera = null, renderer = null;
+  class MockRenderer {
+    shadowMap = {};
+    domElement = { setAttribute: noop, remove: noop, style: {} };
+    constructor() { renderer = this; }
+    setPixelRatio() {}
+    setSize() {}
+    setAnimationLoop(fn) { loop = fn; }
+    render(scene, camera) { renderedScene = scene; renderedCamera = camera; }
+    dispose() {}
+    forceContextLoss() {}
+  }
+  const originalLoad = Module._load;
+  t.mock.method(Module, '_load', function (id, ...args) {
+    if (id === 'three') return { ...three, WebGLRenderer: MockRenderer };
+    return originalLoad.call(this, id, ...args);
+  });
+  globalThis.window = globalThis.window ?? { devicePixelRatio: 1 };
+  globalThis.document = globalThis.document ?? { hidden: false, createElement: () => ({ getContext: () => null }) };
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+
+  const { suburbanGameState } = require(path.join(SRC, 'game', 'core', 'GameState.ts'));
+  const roadsBefore = JSON.stringify(suburbanGameState.snapshot().roads);
+  const introPath = path.join(SRC, 'game', 'cinematics', 'IntroWorld.ts');
+  delete require.cache[introPath];
+  const { createIntroWorld } = require(introPath);
+  const host = { clientWidth: 1280, clientHeight: 720, prepend: noop, dataset: {} };
+  let state = { shot: 'city', beat: 0, reducedMotion: true, paused: false };
+  const dispose = createIntroWorld(host, () => state);
+
+  assert.ok(renderedScene && renderedCamera, 'primeiro quadro renderizado imediatamente na montagem');
+  const names = new Set();
+  renderedScene.traverse(obj => { if (obj.name) names.add(obj.name); });
+  for (const name of ['analyst-observation-cabin', 'traffic-flow', 'cycleway-and-pedestrians', 'traffic-signals', 'electric-charger-1'])
+    assert.ok(names.has(name), `elemento do jogo presente no prólogo: ${name}`);
+  assert.ok([...names].some(n => n.startsWith('city-building-')), 'frente urbana sul fecha o fundo dos planos baixos');
+  const kinds = [...names].filter(n => n.startsWith('vehicle-'));
+  assert.ok(kinds.length >= 5, `frota variada como no jogo: ${kinds.join(', ')}`);
+
+  const roadZ = 6;
+  const vehicles = () => {
+    const found = [];
+    renderedScene.traverse(obj => { if (obj.name === 'traffic-vehicle' || obj.name === 'intro-vehicle') found.push(obj); });
+    return found;
+  };
+  // Todo veículo com as rodas no chão: o wrapper do jogo sobe 0,27 e o modelo desce 0,27.
+  for (const vehicle of vehicles()) assert.ok(Math.abs(vehicle.position.y + vehicle.children[0].position.y) < 1e-6, 'veículo apoiado no chão');
+  const filmLane = vehicles().filter(v => v.name === 'intro-vehicle');
+  assert.ok(filmLane.length && filmLane.every(v => Math.abs(v.position.z - (roadZ + ROAD_LAYOUT.eastbound[0])) < 1e-4 && v.rotation.y === 0),
+    'faixa do filme alinhada à leste 1, com carros retos');
+
+  let time = 16;
+  const play = (frames, onFrame = noop) => { for (let i = 0; i < frames; i++, time += 50) { loop(time); onFrame(); } };
+  // O tráfego anda mesmo com movimento reduzido: o prólogo é um filme.
+  const before = new Map(vehicles().map(v => [v, v.position.x]));
+  play(20);
+  assert.ok([...before].filter(([v, x]) => Math.abs(v.position.x - x) > .5).length >= 4, 'veículos em movimento');
+
+  const framings = [];
+  const canvas = renderer.domElement;
+  for (const [beat, shot] of ['city', 'city', 'city', 'incident', 'response', 'team'].entries()) {
+    let darkest = 1, lens = '';
+    for (const reducedMotion of [false, true]) {
+      state = { shot, beat, reducedMotion, paused: false };
+      play(30, () => { darkest = Math.min(darkest, Number(canvas.style.opacity)); if (host.dataset.lens) lens = host.dataset.lens; });
+      assert.ok(Number.isFinite(renderedCamera.position.x) && Number.isFinite(renderedCamera.position.z));
+    }
+    framings.push(renderedCamera.position.clone());
+    // A câmera de monitoramento e o acidente entram por um mergulho no escuro; os demais encadeiam movimentos.
+    if (beat === 2 || beat === 3) assert.ok(darkest < .1, `fade do beat ${beat} escurece a tela (${darkest})`);
+    else assert.equal(darkest, 1, `beat ${beat} entra sem fade`);
+    if (beat === 2) assert.equal(lens, 'cctv', 'beat 2 usa a lente de monitoramento');
+    assert.equal(canvas.style.opacity, '1.000', `beat ${beat} termina com a imagem visível`);
+    if (beat === 3) {
+      // A batida tira os dois carros do eixo e espalha peças pela pista.
+      const crashed = vehicles().filter(v => v.name === 'intro-vehicle' && Math.abs(v.rotation.y) > .15);
+      assert.equal(crashed.length, 2, 'os dois carros da batida giram com o impacto');
+      const debris = renderedScene.children.filter(c => c.isMesh && c.geometry?.parameters?.width === .09);
+      assert.ok(debris.length >= 10, 'peças soltas no asfalto');
+    }
+  }
+  // Cada beat termina num ângulo próprio, inclusive com movimento reduzido.
+  framings.forEach((position, i) => i && assert.ok(position.distanceTo(framings[i - 1]) > 2, `beat ${i} troca de ângulo`));
+  dispose();
+  assert.equal(JSON.stringify(suburbanGameState.snapshot().roads), roadsBefore, 'prólogo não publica estado das vias da partida');
+});
+
+test('OrdersHud: tolera 3 expirações sem declarar derrota e exibe fim por 4 missões expiradas', t => {
+  const { GameSession } = require(path.join(SRC, 'game', 'session', 'GameSession.ts'));
+  const { ORLA_SESSION_CONFIG } = require(path.join(SRC, 'game', 'session', 'sessionData.ts'));
+  const { sessionStore } = require(path.join(SRC, 'game', 'session', 'sessionStore.ts'));
+  t.mock.method(sessionStore, 'getServerSnapshot', () => sessionStore.getSnapshot());
+  const session = new GameSession(ORLA_SESSION_CONFIG);
+  sessionStore.bind(session);
+  sessionStore.start();
+  // Expira os 4 primeiros chamados em série até encerrar a partida.
+  for (let i = 0; i < 4; i++) sessionStore.tick(200_000);
+  assert.equal(session.snapshot().status, 'finished');
+  assert.equal(session.snapshot().expiredOrders, 4);
+  const html = render('OrdersHud.tsx', { paused: false });
+  assert.match(html, /VOCÊ PERDEU/);
+  assert.match(html, /Quatro missões venceram sem ser concluídas/);
+  assert.match(html, /Quatro missões expiraram/);
+  sessionStore.unbind(session);
+});

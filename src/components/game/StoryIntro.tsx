@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import type { IntroPlayback, IntroShot } from '@/game/cinematics/IntroWorld';
 import styles from './StoryIntro.module.css';
 
@@ -21,10 +21,10 @@ const SCRIPT = ([
   return { ...beat, letters, timing, typingEnd: at, duration: Math.max(beat.minimum, at + 2000) };
 });
 
-function CinematicWorld({ shot, reducedMotion, paused }: IntroPlayback) {
+const CinematicWorld = memo(function CinematicWorld({ shot, beat, reducedMotion, paused }: IntroPlayback) {
   const host = useRef<HTMLDivElement>(null);
-  const playback = useRef({ shot, reducedMotion, paused });
-  playback.current = { shot, reducedMotion, paused };
+  const playback = useRef({ shot, beat, reducedMotion, paused });
+  playback.current = { shot, beat, reducedMotion, paused };
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -38,7 +38,7 @@ function CinematicWorld({ shot, reducedMotion, paused }: IntroPlayback) {
   return <div ref={host} className={styles.world} data-shot={shot} aria-hidden="true">
     {failed && <div className={styles.fallback}><span /><i /><b /></div>}
   </div>;
-}
+});
 
 export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
   const root = useRef<HTMLDivElement>(null);
@@ -50,8 +50,10 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
   const [exiting, setExiting] = useState(false);
   const beat = SCRIPT[clock.beat];
   const finale = clock.beat === SCRIPT.length - 1;
-  const cinema = clock.beat >= 2;
-  const count = reducedMotion ? beat.letters.length : beat.timing.filter(at => at <= clock.time).length;
+  const cinema = clock.beat >= 0;
+  // A digitação faz parte da leitura do prólogo, não é movimento de câmera:
+  // continua ativa mesmo quando o sistema pede movimento reduzido.
+  const count = beat.timing.filter(at => at <= clock.time).length;
   const typed = count === beat.letters.length;
 
   useEffect(() => {
@@ -99,7 +101,7 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
       else if (!event.shiftKey && (document.activeElement === last || document.activeElement === root.current)) { event.preventDefault(); first.focus(); }
     }
   }}>
-    <div className={styles.film}><CinematicWorld shot={beat.shot} reducedMotion={reducedMotion} paused={paused || exiting || !cinema} /></div>
+    <div className={styles.film}><CinematicWorld shot={beat.shot} beat={clock.beat} reducedMotion={reducedMotion} paused={paused || exiting || !cinema} /></div>
     <div className={styles.vignette} aria-hidden="true" />
     <header className={styles.topbar}>
       <span className={styles.signature}><b>S</b> SUBURBAN <i /> <small>PRÓLOGO</small></span>

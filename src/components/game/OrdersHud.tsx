@@ -158,7 +158,7 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
   const allMissionsCompleted = snapshot.completedOrders === ORLA_EVENTS.length;
-  const lost = snapshot.expiredOrders >= 3;
+  const lost = snapshot.expiredOrders >= 4;
 
   useEffect(() => {
     const node = root.current;
@@ -182,7 +182,7 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
         <p className={`${styles.verdict}${allMissionsCompleted ? ` ${styles.farewellVerdict}` : ''}`}>{allMissionsCompleted
           ? 'Obrigado por jogar nossa primeira fase! Ficaremos felizes em ter você para testar nossas próximas fases e nosso modo coop. Nos veremos em breve!'
           : lost
-          ? 'Três missões venceram sem ser concluídas. Cada prazo encerrado tira XP. Jogue novamente e conclua as tarefas antes do tempo acabar.'
+          ? 'Quatro missões venceram sem ser concluídas. Cada prazo encerrado tira XP. Jogue novamente e conclua as tarefas antes do tempo acabar.'
           : SUMMARY_MESSAGES[stars]}</p>
         {allMissionsCompleted && <EndCredits />}
         <dl className={styles.stats}>
@@ -216,7 +216,7 @@ function PenaltyAlert({ feedback, finished, onContinue }: {
         <span className={styles.penaltyEyebrow}>ENTENDA O QUE ACONTECEU</span>
         <h2 id="penalty-title">Você perdeu {amount} XP</h2>
         <p>{explanation}</p>
-        {finished && <p className={styles.penaltyExtra}>Três missões expiraram. A partida terminou; veja o resultado e tente novamente.</p>}
+        {finished && <p className={styles.penaltyExtra}>Quatro missões expiraram. A partida terminou; veja o resultado e tente novamente.</p>}
         <button type="button" className={styles.primary} onClick={() => {
           sessionStore.dismissFeedback(feedback.seq);
           if (!finished) onContinue?.();
