@@ -85,6 +85,51 @@ function wave(
   });
 }
 
+/** Pedrinhas claras e escuras da pedra portuguesa, com leve variação de tom. */
+const MOSAIC_LIGHT = ['#ebe7de', '#e2ded3', '#f2efe7', '#d9d4c8', '#e6e1d5'];
+const MOSAIC_DARK = ['#2b2d2f', '#36393b', '#232526', '#41403d'];
+const MOSAIC_STONE = 4;
+
+/**
+ * Mosaico de pedra portuguesa: uma pedrinha irregular por célula, sobre rejunte
+ * cinza. A grade divide o canvas, então a textura continua emendando sem costura.
+ */
+function portugueseMosaic(
+  ctx: CanvasRenderingContext2D,
+  random: () => number,
+  isDark: (x: number, y: number) => boolean,
+): void {
+  ctx.fillStyle = '#a19c90';
+  ctx.fillRect(0, 0, SIZE, SIZE);
+
+  for (let y = 0; y < SIZE; y += MOSAIC_STONE) {
+    for (let x = 0; x < SIZE; x += MOSAIC_STONE) {
+      const palette = isDark(x + MOSAIC_STONE / 2, y + MOSAIC_STONE / 2) ? MOSAIC_DARK : MOSAIC_LIGHT;
+      ctx.fillStyle = palette[Math.floor(random() * palette.length)];
+      ctx.beginPath();
+      const gap = 0.5;
+      const corners = [[gap, gap], [MOSAIC_STONE - gap, gap], [MOSAIC_STONE - gap, MOSAIC_STONE - gap], [gap, MOSAIC_STONE - gap]];
+      corners.forEach(([cornerX, cornerY], index) => {
+        const px = x + cornerX + (random() - 0.5) * 0.8;
+        const py = y + cornerY + (random() - 0.5) * 0.8;
+        if (index === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      });
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+
+/**
+ * A textura do calçadão cobre 2×2 tiles (4 m): uma onda longa por largura e três
+ * faixas na profundidade, cerca de 1,3 m entre elas, com espessura que respira.
+ */
+const WAVE_BAND_SPACING = SIZE / 3;
+
+/** Texturas desenhadas com mais pixels, para cobrir mais de um tile sem perder detalhe. */
+const RESOLUTION: Partial<Record<TextureKey, number>> = { promenade: 2 };
+
 const RECIPES: Record<TextureKey, Draw> = {
   // Areia: grão fino, conchinhas claras e marcas de maré bem suaves.
   sand: (ctx, random) => {
@@ -149,39 +194,21 @@ const RECIPES: Record<TextureKey, Draw> = {
     }
   },
 
-  // Calçadão: pedra portuguesa clara com onda discreta e juntas.
+  // Calçadão: pedra portuguesa branca com faixas pretas em onda, no estilo da orla carioca.
   promenade: (ctx, random) => {
-    ctx.fillStyle = '#e4ded2';
-    ctx.fillRect(0, 0, SIZE, SIZE);
+    portugueseMosaic(ctx, random, (x, y) => {
+      // Período inteiro na largura e faixas que dividem a altura: emenda sem costura.
+      const phase = (x / SIZE) * Math.PI * 2;
+      const edge = Math.sin(phase) * 26;
+      const thickness = 24 + Math.sin(phase + 1.2) * 8;
+      const offset = (((y - edge) % WAVE_BAND_SPACING) + WAVE_BAND_SPACING) % WAVE_BAND_SPACING;
+      return offset < thickness;
+    });
 
-    for (let i = 0; i < 3; i++) {
-      wave(ctx, (i + 0.5) * SIZE / 3, 20, 1, 30, '#f7f3ea');
-    }
-
-    for (let i = 0; i < 3; i++) {
-      wave(ctx, (i + 0.5) * SIZE / 3 + 30, 20, 1, 14, '#cdc4b2');
-    }
-
-    ctx.strokeStyle = 'rgba(150, 142, 128, 0.28)';
-    ctx.lineWidth = 1.25;
-
-    for (let i = 0; i <= 4; i++) {
-      const position = i * SIZE / 4;
-
-      ctx.beginPath();
-      ctx.moveTo(position, 0);
-      ctx.lineTo(position, SIZE);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(0, position);
-      ctx.lineTo(SIZE, position);
-      ctx.stroke();
-    }
-
-    speckle(ctx, random, 900, [
-      'rgba(120,112,100,0.16)',
-      'rgba(255,255,255,0.3)',
+    // Poeira e desgaste leves, para o piso não parecer impresso.
+    speckle(ctx, random, 700, [
+      'rgba(120,112,100,0.14)',
+      'rgba(255,255,255,0.22)',
     ]);
   },
 
@@ -501,6 +528,8 @@ export class TextureLibrary {
     repeatX: number,
     repeatY: number,
     bump = false,
+    offsetX = 0,
+    offsetY = 0,
   ): Texture | null {
     if (this.disposed) return null;
 
@@ -509,14 +538,15 @@ export class TextureLibrary {
 
     const safeX = Math.max(0.001, repeatX);
     const safeY = Math.max(0.001, repeatY);
-    const variantKey = `${key}:${bump ? 'bump' : 'color'}:${safeX}:${safeY}`;
+    const variantKey = `${key}:${bump ? 'bump' : 'color'}:${safeX}:${safeY}:${offsetX}:${offsetY}`;
 
     const cached = this.variants.get(variantKey);
     if (cached) return cached;
 
     const texture = source.clone();
-    texture.name = `procedural-${key}-${bump ? 'bump' : 'color'}-${safeX}-${safeY}`;
+    texture.name = `procedural-${key}-${bump ? 'bump' : 'color'}-${safeX}-${safeY}-${offsetX}-${offsetY}`;
     texture.repeat.set(safeX, safeY);
+    texture.offset.set(offsetX, offsetY);
     texture.needsUpdate = true;
 
     this.variants.set(variantKey, texture);
@@ -529,12 +559,15 @@ export class TextureLibrary {
     const cached = this.cache.get(key);
     if (cached) return cached;
 
+    const resolution = RESOLUTION[key] ?? 1;
     const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = SIZE;
+    canvas.width = canvas.height = SIZE * resolution;
 
     const context = canvas.getContext('2d');
     if (!context) return null;
 
+    // As receitas desenham sempre em SIZE×SIZE; a escala só adiciona pixels.
+    context.scale(resolution, resolution);
     RECIPES[key](context, makeRandom(SEEDS[key]));
 
     const color = new CanvasTexture(canvas);

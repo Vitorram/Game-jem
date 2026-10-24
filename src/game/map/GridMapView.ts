@@ -69,6 +69,14 @@ const BUMP_SCALE: Partial<Record<TextureKey, number>> = {
   grain: 0.004,
 };
 
+/**
+ * Quantos tiles uma textura cobre em cada direção. O calçadão usa 2: as ondas
+ * ficam longas como na orla de verdade, e cada tile mostra só o seu recorte.
+ */
+const TEXTURE_SPAN: Partial<Record<TextureKey, number>> = {
+  promenade: 2,
+};
+
 /** Cores dos seixos e conchas espalhados na areia. */
 const PEBBLE_COLORS = ['#fff6e0', '#f1d8b4', '#dcc09a', '#c9ad86', '#f7efe2'];
 
@@ -449,6 +457,8 @@ export class GridMapView {
       texture?: TextureKey;
       repeatX?: number;
       repeatY?: number;
+      offsetX?: number;
+      offsetY?: number;
       coloredTexture?: boolean;
     } = {},
   ): MeshStandardMaterial {
@@ -459,6 +469,8 @@ export class GridMapView {
         texture,
         repeatX = 1,
         repeatY = 1,
+        offsetX = 0,
+        offsetY = 0,
         coloredTexture = true,
         ...options
       } = extra;
@@ -470,14 +482,14 @@ export class GridMapView {
       });
 
       if (texture) {
-        const repeatNeeded = repeatX !== 1 || repeatY !== 1;
+        const repeatNeeded = repeatX !== 1 || repeatY !== 1 || offsetX !== 0 || offsetY !== 0;
 
         const map = repeatNeeded
-          ? this.textures.getRepeated(texture, repeatX, repeatY)
+          ? this.textures.getRepeated(texture, repeatX, repeatY, false, offsetX, offsetY)
           : this.textures.get(texture);
 
         const bumpMap = repeatNeeded
-          ? this.textures.getRepeated(texture, repeatX, repeatY, true)
+          ? this.textures.getRepeated(texture, repeatX, repeatY, true, offsetX, offsetY)
           : this.textures.getBump(texture);
 
         if (map) material.map = map;
@@ -519,11 +531,20 @@ export class GridMapView {
   ): MeshStandardMaterial {
     if (kind === 'sea') return this.seaWaves[(column + row) % 2];
 
-    return this.material(
-      `floor:${kind}`,
-      '#ffffff',
-      { texture: TILE_TEXTURE[kind] },
-    );
+    const texture = TILE_TEXTURE[kind];
+    const span = TEXTURE_SPAN[texture] ?? 1;
+    if (span === 1) return this.material(`floor:${kind}`, '#ffffff', { texture });
+
+    // Cada tile mostra o seu pedaço da textura maior, para o desenho atravessar os tiles.
+    const sliceX = column % span;
+    const sliceY = row % span;
+    return this.material(`floor:${kind}:${sliceX}:${sliceY}`, '#ffffff', {
+      texture,
+      repeatX: 1 / span,
+      repeatY: 1 / span,
+      offsetX: sliceX / span,
+      offsetY: sliceY / span,
+    });
   }
 
   private roundedBox(
@@ -1096,8 +1117,8 @@ export class GridMapView {
       this.flat,
       this.material('gym-deck', '#ffffff', {
         texture: 'promenade',
-        repeatX: 3,
-        repeatY: 1,
+        repeatX: 2.9 / (TEXTURE_SPAN.promenade ?? 1),
+        repeatY: 0.92 / (TEXTURE_SPAN.promenade ?? 1),
       }),
     );
     deck.scale.set(size * 2.9, 0.045, size * 0.92);
@@ -1626,12 +1647,24 @@ export class GridMapView {
     const sidewalkCenterZ = roadSouthEdgeZ + sidewalkDepth / 2;
     const curbZ = roadSouthEdgeZ + 0.06;
     const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
-    const sidewalkMat = this.floorMaterial('promenade', 0, southRow);
+    // A calçada sul é mais rasa que um tile: recorta a textura em vez de achatar as ondas.
+    const sidewalkSpan = (TEXTURE_SPAN[TILE_TEXTURE.promenade] ?? 1) * tileSize;
+    const sidewalkRepeatY = sidewalkDepth / sidewalkSpan;
+    const sidewalkMaterial = (column: number) => {
+      const slices = Math.round(sidewalkSpan / tileSize);
+      const slice = column % slices;
+      return this.material(`south-sidewalk:${slice}`, '#ffffff', {
+        texture: TILE_TEXTURE.promenade,
+        repeatX: 1 / slices,
+        repeatY: sidewalkRepeatY,
+        offsetX: slice / slices,
+      });
+    };
 
     for (let column = 0; column < columns; column++) {
       const center = this.map.cellCenter(column, southRow);
 
-      const pavement = new Mesh(this.flat, sidewalkMat);
+      const pavement = new Mesh(this.flat, sidewalkMaterial(column));
       pavement.name = `south-sidewalk-${column}`;
       pavement.scale.set(tileSize, 0.036, sidewalkDepth);
       pavement.position.set(center.x, 0.018, sidewalkCenterZ);
@@ -1652,9 +1685,9 @@ export class GridMapView {
     // Estende a calçada sul e o meio-fio para as bordas oeste e leste do apron
     for (const [side, x] of [['w', -width / 2 - APRON / 2], ['e', width / 2 + APRON / 2]] as const) {
       const apronMat = this.material(
-        `apron:promenade:${Math.round(APRON)}x${Math.round(tileSize)}`,
+        `south-sidewalk-apron:${Math.round(APRON)}`,
         '#ffffff',
-        { texture: TILE_TEXTURE.promenade, repeatX: Math.max(1, Math.round(APRON / tileSize)), repeatY: 1 },
+        { texture: TILE_TEXTURE.promenade, repeatX: APRON / sidewalkSpan, repeatY: sidewalkRepeatY },
       );
       const extPavement = new Mesh(this.flat, apronMat);
       extPavement.name = `south-sidewalk-apron-${side}`;
@@ -1871,8 +1904,8 @@ export class GridMapView {
           '#ffffff',
           {
             texture: TILE_TEXTURE[floorKind],
-            repeatX: Math.max(1, Math.round(w / tileSize)),
-            repeatY: Math.max(1, Math.round(d / tileSize)),
+            repeatX: Math.max(1, Math.round(w / tileSize)) / (TEXTURE_SPAN[TILE_TEXTURE[floorKind]] ?? 1),
+            repeatY: Math.max(1, Math.round(d / tileSize)) / (TEXTURE_SPAN[TILE_TEXTURE[floorKind]] ?? 1),
           },
         );
 
