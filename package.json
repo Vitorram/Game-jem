@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "coop:server": "node backend/server.mjs",
     "typecheck": "tsc --noEmit",
     "test:characters": "node --test tests/player.cjs",
     "test": "node --test tests/*.cjs"

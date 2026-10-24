@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 
 type CommonProps = { paused: boolean; onComplete: () => void; onCancel?: () => void };
 
@@ -126,161 +126,112 @@ export function ChargerRepairPuzzle({ paused, onComplete, onCancel }: CommonProp
   </PuzzleFrame>;
 }
 
-type TrafficVehicle = {
-  id: string;
-  label: string;
-  code: string;
-  row: number;
-  col: number;
-  length: 2 | 3;
-  axis: 'horizontal' | 'vertical';
-  color: string;
-};
+const VEHICLE_REPAIR_CABLES = [
+  { id: 'yellow', label: 'Amarelo', module: 'motor', moduleLabel: 'Motor', row: 0, targetRow: 2, stroke: '#f4c74f' },
+  { id: 'blue', label: 'Azul', module: 'battery', moduleLabel: 'Bateria', row: 1, targetRow: 0, stroke: '#5594f5' },
+  { id: 'cyan', label: 'Ciano', module: 'ignition', moduleLabel: 'Ignição', row: 2, targetRow: 1, stroke: '#71e6e7' },
+] as const;
 
-const INITIAL_TRAFFIC: TrafficVehicle[] = [
-  { id: 'shuttle', label: 'Micro-ônibus', code: 'BUS', row: 0, col: 0, length: 2, axis: 'horizontal', color: 'yellow' },
-  { id: 'compact', label: 'Compacto', code: 'CITY', row: 5, col: 0, length: 2, axis: 'horizontal', color: 'lime' },
-  { id: 'bus', label: 'Van de apoio', code: 'APOIO', row: 1, col: 3, length: 2, axis: 'vertical', color: 'teal' },
-  { id: 'van', label: 'Van escolar', code: 'VAN', row: 4, col: 5, length: 2, axis: 'vertical', color: 'cream' },
-  { id: 'rescue', label: 'Carro de resgate', code: 'RESGATE', row: 2, col: 1, length: 2, axis: 'horizontal', color: 'rescue' },
-  { id: 'taxi', label: 'Táxi', code: 'TAXI', row: 3, col: 4, length: 2, axis: 'horizontal', color: 'orange' },
-  { id: 'family', label: 'Carro familiar', code: 'FAM', row: 4, col: 0, length: 2, axis: 'horizontal', color: 'violet' },
-];
-
-function slideTrafficVehicle(vehicles: TrafficVehicle[], id: string, distance: number): TrafficVehicle[] | null {
-  const vehicle = vehicles.find(item => item.id === id);
-  if (!vehicle || distance === 0) return null;
-  const deltaRow = vehicle.axis === 'vertical' ? Math.sign(distance) : 0;
-  const deltaCol = vehicle.axis === 'horizontal' ? Math.sign(distance) : 0;
-  const steps = Math.abs(distance);
-  const maxRow = 6 - (vehicle.axis === 'vertical' ? vehicle.length : 1);
-  const maxCol = id === 'rescue' ? 5 : 6 - (vehicle.axis === 'horizontal' ? vehicle.length : 1);
-  const occupied = new Set<string>();
-  for (const other of vehicles) {
-    if (other.id === id) continue;
-    for (let part = 0; part < other.length; part += 1) {
-      const row = other.row + (other.axis === 'vertical' ? part : 0);
-      const col = other.col + (other.axis === 'horizontal' ? part : 0);
-      occupied.add(`${row}:${col}`);
-    }
-  }
-  let nextRow = vehicle.row;
-  let nextCol = vehicle.col;
-  for (let step = 0; step < steps; step += 1) {
-    nextRow += deltaRow;
-    nextCol += deltaCol;
-    if (nextRow < 0 || nextRow > maxRow || nextCol < 0 || nextCol > maxCol) return null;
-    for (let part = 0; part < vehicle.length; part += 1) {
-      const row = nextRow + (vehicle.axis === 'vertical' ? part : 0);
-      const col = nextCol + (vehicle.axis === 'horizontal' ? part : 0);
-      if (row >= 0 && row < 6 && col >= 0 && col < 6 && occupied.has(`${row}:${col}`)) return null;
-    }
-  }
-  return vehicles.map(item => item.id === id ? { ...item, row: nextRow, col: nextCol } : item);
-}
+const VEHICLE_REPAIR_MODULES = [
+  { id: 'battery', label: 'Bateria', cable: 'blue', row: 0, color: 'blue' },
+  { id: 'ignition', label: 'Ignição', cable: 'cyan', row: 1, color: 'cyan' },
+  { id: 'motor', label: 'Motor', cable: 'yellow', row: 2, color: 'yellow' },
+] as const;
 
 export function CollisionSafetyPuzzle({ paused, onComplete, onCancel }: CommonProps) {
-  const [vehicles, setVehicles] = useState(INITIAL_TRAFFIC);
-  const [selected, setSelected] = useState('bus');
-  const [moves, setMoves] = useState(0);
+  const [selectedCable, setSelectedCable] = useState<string | null>(null);
+  const [connectedModules, setConnectedModules] = useState<string[]>([]);
   const [solved, setSolved] = useState(false);
-  const [status, setStatus] = useState('Etapa 1 de 2: mova a van de apoio uma casa para cima. Depois, leve o resgate até a saída.');
+  const [status, setStatus] = useState('Selecione um cabo e conecte-o à peça com a mesma cor.');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  const selectedVehicle = vehicles.find(vehicle => vehicle.id === selected) ?? vehicles[0];
-  const target = vehicles.find(vehicle => vehicle.id === 'rescue')!;
-  const routeOpen = !vehicles.some(vehicle => vehicle.id !== 'rescue'
-    && vehicle.row <= 2 && vehicle.row + (vehicle.axis === 'vertical' ? vehicle.length : 1) > 2
-    && vehicle.col + (vehicle.axis === 'horizontal' ? vehicle.length : 1) > target.col + target.length - 1);
-  const activeId = routeOpen ? 'rescue' : 'bus';
-  const stars = moves === 0 ? 0 : moves <= 5 ? 3 : moves <= 7 ? 2 : 1;
-  const slide = (id: string, distance: number) => {
-    if (paused || solved) return;
-    if (id !== activeId || id === 'bus' && distance >= 0 || id === 'rescue' && distance <= 0) return;
-    const next = slideTrafficVehicle(vehicles, id, distance);
-    if (!next) return;
-    const nextMoves = moves + Math.abs(distance);
-    setVehicles(next); setMoves(nextMoves);
-    const rescued = next.find(vehicle => vehicle.id === 'rescue')!.col >= 5;
-    const opened = !next.some(vehicle => vehicle.id !== 'rescue'
-      && vehicle.row <= 2 && vehicle.row + (vehicle.axis === 'vertical' ? vehicle.length : 1) > 2
-      && vehicle.col + (vehicle.axis === 'horizontal' ? vehicle.length : 1) > 2);
-    if (rescued) {
-      setSolved(true); setStatus('Resgate concluído! A faixa foi liberada e os veículos já podem seguir.');
-      timer.current = setTimeout(onComplete, 1100);
-    } else if (opened) {
-      setSelected('rescue'); setStatus('Etapa 2 de 2: faixa liberada! Arraste o carro vermelho até a saída.');
-    } else if (id === 'rescue') setStatus('Continue levando o carro vermelho até a saída.');
-    else setStatus('Boa! A faixa foi aberta. Agora selecione o carro vermelho e leve-o até a saída.');
+
+  const selectCable = (cableId: string, moduleLabel: string, moduleId: string) => {
+    if (paused || solved || connectedModules.includes(moduleId)) return;
+    setSelectedCable(cableId);
+    setStatus(`Cabo selecionado. Conecte-o à ${moduleLabel.toLowerCase()}.`);
   };
-  const onCarKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, vehicle: TrafficVehicle) => {
-    const direction = event.key === 'ArrowLeft' && vehicle.axis === 'horizontal' ? -1
-      : event.key === 'ArrowRight' && vehicle.axis === 'horizontal' ? 1
-        : event.key === 'ArrowUp' && vehicle.axis === 'vertical' ? -1
-          : event.key === 'ArrowDown' && vehicle.axis === 'vertical' ? 1 : 0;
-    if (!direction) return;
-    event.preventDefault(); slide(vehicle.id, direction);
+
+  const connectModule = (module: typeof VEHICLE_REPAIR_MODULES[number]) => {
+    if (paused || solved || connectedModules.includes(module.id)) return;
+    const cable = VEHICLE_REPAIR_CABLES.find(item => item.id === selectedCable);
+    if (!cable) {
+      setStatus('Escolha primeiro um dos cabos soltos.');
+      return;
+    }
+    if (cable.module !== module.id) {
+      setStatus('As cores não combinam. Tente outro conector; seu progresso está salvo.');
+      return;
+    }
+
+    const next = [...connectedModules, module.id];
+    setConnectedModules(next);
+    setSelectedCable(null);
+    if (next.length === VEHICLE_REPAIR_MODULES.length) {
+      setSolved(true);
+      setStatus('Sistema elétrico restaurado. O carro está pronto para voltar à via!');
+      timer.current = setTimeout(onComplete, 900);
+    } else {
+      setStatus(`${module.label} conectado! Falta${VEHICLE_REPAIR_MODULES.length - next.length === 1 ? '' : 'm'} ${VEHICLE_REPAIR_MODULES.length - next.length} conexão${VEHICLE_REPAIR_MODULES.length - next.length === 1 ? '' : 'ões'}.`);
+    }
   };
-  const onCarPointerDown = (event: ReactPointerEvent<HTMLButtonElement>, vehicle: TrafficVehicle) => {
-    if (paused || solved) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setSelected(vehicle.id);
-    event.currentTarget.dataset.dragStart = `${event.clientX}:${event.clientY}`;
-  };
-  const onCarPointerUp = (event: ReactPointerEvent<HTMLButtonElement>, vehicle: TrafficVehicle) => {
-    const start = event.currentTarget.dataset.dragStart?.split(':').map(Number);
-    delete event.currentTarget.dataset.dragStart;
-    if (!start || start.length !== 2) return;
-    const board = event.currentTarget.parentElement;
-    if (!board) return;
-    const rect = board.getBoundingClientRect();
-    const distance = vehicle.axis === 'horizontal'
-      ? Math.round((event.clientX - start[0]) / (rect.width / 6))
-      : Math.round((event.clientY - start[1]) / (rect.height / 6));
-    if (distance) slide(vehicle.id, distance);
-  };
-  const nudge = (direction: -1 | 1) => selectedVehicle && slide(selectedVehicle.id, direction);
+
   const reset = () => {
     if (paused || solved) return;
-    setVehicles(INITIAL_TRAFFIC); setSelected('bus'); setMoves(0);
-    setStatus('Etapa 1 de 2: mova a van de apoio uma casa para cima. Depois, leve o resgate até a saída.');
+    setSelectedCable(null);
+    setConnectedModules([]);
+    setStatus('Selecione um cabo e conecte-o à peça com a mesma cor.');
   };
-  return <PuzzleFrame title="LIBERE A ROTA DE RESGATE" chip="MISSÃO 06 · TRÂNSITO" description="Siga duas etapas rápidas para abrir a faixa e levar o resgate até a saída." paused={paused} solved={solved} status={status} progress={`${moves} ${moves === 1 ? 'CASA' : 'CASAS'} · ${stars}/3 ESTRELAS`} onCancel={onCancel} cardClassName="collision-safety-puzzle traffic-jam-puzzle">
-    <div className="traffic-jam-layout">
-      <div className="traffic-jam-board-wrap">
-        <div className={`traffic-jam-board${routeOpen ? ' route-open' : ''}${solved ? ' is-cleared' : ''}`} role="group" aria-label="Tabuleiro de trânsito com seis veículos. Mova a van de apoio e depois leve o carro de resgate até a saída.">
-          {vehicles.map(vehicle => <button key={vehicle.id} type="button"
-            className={`traffic-jam-car axis-${vehicle.axis} car-${vehicle.color}${selected === vehicle.id ? ' is-selected' : ''}${vehicle.id === 'rescue' ? ' is-rescue' : ''}`}
-            style={{ top: `${vehicle.row * 100 / 6}%`, left: `${vehicle.col * 100 / 6}%`, width: `${vehicle.length * 100 / 6}%`, height: `${100 / 6}%` } as CSSProperties}
-            aria-label={`${vehicle.label}, faixa ${vehicle.axis === 'horizontal' ? 'horizontal' : 'vertical'}${selected === vehicle.id ? ', selecionado' : ''}`}
-            aria-pressed={selected === vehicle.id} disabled={paused || solved || vehicle.id !== activeId}
-            onClick={() => setSelected(vehicle.id)} onKeyDown={event => onCarKeyDown(event, vehicle)}
-            onPointerDown={event => onCarPointerDown(event, vehicle)} onPointerUp={event => onCarPointerUp(event, vehicle)}
-            onPointerCancel={event => { delete event.currentTarget.dataset.dragStart; }}>
-            <span className="traffic-car-shell"><i className="traffic-car-window" /><b>{vehicle.code}</b><i className="traffic-car-wheel wheel-a" /><i className="traffic-car-wheel wheel-b" /></span>
-          </button>)}
-          <div className="traffic-jam-lane-label">CORREDOR DE RESGATE</div>
+
+  return <PuzzleFrame title="CONSERTAR SISTEMA DO CARRO" chip="REPARO · VEÍCULO" description="Reconecte os três cabos coloridos para restaurar o carro." paused={paused} solved={solved} status={status} progress={`${connectedModules.length}/3 CABOS CONECTADOS`} onCancel={onCancel} cardClassName="collision-safety-puzzle vehicle-repair-puzzle">
+    <div className="vehicle-repair-layout">
+      <div className="vehicle-repair-diagnostic">
+        <div className={`vehicle-repair-car${solved ? ' is-running' : ''}`} aria-hidden="true">
+          <span className="vehicle-repair-wheel wheel-front" /><span className="vehicle-repair-wheel wheel-back" />
+          <i className="vehicle-repair-window" /><b>{solved ? 'PRONTO' : 'SEM ENERGIA'}</b>
         </div>
-        <div className={`traffic-jam-exit${routeOpen ? ' is-open' : ''}${solved ? ' is-cleared' : ''}`} aria-label={solved ? 'Saída liberada' : routeOpen ? 'Saída aberta' : 'Saída bloqueada'}><span>SAÍDA</span><b>{solved ? '✓' : '➜'}</b></div>
+        <div className="vehicle-repair-readout">
+          <span>DIAGNÓSTICO DO VEÍCULO</span>
+          <b>{solved ? 'SISTEMA ELÉTRICO OK' : 'CONEXÕES INTERROMPIDAS'}</b>
+          <small>Motor · bateria · ignição</small>
+        </div>
+        <p>Escolha um cabo à esquerda e clique na peça da mesma cor. Se errar, pode tentar de novo sem perder o progresso.</p>
       </div>
-      <aside className="traffic-jam-console">
-        <div className="traffic-jam-mission"><span>{solved ? 'MISSÃO CONCLUÍDA' : `ETAPA ${routeOpen ? '2' : '1'} DE 2`}</span><b>{solved ? 'ROTA LIBERADA!' : routeOpen ? 'LEVE O RESGATE' : 'ABRA A FAIXA'}</b><small>{solved ? 'Resgate concluído' : routeOpen ? 'Arraste o carro vermelho à direita' : 'Mova a van verde uma casa para cima'}</small></div>
-        <div className="traffic-jam-stage-track"><span className={routeOpen ? 'is-done' : 'is-current'}><b>{routeOpen ? '✓' : '1'}</b> ABRIR FAIXA</span><span className={solved ? 'is-done' : routeOpen ? 'is-current' : ''}><b>{solved ? '✓' : '2'}</b> RESGATAR</span></div>
-        <div className="traffic-jam-score"><div><small>CASAS MOVIDAS</small><b>{moves.toString().padStart(2, '0')}</b></div><div><small>EFICIÊNCIA</small><b className="traffic-jam-stars">{'★'.repeat(stars)}{'☆'.repeat(3 - stars)}</b></div></div>
-        <div className="traffic-jam-selected"><span>VEÍCULO SELECIONADO</span><b>{selectedVehicle?.label ?? 'Escolha um carro'}</b><small>{selectedVehicle?.axis === 'horizontal' ? 'Move para os lados' : 'Move para cima ou para baixo'}</small></div>
-        <div className="traffic-jam-controls" aria-label="Mover veículo selecionado">
-          <button type="button" aria-label="Mover para cima" disabled={paused || solved || selected !== activeId || activeId !== 'bus' || !slideTrafficVehicle(vehicles, activeId, -1)} onClick={() => nudge(-1)}>↑</button>
-          <button type="button" aria-label="Mover para a esquerda" disabled>←</button>
-          <button type="button" aria-label="Mover para baixo" disabled>↓</button>
-          <button type="button" aria-label="Mover para a direita" disabled={paused || solved || selected !== activeId || activeId !== 'rescue' || !slideTrafficVehicle(vehicles, activeId, 1)} onClick={() => nudge(1)}>→</button>
+
+      <div className="vehicle-repair-wiring" role="group" aria-label="Reconecte os cabos coloridos às peças correspondentes do carro">
+        <svg className="vehicle-repair-wires" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+          {VEHICLE_REPAIR_CABLES.map(cable => <path key={cable.id}
+            className={connectedModules.includes(cable.module) ? 'is-connected' : selectedCable === cable.id ? 'is-selected' : ''}
+            d={`M 34 ${20 + cable.row * 30} C 46 ${20 + cable.row * 30}, 54 ${20 + cable.targetRow * 30}, 66 ${20 + cable.targetRow * 30}`}
+            stroke={cable.stroke} />)}
+        </svg>
+        <div className="vehicle-repair-cables">
+          <h3>CABOS SOLTOS</h3>
+          {VEHICLE_REPAIR_CABLES.map((cable, index) => <button key={cable.id} type="button"
+            className={`vehicle-repair-cable is-${cable.id}${selectedCable === cable.id ? ' is-selected' : ''}${connectedModules.includes(cable.module) ? ' is-connected' : ''}`}
+            style={{ top: `${20 + index * 30}%` }}
+            aria-label={`Cabo ${cable.label}${connectedModules.includes(cable.module) ? ', conectado' : ''}`}
+            aria-pressed={selectedCable === cable.id} disabled={paused || solved || connectedModules.includes(cable.module)}
+            onClick={() => selectCable(cable.id, cable.moduleLabel, cable.module)}>
+            <i>{connectedModules.includes(cable.module) ? '✓' : index + 1}</i><span><b>{cable.label}</b><small>{connectedModules.includes(cable.module) ? 'CONECTADO' : 'SELECIONAR'}</small></span>
+          </button>)}
         </div>
-        <p className="traffic-jam-hint">Toque e arraste os carros. No computador, também pode selecionar e usar as setas do teclado.</p>
-        <button type="button" className="traffic-jam-reset" onClick={reset} disabled={paused || solved}>REINICIAR DESAFIO</button>
-      </aside>
+        <div className="vehicle-repair-modules">
+          <h3>PEÇAS DO CARRO</h3>
+          {VEHICLE_REPAIR_MODULES.map(module => <button key={module.id} type="button"
+            className={`vehicle-repair-module is-${module.color}${connectedModules.includes(module.id) ? ' is-connected' : ''}`}
+            style={{ top: `${20 + module.row * 30}%` }}
+            aria-label={`${module.label}${connectedModules.includes(module.id) ? ', cabo conectado' : ', conectar cabo selecionado'}`}
+            disabled={paused || solved || connectedModules.includes(module.id)}
+            onClick={() => connectModule(module)}>
+            <i>{connectedModules.includes(module.id) ? '✓' : ''}</i><span><b>{module.label}</b><small>{connectedModules.includes(module.id) ? 'ENERGIZADA' : 'CONECTAR'}</small></span>
+          </button>)}
+        </div>
+      </div>
+      <button className="vehicle-repair-reset" type="button" onClick={reset} disabled={paused || solved}>REINICIAR CONEXÕES</button>
     </div>
   </PuzzleFrame>;
 }
-
 export function CyclistRepairPuzzle({ paused, onComplete, onCancel }: CommonProps) {
   const [step, setStep] = useState(0);
   const [tension, setTension] = useState(5);

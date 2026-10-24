@@ -222,12 +222,12 @@ export function createIntroWorld(host: HTMLElement, readPlayback: () => IntroPla
         body.yaw += (body.yawTarget - body.yaw) * (1 - Math.exp(-dt * 7));
       }
       // Mergulho de frente do hero e traseira do sedã subindo, com amortecimento.
-      const spring = Math.exp(-5 * t) * Math.cos(15 * t);
-      bodies.hero.pitch = -.1 * spring;
-      bodies.victim.pitch = -.07 * spring;
+      const spring = Math.exp(-7 * t) * Math.cos(8 * t);
+      bodies.hero.pitch = -.055 * spring;
+      bodies.victim.pitch = -.04 * spring;
     }
     for (const [car, body] of [[victim, bodies.victim], [hero, bodies.hero]] as const) {
-      const hop = crash.impacted ? .04 * Math.exp(-6 * crash.sinceImpact) * Math.abs(Math.sin(16 * crash.sinceImpact)) : 0;
+      const hop = crash.impacted ? .012 * Math.exp(-9 * crash.sinceImpact) * Math.abs(Math.sin(8 * crash.sinceImpact)) : 0;
       car.group.position.set(car.x, hop + Math.abs(body.pitch) * car.half, incidentZ);
       car.group.rotation.set(0, body.yaw, body.pitch);
     }

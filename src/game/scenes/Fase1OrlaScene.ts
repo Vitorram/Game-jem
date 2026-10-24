@@ -122,6 +122,16 @@ export class Fase1OrlaScene implements GameScene {
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
 
+  applyRemotePlayerPose(id: PlayerId, x: number, z: number, yaw: number): void {
+    const player = this.players[id - 1];
+    if (!player || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(yaw)) return;
+    const beforeX = player.position.x;
+    const beforeZ = player.position.z;
+    player.setPosition(x, z);
+    player.mesh.rotation.y = yaw;
+    player.animateWalking(1 / 30, Math.hypot(x - beforeX, z - beforeZ));
+  }
+
   private currentInteractionPrompt: string | null = null;
   constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: (type: RepairPuzzleType) => void, private readonly onObjectiveDistance?: (distance: number | null) => void, private readonly onMissionStep?: (step: number) => void) {
     this.input = input;

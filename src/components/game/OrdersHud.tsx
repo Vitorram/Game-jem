@@ -154,7 +154,7 @@ function EndCredits() {
   </section>;
 }
 
-function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () => void }) {
+function Summary({ snapshot, onMenu, onRestart }: { snapshot: SessionSnapshot; onMenu?: () => void; onRestart?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
   const allMissionsCompleted = snapshot.completedOrders === ORLA_EVENTS.length;
@@ -190,7 +190,7 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
           <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}</dd></div>
           <div><dt>Missões perdidas</dt><dd>{snapshot.expiredOrders}</dd></div>
         </dl>
-        <button type="button" className={styles.primary} onClick={() => sessionStore.restart()}>Jogar de novo</button>
+        <button type="button" className={styles.primary} onClick={() => onRestart ? onRestart() : sessionStore.restart()}>Jogar de novo</button>
         {onMenu && <button type="button" className={styles.primary} onClick={onMenu}>Voltar ao menu</button>}
       </div>
     </div>
@@ -226,8 +226,8 @@ function PenaltyAlert({ feedback, finished, onContinue }: {
   );
 }
 
-export default function OrdersHud({ paused, showDebug = false, onMenu, onContinue }: {
-  paused: boolean; showDebug?: boolean; onMenu?: () => void; onContinue?: () => void;
+export default function OrdersHud({ paused, showDebug = false, onMenu, onContinue, onRestart }: {
+  paused: boolean; showDebug?: boolean; onMenu?: () => void; onContinue?: () => void; onRestart?: () => void;
 }) {
   const { snapshot, feedback } = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
   const [world, setWorld] = useState(() => suburbanGameState.snapshot());
@@ -260,7 +260,7 @@ export default function OrdersHud({ paused, showDebug = false, onMenu, onContinu
           Resolver passo do pedido (teste)
         </button>
       )}
-      {snapshot.status === 'finished' && <Summary snapshot={snapshot} onMenu={onMenu} />}
+      {snapshot.status === 'finished' && <Summary snapshot={snapshot} onMenu={onMenu} onRestart={onRestart} />}
     </>
   );
 }

@@ -854,90 +854,77 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
   .charger-repair-visual b { justify-self: start; }
 }
 
-/* Traffic rescue puzzle: a playable top-down traffic grid. */
-.collision-safety-puzzle.traffic-jam-puzzle { width: min(1080px, 100%); }
-.traffic-jam-layout { display: grid; grid-template-columns: minmax(0, 1.12fr) minmax(250px, .88fr); align-items: center; gap: clamp(18px, 3vw, 34px); margin: 6px 0 16px; }
-.traffic-jam-board-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 44px; align-items: stretch; width: 100%; max-width: 560px; margin: 0 auto; padding-right: 2px; }
-.traffic-jam-board { position: relative; width: 100%; aspect-ratio: 1; overflow: visible; border: 4px solid #192f38; border-radius: 18px 0 0 18px; background-color: #344d55; background-image: linear-gradient(90deg, transparent calc(100% - 2px), #d4d9c02b calc(100% - 1px)), linear-gradient(0deg, transparent calc(100% - 2px), #d4d9c02b calc(100% - 1px)); background-size: 16.6667% 16.6667%, 16.6667% 16.6667%; box-shadow: inset 0 0 0 2px #ffffff16, 0 8px 0 #102731, 0 18px 30px #06171e80; }
-.traffic-jam-board::before { position: absolute; z-index: 0; top: calc(100% / 3 + 3px); right: -1px; left: -1px; height: calc(100% / 6 - 6px); border-top: 2px dashed #f4da8b8c; border-bottom: 2px dashed #f4da8b8c; background: #192e3857; content: ''; pointer-events: none; }
-.traffic-jam-board.route-open::before { border-color: #90e5ae; background: #21745338; box-shadow: 0 0 18px #65d69b35; }
-.traffic-jam-board.is-cleared::before { background: #2787625e; }
-.traffic-jam-lane-label { position: absolute; z-index: 1; top: calc(100% / 3 + 4px); left: 8px; max-width: calc(100% - 16px); overflow: hidden; color: #e6e3bf80; font: 900 clamp(6px, .8vw, 9px) Arial,sans-serif; letter-spacing: .08em; pointer-events: none; white-space: nowrap; }
-.traffic-jam-car { position: absolute; z-index: 2; display: block; padding: 3px; border: 0; border-radius: 0; background: transparent; color: #19323c; touch-action: none; user-select: none; cursor: grab; transition: top .2s cubic-bezier(.2,.75,.25,1), left .2s cubic-bezier(.2,.75,.25,1), filter .16s; }
-.traffic-jam-car:active { cursor: grabbing; }
-.traffic-jam-car:hover:not(:disabled) { z-index: 4; filter: brightness(1.08); }
-.traffic-jam-car:disabled { cursor: default; opacity: 1; }
-.traffic-jam-car:focus-visible { z-index: 5; outline: 3px solid #fff2b4; outline-offset: 1px; }
-.traffic-car-shell { position: relative; display: block; width: 100%; height: 100%; overflow: visible; border: 3px solid #172d35; border-radius: 15px 18px 16px 16px; background: linear-gradient(155deg, #ffffff40 0%, transparent 35%), var(--car-color, #ebbd55); box-shadow: inset 0 0 0 2px #ffffff35, 0 4px 0 #122830, 0 8px 12px #071a2080; transition: box-shadow .18s, border-color .18s, transform .18s; }
-.traffic-car-window { position: absolute; top: 18%; bottom: 27%; left: 27%; width: 47%; border: 2px solid #1936419c; border-radius: 7px 9px 6px 6px; background: linear-gradient(135deg, #c4e6dc, #58818a); box-shadow: inset 0 2px #ffffff6b; }
-.traffic-car-shell>b { position: absolute; z-index: 1; right: 3px; bottom: 3px; left: 3px; overflow: hidden; color: #16313a; font: 1000 clamp(6px, .78vw, 9px)/1 Arial,sans-serif; letter-spacing: .03em; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-.traffic-car-wheel { position: absolute; z-index: -1; bottom: 6%; width: 20%; height: 18%; border: 2px solid #13272e; border-radius: 5px; background: #28383b; }
-.traffic-car-wheel.wheel-a { left: 14%; }.traffic-car-wheel.wheel-b { right: 14%; }
-.axis-vertical .traffic-car-shell { border-radius: 15px 15px 18px 18px; }
-.axis-vertical .traffic-car-window { top: 27%; bottom: auto; left: 17%; width: 66%; height: 43%; }
-.axis-vertical .traffic-car-shell>b { right: 1px; bottom: 2px; left: 1px; font-size: clamp(5px, .66vw, 8px); }
-.axis-vertical .traffic-car-wheel { right: auto; bottom: auto; left: 5%; width: 18%; height: 12%; }
-.axis-vertical .traffic-car-wheel.wheel-a { top: 13%; }.axis-vertical .traffic-car-wheel.wheel-b { top: 75%; }
-.car-yellow { --car-color: #f2c455; }.car-lime { --car-color: #9ec66c; }.car-blue { --car-color: #66aeca; }.car-teal { --car-color: #63c7b5; }.car-cream { --car-color: #d5d0a9; }.car-mint { --car-color: #70cba9; }.car-orange { --car-color: #ef9655; }.car-violet { --car-color: #a391c8; }.car-coral { --car-color: #e88268; }
-.traffic-jam-car.is-selected { z-index: 5; }
-.traffic-jam-car.is-selected .traffic-car-shell { border-color: #fff0a6; box-shadow: inset 0 0 0 2px #ffffff64, 0 0 0 3px #ffd561, 0 0 18px #ffd561a6, 0 6px 0 #122830; transform: translateY(-2px); }
-.traffic-jam-car.is-rescue { z-index: 3; }
-.traffic-jam-car.is-rescue .traffic-car-shell { --car-color: #e75550; border-radius: 20px 22px 18px 18px; box-shadow: inset 0 0 0 2px #ffffff55, 0 4px 0 #862e35, 0 8px 15px #071a20a6; }
-.traffic-jam-car.is-rescue .traffic-car-window { background: linear-gradient(135deg, #d5f5e7, #5d8b8d); }
-.traffic-jam-car.is-rescue .traffic-car-shell::before { position: absolute; top: -5px; left: 43%; width: 18%; height: 5px; border-radius: 4px 4px 0 0; background: #fff1a4; box-shadow: 0 0 10px #fff0a4; content: ''; }
-.traffic-jam-exit { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border: 2px solid #233d45; border-left: 0; border-radius: 0 12px 12px 0; background: repeating-linear-gradient(135deg,#273e45 0 8px,#192f37 8px 16px); color: #aabcb2; box-shadow: 0 8px 0 #102731; font: 1000 8px Arial,sans-serif; writing-mode: vertical-rl; }
-.traffic-jam-exit b { color: #eec96b; font-size: 22px; line-height: 1; }
-.traffic-jam-exit.is-open { border-color: #74d49a; background: repeating-linear-gradient(135deg,#26694f 0 8px,#1e5148 8px 16px); color: #d8f4d7; box-shadow: 0 8px 0 #102731, 0 0 16px #63d49a55; }
-.traffic-jam-exit.is-cleared b { color: #d7f19b; }
-.traffic-jam-console { display: grid; align-content: center; gap: 12px; min-width: 0; }
-.traffic-jam-mission { display: grid; gap: 6px; padding: 13px 15px; border: 2px solid #54756f; border-radius: 13px; background: linear-gradient(135deg,#294e54,#203f49); box-shadow: 0 4px 0 #122d36; }
-.traffic-jam-mission>span,.traffic-jam-selected>span { color: #a8c5ae; font: 1000 9px Arial,sans-serif; letter-spacing: .14em; }
-.traffic-jam-mission>b { color: #ffe49a; font: 1000 clamp(15px, 1.6vw, 21px) Arial,sans-serif; }
-.traffic-jam-mission>small { color: #c2d3c5; font: 700 11px Arial,sans-serif; }
-.traffic-jam-stage-track { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
-.traffic-jam-stage-track>span { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 8px; border: 1px solid #49686a; border-radius: 9px; background: #203e47; color: #8fa99d; font: 1000 8px Arial,sans-serif; letter-spacing: .04em; }
-.traffic-jam-stage-track>span>b { display: grid; flex: 0 0 21px; place-items: center; width: 21px; height: 21px; border-radius: 50%; background: #647c76; color: #d4ddc6; font-size: 11px; }
-.traffic-jam-stage-track>span.is-current { border-color: #e9c356; background: #4d4b39; color: #fff0bd; }
-.traffic-jam-stage-track>span.is-current>b { background: #e9bf4f; color: #273b3c; }
-.traffic-jam-stage-track>span.is-done { border-color: #60b98e; background: #28594d; color: #d4f1d5; }
-.traffic-jam-stage-track>span.is-done>b { background: #68c899; color: #173b3b; }
-.traffic-jam-score { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
-.traffic-jam-score>div { display: grid; gap: 4px; min-width: 0; padding: 10px 12px; border: 1px solid #53716d; border-radius: 11px; background: #1c3943; }
-.traffic-jam-score small { color: #9bb7aa; font: 1000 8px Arial,sans-serif; letter-spacing: .1em; }
-.traffic-jam-score>div>b { color: #f8efd5; font: 1000 21px monospace; }
-.traffic-jam-score>div>b.traffic-jam-stars { color: #ffd570; font: 1000 17px Arial,sans-serif; letter-spacing: .04em; white-space: nowrap; }
-.traffic-jam-selected { display: grid; gap: 4px; min-height: 69px; padding: 11px 13px; border: 1px solid #5c7b75; border-radius: 11px; background: #193640; }
-.traffic-jam-selected>b { overflow: hidden; color: #fff2ce; font: 1000 14px Arial,sans-serif; text-overflow: ellipsis; white-space: nowrap; }
-.traffic-jam-selected>small { color: #aec5b8; font: 700 10px Arial,sans-serif; }
-.traffic-jam-controls { display: grid; grid-template-columns: repeat(3, 42px); grid-template-rows: repeat(2, 38px); justify-content: center; gap: 5px; }
-.traffic-jam-controls button { display: grid; place-items: center; padding: 0; border: 1px solid #759185; border-radius: 9px; background: linear-gradient(145deg,#395b5c,#28474e); color: #f5e7bf; box-shadow: 0 3px 0 #132f38; font-size: 21px; }
-.traffic-jam-controls button:nth-child(1) { grid-area: 1 / 2; }.traffic-jam-controls button:nth-child(2) { grid-area: 2 / 1; }.traffic-jam-controls button:nth-child(3) { grid-area: 2 / 2; }.traffic-jam-controls button:nth-child(4) { grid-area: 2 / 3; }
-.traffic-jam-controls button:disabled { opacity: .32; cursor: default; }
-.traffic-jam-hint { margin: 0; color: #adc4b5; font: 700 10px/1.45 Arial,sans-serif; text-align: center; }
-.traffic-jam-reset { min-height: 39px; padding: 9px 13px; border: 1px solid #708679; border-radius: 9px; background: #1c3941; color: #dbe4cc; box-shadow: 0 3px 0 #102a32; font: 1000 9px Arial,sans-serif; letter-spacing: .1em; }
-.traffic-jam-reset:disabled { opacity: .45; }
-.collision-safety-puzzle.traffic-jam-puzzle .repair-puzzle-status { margin-top: 2px; }
+/* Simple Among Us-style wiring task for the damaged car. */
+.vehicle-repair-puzzle { width: min(960px, 100%); }
+.vehicle-repair-layout { display: grid; grid-template-columns: minmax(210px, .72fr) minmax(0, 1.28fr); align-items: stretch; gap: clamp(16px, 2.5vw, 26px); margin: 8px 0 15px; }
+.vehicle-repair-diagnostic { display: grid; align-content: center; gap: 14px; padding: 16px; border: 2px solid #49666a; border-radius: 15px; background: linear-gradient(150deg, #294a52, #1d3943); box-shadow: 0 5px 0 #112c35; }
+.vehicle-repair-car { position: relative; width: min(100%, 240px); height: 108px; margin: 8px auto 4px; border: 4px solid #172e37; border-radius: 55px 68px 28px 28px; background: linear-gradient(155deg, #f2c961, #dc8247); box-shadow: inset 0 0 0 3px #ffffff2b, 0 8px 0 #102a32, 0 12px 20px #06182080; transition: background .25s, filter .25s; }
+.vehicle-repair-car::before { position: absolute; top: 7px; right: 14%; left: 14%; height: 43px; border: 3px solid #203941; border-radius: 42px 48px 8px 8px; background: linear-gradient(135deg, #c6e9dc, #58828a); box-shadow: inset 0 2px #ffffff80; content: ''; }
+.vehicle-repair-car.is-running { background: linear-gradient(155deg, #94df9f, #389779); filter: drop-shadow(0 0 11px #74e5a877); }
+.vehicle-repair-window { position: absolute; z-index: 1; top: 27px; left: 50%; width: 3px; height: 25px; background: #24454d; transform: translateX(-50%); }
+.vehicle-repair-car>b { position: absolute; right: 0; bottom: 10px; left: 0; color: #17343e; font: 1000 10px Arial,sans-serif; letter-spacing: .12em; text-align: center; }
+.vehicle-repair-wheel { position: absolute; z-index: 2; bottom: -10px; width: 38px; height: 25px; border: 4px solid #172e37; border-radius: 8px; background: #36454a; box-shadow: inset 0 0 0 3px #7e8981; }
+.vehicle-repair-wheel.wheel-front { left: 16%; }.vehicle-repair-wheel.wheel-back { right: 16%; }
+.vehicle-repair-readout { display: grid; gap: 5px; padding: 12px; border: 1px solid #59766f; border-radius: 11px; background: #18343d; }
+.vehicle-repair-readout>span,.vehicle-repair-readout>small { color: #a9c4b4; font: 900 9px Arial,sans-serif; letter-spacing: .08em; }
+.vehicle-repair-readout>b { color: #ffe39a; font: 1000 clamp(12px, 1.3vw, 16px) Arial,sans-serif; }
+.vehicle-repair-readout>small { letter-spacing: .02em; }
+.vehicle-repair-diagnostic>p { margin: 0; color: #c5d5c7; font: 700 12px/1.5 Arial,sans-serif; }
+.vehicle-repair-wiring { position: relative; min-height: 330px; overflow: hidden; border: 2px solid #4a696b; border-radius: 15px; background: linear-gradient(145deg, #1b3944, #142d38); box-shadow: inset 0 0 0 3px #ffffff0a, 0 5px 0 #112c35; }
+.vehicle-repair-wires { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.vehicle-repair-wires path { fill: none; stroke-width: 2.8; stroke-linecap: round; stroke-dasharray: 1.4 2.6; opacity: .28; transition: opacity .2s, stroke-width .2s, filter .2s; }
+.vehicle-repair-wires path.is-selected { stroke-width: 3.8; opacity: .75; filter: drop-shadow(0 0 3px currentColor); }
+.vehicle-repair-wires path.is-connected { stroke-width: 4.5; stroke-dasharray: none; opacity: 1; filter: drop-shadow(0 0 6px currentColor); }
+.vehicle-repair-cables,.vehicle-repair-modules { position: absolute; z-index: 1; top: 0; bottom: 0; width: 32%; }
+.vehicle-repair-cables { left: 1.5%; }.vehicle-repair-modules { right: 1.5%; }
+.vehicle-repair-cables>h3,.vehicle-repair-modules>h3 { position: absolute; top: 12px; right: 0; left: 0; margin: 0; color: #a9c5b6; font: 1000 9px Arial,sans-serif; letter-spacing: .1em; text-align: center; }
+.vehicle-repair-cable,.vehicle-repair-module { position: absolute; display: flex; align-items: center; gap: 9px; width: 100%; height: 62px; padding: 7px 9px; border: 2px solid #587476; border-radius: 11px; background: linear-gradient(145deg, #294953, #203d47); color: #f7efd7; box-shadow: 0 4px 0 #102831; text-align: left; cursor: pointer; transform: translateY(-50%); transition: transform .14s, border-color .14s, background .14s, opacity .14s; }
+.vehicle-repair-cable:hover:not(:disabled),.vehicle-repair-module:hover:not(:disabled) { z-index: 2; border-color: #fff0b1; transform: translateY(calc(-50% - 2px)); }
+.vehicle-repair-cable:focus-visible,.vehicle-repair-module:focus-visible { z-index: 3; outline: 3px solid #ffe494; outline-offset: 2px; }
+.vehicle-repair-cable>i,.vehicle-repair-module>i { display: grid; flex: 0 0 28px; place-items: center; width: 28px; height: 28px; border: 2px solid #19333c; border-radius: 50%; background: #82968b; color: #f8f0d9; font: 1000 13px Arial,sans-serif; font-style: normal; }
+.vehicle-repair-cable>span,.vehicle-repair-module>span { display: grid; gap: 4px; min-width: 0; }
+.vehicle-repair-cable b,.vehicle-repair-module b { overflow: hidden; font: 1000 11px Arial,sans-serif; text-overflow: ellipsis; white-space: nowrap; }
+.vehicle-repair-cable small,.vehicle-repair-module small { color: #b5c8ba; font: 900 7px Arial,sans-serif; letter-spacing: .08em; }
+.vehicle-repair-cable.is-yellow,.vehicle-repair-module.is-yellow { border-color: #b9933f; }.vehicle-repair-cable.is-yellow>i,.vehicle-repair-module.is-yellow>i { background: #efbd45; color: #243b42; }
+.vehicle-repair-cable.is-blue,.vehicle-repair-module.is-blue { border-color: #507abe; }.vehicle-repair-cable.is-blue>i,.vehicle-repair-module.is-blue>i { background: #5792e9; color: #172f42; }
+.vehicle-repair-cable.is-cyan,.vehicle-repair-module.is-cyan { border-color: #529da1; }.vehicle-repair-cable.is-cyan>i,.vehicle-repair-module.is-cyan>i { background: #70dbda; color: #193b40; }
+.vehicle-repair-cable.is-selected { box-shadow: 0 0 0 3px #fff0b255, 0 4px 0 #102831, 0 0 14px #fff0b277; }
+.vehicle-repair-cable.is-connected,.vehicle-repair-module.is-connected { border-color: #74d49a; background: linear-gradient(145deg, #28624f, #204c48); }
+.vehicle-repair-cable:disabled,.vehicle-repair-module:disabled { cursor: default; }
+.vehicle-repair-module:not(.is-connected) { background: #1c3740; }
+.vehicle-repair-reset { grid-column: 1 / -1; min-height: 40px; padding: 9px 13px; border: 2px solid #647e73; border-radius: 9px; background: #203f48; color: #e9e4cc; box-shadow: 0 3px 0 #102a32; font: 1000 10px Arial,sans-serif; letter-spacing: .1em; cursor: pointer; }
+.vehicle-repair-reset:disabled { opacity: .45; cursor: default; }
+.vehicle-repair-puzzle .repair-puzzle-status { min-height: 48px; padding: 11px 14px; font-size: 13px; }
+.vehicle-repair-puzzle .repair-puzzle-footer { margin-top: 10px; font-size: 10px; }
 @media (max-width: 760px) {
-  .traffic-jam-layout { grid-template-columns: 1fr; gap: 18px; }
-  .traffic-jam-board-wrap { width: min(100%, 470px); }
-  .traffic-jam-console { grid-template-columns: 1fr 1fr; align-items: center; }
-  .traffic-jam-mission,.traffic-jam-selected,.traffic-jam-hint { grid-column: 1 / -1; }
-  .traffic-jam-score { grid-column: 1 / 2; }
-  .traffic-jam-controls { grid-column: 2 / 3; grid-row: 2; }
-  .traffic-jam-reset { grid-column: 1 / -1; }
+  .vehicle-repair-layout { grid-template-columns: 1fr; }
+  .vehicle-repair-diagnostic { grid-template-columns: minmax(130px, .65fr) minmax(0, 1fr); align-items: center; column-gap: 15px; }
+  .vehicle-repair-car { grid-row: span 2; width: min(100%, 220px); }
+  .vehicle-repair-readout,.vehicle-repair-diagnostic>p { grid-column: 2; }
 }
 @media (max-width: 520px) {
-  .traffic-jam-board-wrap { grid-template-columns: minmax(0, 1fr) 32px; }
-  .traffic-jam-board { border-radius: 13px 0 0 13px; }
-  .traffic-jam-car { padding: 2px; }
-  .traffic-car-shell { border-width: 2px; border-radius: 9px 12px 10px 10px; }
-  .traffic-car-window { border-width: 1px; border-radius: 4px; }
-  .traffic-car-shell>b { right: 1px; bottom: 2px; left: 1px; font-size: 5px; }
-  .axis-vertical .traffic-car-shell>b { font-size: 4px; }
-  .traffic-jam-controls { grid-template-columns: repeat(3, 38px); grid-template-rows: repeat(2, 34px); }
-  .traffic-jam-mission { padding: 10px; }
+  .vehicle-repair-layout { gap: 13px; }
+  .vehicle-repair-diagnostic { grid-template-columns: 1fr; padding: 12px; }
+  .vehicle-repair-car { grid-row: auto; width: min(100%, 210px); height: 94px; }
+  .vehicle-repair-readout,.vehicle-repair-diagnostic>p { grid-column: auto; }
+  .vehicle-repair-wiring { min-height: 292px; }
+  .vehicle-repair-cable,.vehicle-repair-module { height: 56px; gap: 5px; padding: 5px; }
+  .vehicle-repair-cable>i,.vehicle-repair-module>i { flex-basis: 23px; width: 23px; height: 23px; font-size: 11px; }
+  .vehicle-repair-cable b,.vehicle-repair-module b { font-size: 9px; }
+  .vehicle-repair-cable small,.vehicle-repair-module small { font-size: 6px; }
+  .vehicle-repair-cables>h3,.vehicle-repair-modules>h3 { font-size: 7px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .traffic-jam-car { transition: none; }
-  .traffic-jam-car.is-selected .traffic-car-shell { transform: none; }
-}
+@media (prefers-reduced-motion: reduce) { .vehicle-repair-cable,.vehicle-repair-module,.vehicle-repair-wires path,.vehicle-repair-car { transition: none; } }
+.coop-tutorial-overlay{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:#061725b8;backdrop-filter:blur(8px)}
+.coop-tutorial-card{width:min(100%,520px);padding:clamp(24px,5vw,42px);border:2px solid #eab84e;border-radius:20px;background:#fff2d2;color:#1a3946;box-shadow:0 20px 60px #00131acc}
+.coop-tutorial-card .eyebrow{font-size:10px;letter-spacing:.13em;color:#95702d;font-weight:800}
+.coop-tutorial-card h2{font-size:clamp(26px,5vw,38px);margin:12px 0}
+.coop-tutorial-card p{line-height:1.5;color:#405d67}
+.coop-tutorial-card .coop-tutorial-note{padding:12px;border-radius:10px;background:#fff9e9;font-size:13px}
+.coop-tutorial-ready{width:100%;min-height:48px;border:2px solid #183847;border-radius:10px;background:#efbd4f;color:#153547;font-weight:800;cursor:pointer}
+.coop-tutorial-ready:disabled{opacity:.8;cursor:wait}
+.coop-team-hud{position:fixed;z-index:24;top:76px;right:18px;display:grid;gap:5px;min-width:160px;padding:11px 13px;border:1px solid #8bc7d166;border-radius:12px;background:#082944d9;color:#edf7f6;backdrop-filter:blur(8px);font:11px/1.35 Arial,sans-serif;pointer-events:none}
+.coop-team-hud>b{color:#7adcf2;font-size:10px;letter-spacing:.12em;margin-bottom:2px}
+.coop-team-hud>span{color:#c1d8df}
+.coop-team-hud>span.is-you{color:#f3c458;font-weight:800}
+@media(max-width:640px){.coop-team-hud{top:auto;right:8px;bottom:64px;min-width:0;padding:8px 10px;font-size:9px}}
