@@ -97,7 +97,8 @@ function isServerMessage(value: unknown): value is CoopMessage {
   }
 }
 function defaultUrl(): string {
-  const configuredUrl = process.env.NEXT_PUBLIC_COOP_WS_URL?.trim();
+  const configuredUrl = process.env.NEXT_PUBLIC_COOP_WS_URL?.trim()
+    || process.env.NEXT_PUBLIC_COOP_SERVER_URL?.trim();
   if (configuredUrl) return configuredUrl;
   if (process.env.NODE_ENV === 'production') return 'wss://game-jem.onrender.com/coop';
   return 'ws://localhost:3001/coop';
@@ -130,6 +131,7 @@ export class CoopClient {
       const parsed = new URL(this.url);
       if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
       if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      if (parsed.pathname === '/') parsed.pathname = '/coop';
       if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || !['/coop', '/coop/'].includes(parsed.pathname) || parsed.search || parsed.hash) {
         throw new Error('Use uma URL ws:// ou wss:// terminada em /coop, sem credenciais, parâmetros ou fragmento.');
       }

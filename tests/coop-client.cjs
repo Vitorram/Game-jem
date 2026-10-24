@@ -41,6 +41,28 @@ async function connected(timeout = 1000) {
   ws.open(); await pending;
   return { client, ws };
 }
+test('Client: normaliza a URL base do Render e aceita o nome de variável anterior', async () => {
+  const baseUrlClient = new CoopClient('https://game-jem.onrender.com');
+  const baseUrlConnect = baseUrlClient.connect();
+  assert.equal(FakeSocket.instances[0].url, 'wss://game-jem.onrender.com/coop');
+  FakeSocket.instances[0].open(); await baseUrlConnect; baseUrlClient.disconnect();
+
+  const previousWsUrl = process.env.NEXT_PUBLIC_COOP_WS_URL;
+  const previousServerUrl = process.env.NEXT_PUBLIC_COOP_SERVER_URL;
+  try {
+    process.env.NEXT_PUBLIC_COOP_WS_URL = '';
+    process.env.NEXT_PUBLIC_COOP_SERVER_URL = 'wss://game-jem.onrender.com/coop';
+    const legacyConfiguredClient = new CoopClient();
+    const legacyConnect = legacyConfiguredClient.connect();
+    assert.equal(FakeSocket.instances[1].url, 'wss://game-jem.onrender.com/coop');
+    FakeSocket.instances[1].open(); await legacyConnect; legacyConfiguredClient.disconnect();
+  } finally {
+    if (previousWsUrl === undefined) delete process.env.NEXT_PUBLIC_COOP_WS_URL;
+    else process.env.NEXT_PUBLIC_COOP_WS_URL = previousWsUrl;
+    if (previousServerUrl === undefined) delete process.env.NEXT_PUBLIC_COOP_SERVER_URL;
+    else process.env.NEXT_PUBLIC_COOP_SERVER_URL = previousServerUrl;
+  }
+});
 const player = { id: 'id1', name: 'Ana', role: 'analista', ready: true, tutorialReady: false, host: true };
 function session(ws, phase = 'lobby') {
   ws.message({ type: 'joined', id: 'id1', role: 'analista', code: 'ABCD1234', host: true });
