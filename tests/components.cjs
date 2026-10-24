@@ -146,7 +146,8 @@ test('CT-6.1: nenhum componente usa clique em elemento não focável sem papel a
 test('CT-4.2: pictograma do carro elétrico tem contraste mínimo de 3:1 (WCAG 1.4.11)', () => {
   const source = fs.readFileSync(path.join(SRC, 'game', 'map', 'GridMapView.ts'), 'utf8');
   const color = key => source.match(new RegExp(`'mark:${key}', '(#[0-9a-f]{6})'`))?.[1];
-  const lane = source.match(/electric: '(#[0-9a-f]{6})'/)?.[1];
+  const textures = fs.readFileSync(path.join(SRC, 'game', 'map', 'proceduralTextures.ts'), 'utf8');
+  const lane = textures.match(/const ELECTRIC_PAINT = '(#[0-9a-f]{6})'/)?.[1];
   const body = color('electric-pictogram'), bolt = color('electric-bolt');
   assert.ok(lane && body && bolt, 'cores do pictograma encontradas no código');
   const luminance = hex => {

@@ -3,7 +3,7 @@ import {
 } from 'three';
 import type { GridMap } from '../map/GridMap';
 import { WORK_ZONE_CLEARANCE, type TrafficSystem } from './TrafficSystem';
-import { ORLA_CROSSING } from '../config';
+import { ORLA_CROSSING, ORLA_SCENERY_MARGIN } from '../config';
 import { ROAD_LAYOUT } from '../map/roadLayout';
 import { NpcModels, type NpcVisual } from './NpcModels';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
@@ -294,7 +294,8 @@ export class ActiveMobilitySystem {
     this.spawnCycleTimer -= dt;
     if (this.spawnCycleTimer <= 0) {
       const dir: 1 | -1 = this.random() > 0.42 ? 1 : -1;
-      const startX = dir === 1 ? this.minX + 0.45 : this.maxX - 0.45;
+      // Entram e saem além do cenário estendido, sempre fora da tela.
+      const startX = dir === 1 ? this.minX - ORLA_SCENERY_MARGIN : this.maxX + ORLA_SCENERY_MARGIN;
       this.spawnCyclist(startX, dir);
       this.spawnCycleTimer = 3.8 + this.random() * 3.6;
     }
@@ -416,7 +417,7 @@ export class ActiveMobilitySystem {
         cyclist.x += direction * motion.distance;
         cyclist.visual.animate(dt, motion.distance);
         cyclist.mesh.position.set(cyclist.x, 0, cyclist.z);
-        if (cyclist.x > this.maxX || cyclist.x < this.minX) {
+        if (cyclist.x > this.maxX + ORLA_SCENERY_MARGIN || cyclist.x < this.minX - ORLA_SCENERY_MARGIN) {
           this.group.remove(cyclist.mesh); cyclist.visual.dispose();
           this.cyclists.splice(this.cyclists.indexOf(cyclist), 1);
         }
@@ -552,7 +553,7 @@ export class ActiveMobilitySystem {
       const onSouthSidewalk = walker.z >= this.roadSouthEdgeZ - 0.8;
       walker.mesh.position.set(walker.x, onRoad ? 0 : onSouthSidewalk ? 0.036 : SIDEWALK_Y, walker.z);
       walker.visual.animate(dt, traveled, dt > 0 ? turn / dt : 0);
-      if (walker.state === 'exit' && (walker.x < this.minX || walker.x > this.maxX)) {
+      if (walker.state === 'exit' && (walker.x < this.minX - ORLA_SCENERY_MARGIN || walker.x > this.maxX + ORLA_SCENERY_MARGIN)) {
         this.group.remove(walker.mesh); walker.visual.dispose(); this.walkers.splice(this.walkers.indexOf(walker), 1);
       }
     }

@@ -12,10 +12,13 @@ import {
  * delas em escala de cinza e não recebem conversão sRGB.
  */
 export type TextureKey =
-  | 'sand' | 'wetSand' | 'promenade' | 'road' | 'cycleway' | 'sea'
+  | 'sand' | 'wetSand' | 'promenade' | 'road' | 'electricRoad' | 'cycleway' | 'sea'
   | 'plaster' | 'panel' | 'crate' | 'grain' | 'shadow';
 
 const SIZE = 256;
+
+/** Tinta da faixa de elétricos. O asfalto por baixo só a escurece, então o contraste dos símbolos só aumenta. */
+const ELECTRIC_PAINT = '#22936f';
 
 type Draw = (ctx: CanvasRenderingContext2D, random: () => number) => void;
 
@@ -210,6 +213,15 @@ const RECIPES: Record<TextureKey, Draw> = {
       'rgba(120,112,100,0.14)',
       'rgba(255,255,255,0.22)',
     ]);
+  },
+
+  // Faixa de elétricos: o mesmo asfalto com tinta verde por cima; a brita aparece através dela.
+  electricRoad: (ctx, random) => {
+    RECIPES.road(ctx, random);
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = ELECTRIC_PAINT;
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.globalAlpha = 1;
   },
 
   // Asfalto: brita grossa sobre base escura, com remendos e marcas de pneu.
@@ -450,6 +462,7 @@ const SEEDS: Record<TextureKey, number> = {
   wetSand: 1543,
   promenade: 2447,
   road: 3769,
+  electricRoad: 3769,
   cycleway: 4211,
   sea: 5839,
   plaster: 6133,
