@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useRef, useState } from 'react';
 import StoryIntro from './StoryIntro';
@@ -17,6 +17,8 @@ import MobilityTutorialGuide, { type MobilityTutorialStep } from './MobilityTuto
 import InfrastructureTutorialGuide, { type InfrastructureTutorialStep } from './InfrastructureTutorialGuide';
 import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
 import { suburbanGameState } from '@/game/core/GameState';
+import { useGameAudio } from '@/game/audio/useGameAudio';
+import AudioControls from '../audio/AudioControls';
 
 import { gameMusic } from '@/game/audio/musicManager';
 import { coopRoleToPlayerId, getCoopClient, type CoopMessage, type CoopPlayer, type CoopRole } from '@/game/coop/CoopClient';
