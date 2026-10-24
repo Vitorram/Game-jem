@@ -12,9 +12,23 @@ Base analisada: main, commit 90c186c1fbe2198245c16fb8f0398164a1155098.
 - `setTutorialCollisionProtection(true)` descartava a referência de recuperação de colisão sem restaurar visibilidade, altura e inclinação. A restauração agora é centralizada, inclusive na expiração de uma task e no descarte. A inclinação também é zerada no respawn.
 - O índice de definições de pedidos agora remove entradas expiradas e concluídas.
 
-## Imagem: conclusão limitada
+## Causa da mancha marrom: reproduzida no Chromium
 
-Não foi identificado código que crie uma partícula/geometria marrom ao expirar uma task. `PlayerFeedback` é um anel e já possui dispose. A falha de restauração de colisão é reproduzível em teste, mas não foi comprovado que ela causa exatamente o oval da fotografia. Não foram removidas peças do modelo para esconder o sintoma.
+A mancha é o `<div>` vazio do antigo `Toast` em `OrdersHud.tsx`, não um objeto Three.js.
+O componente renderizava sempre o elemento, mesmo quando `feedback` era null. Ao confirmar
+"Entendi · continuar", `dismissFeedback` removia o texto e `data-tone`. O cleanup matava a
+animação GSAP durante a exibição, preservando seu estilo inline `opacity: 1`. Sem o tom
+vermelho, voltava o fundo padrão marrom `#4a311c`.
+
+Reprodução no navegador: penalizar XP, aguardar 350 ms e confirmar o modal. Dois segundos
+depois o elemento estava vazio, ainda com opacidade 1, fundo `rgb(74, 49, 28)`, largura
+46 px e altura 26 px (padding de 20/10 px e borda de 3 px). A captura reproduziu a mesma
+cápsula sobre o personagem da imagem de referência.
+
+`FeedbackToast.tsx` agora monta o aviso somente com texto válido, dá a cada sequência seu
+próprio elemento/animação e desmonta após o fade. Dispensar o feedback desmonta o elemento
+imediatamente e cancela sua animação. `.toast:empty` também impede que um aviso vazio
+forme uma cápsula. A comparação visual após a correção mostrou o personagem sem o oval.
 
 ## Sincronização: requisito ainda pendente
 
@@ -25,8 +39,9 @@ Portanto este patch NÃO garante igualdade integral de veículos, NPCs, eventos 
 ## Validação
 
 - `npm run typecheck`: aprovado.
-- `npm test`: 189 testes aprovados; inclui transporte por WebSocket, isolamento de salas, pausa legada que não bloqueia movimento, menu/blur sem congelar a sessão e recuperação visual interrompida.
+- `npm test`: 190 testes aprovados; inclui transporte por WebSocket, isolamento de salas, pausa legada que não bloqueia movimento, menu/blur sem congelar a sessão e recuperação visual interrompida.
 - `npm run build`: aprovado.
-- Não foi executada uma comparação visual em dois navegadores reais nem reprodução visual da mancha original.
+- Chromium: reprodução visual antes/depois da mancha; confirmação imediata e após 100/350/1700 ms, movimento normal/reduzido, substituição rápida de avisos, remoção ao terminar a animação, expiração e reinício.
+- Não foi executada comparação multiplayer em dois navegadores. A sincronização integral foi retirada do escopo pelo solicitante nesta etapa.
 
 A alteração de política de pausa inclui backend e frontend: publicar ambos para manter clientes antigos consistentes.

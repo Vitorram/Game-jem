@@ -179,6 +179,8 @@
   pointer-events: none;
 }
 
+.toast:empty { display: none; }
+
 .toast[data-tone='good'] { background: #2fa855; }
 .toast[data-tone='bad'] { background: #d6403f; }
 
@@ -497,3 +499,4 @@
   .ticket .steps, .ticket .hint:first-of-type { display: none; }
   .ticket { width: 170px; }
 }
+

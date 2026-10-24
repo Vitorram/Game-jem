@@ -8,6 +8,7 @@ import styles from './OrdersHud.module.css';
 import { ORLA_EVENTS, ORLA_EVENT_STEPS } from '@/game/session/orlaEvents';
 import { suburbanGameState, type UrbanProblem } from '@/game/core/GameState';
 import FarewellIllustration from './FarewellIllustration';
+import FeedbackToast from './FeedbackToast';
 
 type HudOrder = SessionSnapshot['orders'][number];
 
@@ -102,30 +103,6 @@ function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | '
   }
 }
 
-function Toast({ feedback }: { feedback: SessionView['feedback'] }) {
-  const root = useRef<HTMLDivElement>(null);
-  const seq = feedback?.seq;
-  useEffect(() => {
-    const node = root.current;
-    if (!node || seq === undefined) return;
-    if (reducedMotion()) {
-      gsap.set(node, { opacity: 1, y: 0, scale: 1 });
-      const fade = gsap.to(node, { opacity: 0, delay: 1.6, duration: 0.2 });
-      return () => { fade.kill(); };
-    }
-    const timeline = gsap.timeline();
-    timeline
-      .fromTo(node, { y: 14, opacity: 0, scale: 0.9 }, { y: 0, opacity: 1, scale: 1, duration: 0.28, ease: 'back.out(2)' })
-      .to(node, { opacity: 0, y: -8, duration: 0.35, delay: 1.3 });
-    return () => { timeline.kill(); };
-  }, [seq]);
-  const message = feedback ? describe(feedback.event) : null;
-  return (
-    <div ref={root} className={styles.toast} data-tone={message?.tone} role="status" aria-live="polite">
-      {message?.text}
-    </div>
-  );
-}
 
 const SUMMARY_MESSAGES = [
   'A orla ainda precisa de você. Tente de novo.',
@@ -253,7 +230,7 @@ export default function OrdersHud({ paused, showDebug = false, onMenu, onContinu
           <span aria-hidden="true">⏱</span> {overtime ? `+${formatTime(overtime)}` : formatTime(snapshot.remainingMs)}
         </div>
       </div>
-      <Toast feedback={feedback} />
+      <FeedbackToast sequence={feedback?.seq} message={feedback ? describe(feedback.event) : null} />
       <PenaltyAlert feedback={feedback} finished={snapshot.status === 'finished'} onContinue={onContinue} />
       {showDebug && snapshot.status === 'playing' && snapshot.orders[0] && (
         <button type="button" className={styles.debug} onClick={() => sessionStore.debugResolveNext()}>
@@ -264,4 +241,5 @@ export default function OrdersHud({ paused, showDebug = false, onMenu, onContinu
     </>
   );
 }
+
 

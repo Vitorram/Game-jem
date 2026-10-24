@@ -279,3 +279,15 @@ test('OrdersHud: tolera 3 expirações sem declarar derrota e exibe fim por 4 mi
   assert.match(html, /Quatro missões expiraram/);
   sessionStore.unbind(session);
 });
+
+
+test('aviso de feedback não cria cápsula vazia sem mensagem ou após dispensá-la', () => {
+  for (const message of [null, { text: '', tone: 'info' }, { text: '  ', tone: 'info' }]) {
+    assert.equal(render('FeedbackToast.tsx', { sequence: undefined, message }), '');
+  }
+  const html = render('FeedbackToast.tsx', { sequence: 1, message: { text: 'Você perdeu 15 XP', tone: 'bad' } });
+  assert.match(html, /role="status"/);
+  assert.match(html, /data-tone="bad"/);
+  assert.match(html, /Você perdeu 15 XP/);
+  assert.equal(render('FeedbackToast.tsx', { sequence: undefined, message: null }), '');
+});
