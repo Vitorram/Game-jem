@@ -186,6 +186,14 @@ test('colisão exige cone e desvio antes do serviço', () => {
     game.run(3.1);
     assert.equal(problem('minor-collision').status, 'RESOLVED');
     assert.equal(game.scene.traffic.getIncidentPosition(), null);
+    const resolvedDiagnostics = game.scene.getTrafficDiagnostics();
+    assert.ok(resolvedDiagnostics.traffic.lanes.filter(lane => lane.id !== 'orla-green')
+      .every(lane => lane.status === 'open'), 'resolver a colisão remove a interdição temporária');
+    const exitedAtResolution = resolvedDiagnostics.traffic.exitedVehicles;
+    game.run(35);
+    const afterRecovery = game.scene.getTrafficDiagnostics();
+    assert.ok(afterRecovery.traffic.exitedVehicles > exitedAtResolution, 'veículos voltam a percorrer e sair do mapa');
+    assert.deepEqual(afterRecovery.persistentInvalidBlocks, []);
     assert.equal(game.session.snapshot().status, 'playing');
   } finally { game.scene.dispose(); }
 });
@@ -329,6 +337,14 @@ test('resgate do entregador: proteger a travessia e só reabrir a via quando ele
     }
     assert.equal(problem('cyclist-assist').status, 'RESOLVED');
     assert.equal(game.scene.traffic.isCrossingGuarded(), false);
+    assert.equal(game.scene.getTrafficDiagnostics().mobility.roadBatchHeld, false,
+      'o resgate não deixa os próximos lotes de pedestres congelados');
+    const before = game.scene.getTrafficDiagnostics();
+    game.run(45);
+    const after = game.scene.getTrafficDiagnostics();
+    assert.ok(after.mobility.entities.some(entity => entity.kind === 'pedestrian'), 'pedestres continuam sendo gerados');
+    assert.ok(after.traffic.exitedVehicles > before.traffic.exitedVehicles, 'tráfego continua após o resgate');
+    assert.deepEqual(after.persistentInvalidBlocks, []);
   } finally { game.scene.dispose(); }
 });
 

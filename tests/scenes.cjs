@@ -551,7 +551,7 @@ test('combinação CT-3.1 + acidente: nenhum veículo parado da fila pode ser at
     orla.traffic.startCollision();
     for (let frame = 0; frame < 20 * 40; frame++) orla.update(0.05);
     const stopped = orla.traffic.vehicles.filter(vehicle => vehicle.speed < 0.05);
-    assert.ok(stopped.length >= 2, `o acidente forma fila de carros parados (${stopped.length})`);
+    assert.ok(stopped.length >= 1, `o veículo do acidente permanece sólido enquanto os demais podem desviar (${stopped.length})`);
     const radius = orla.map.playerRadius, halfLength = 1.35 / 2 + radius, halfWidth = 0.36 + radius;
     const insideAny = point => stopped.some(other => Math.abs(point.x - other.mesh.position.x) < halfLength - 1e-6
       && Math.abs(point.z - other.mesh.position.z) < halfWidth - 1e-6);

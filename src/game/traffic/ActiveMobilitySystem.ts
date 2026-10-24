@@ -9,9 +9,21 @@ import { NpcModels, type NpcVisual } from './NpcModels';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 
 type WalkerState = 'approach-cycle' | 'wait-cycle' | 'cross-cycle' | 'approach-road' | 'wait-road' | 'form-road' | 'cross-road' | 'exit';
-type Walker = { slot: number; roadSlot: number | null; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1 };
-type Cyclist = { visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1 };
-type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; safeElapsed: number };
+type Walker = { id: string; slot: number; roadSlot: number | null; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1; lastProgressAt: number };
+type Cyclist = { id: string; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1; lastProgressAt: number; stoppedSince: number | null; stopReason: 'none' | 'crossing' | 'player' | 'cyclist-ahead' };
+type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; safeElapsed: number; lastProgressAt: number };
+export type MobilityDiagnostics = {
+  elapsedSeconds: number;
+  activeNpcs: number;
+  pedestrians: number;
+  cyclists: number;
+  waitingPedestrians: number;
+  crossingOccupied: boolean;
+  roadBatchHeld: boolean;
+  walkerSpawningPaused: boolean;
+  entities: { id: string; kind: 'pedestrian' | 'cyclist' | 'injured-worker'; state: string; lastProgressSecondsAgo: number }[];
+  persistentInvalidBlocks: string[];
+};
 
 const CROSSING_X = ORLA_CROSSING.centerX;
 const SIDEWALK_Y = 0.02;
@@ -49,6 +61,7 @@ export class ActiveMobilitySystem {
   private readonly npcModels = new NpcModels();
   private walkerVariant = 0;
   private cyclistVariant = 0;
+  private entityIdSequence = 0;
   private readonly white = new MeshStandardMaterial({ color: '#f5f2e6', roughness: 0.78 });
   private readonly rampConcrete = new MeshStandardMaterial({ color: '#e2ded4', roughness: 0.84 });
   private readonly tactileYellow = new MeshStandardMaterial({ color: '#f0b832', roughness: 0.72 });
@@ -94,7 +107,7 @@ export class ActiveMobilitySystem {
     const x = CROSSING_X - .35, z = this.roadQueueZ;
     mesh.position.set(x, SIDEWALK_Y, z);
     this.group.add(mesh);
-    this.injuredWorker = { visual, mesh, x, z, state: 'waiting', safeElapsed: 0 };
+    this.injuredWorker = { visual, mesh, x, z, state: 'waiting', safeElapsed: 0, lastProgressAt: this.elapsed };
   }
 
   startWorkerCrossing(): void {
@@ -267,7 +280,8 @@ export class ActiveMobilitySystem {
     mesh.rotation.y = direction === 1 ? 0 : Math.PI;
     this.group.add(mesh);
     const speed = 2.0 + this.random() * 0.65;
-    this.cyclists.push({ visual, mesh, x, z, speed, baseSpeed: speed, direction });
+    this.cyclists.push({ id: this.nextEntityId('cyclist'), visual, mesh, x, z, speed, baseSpeed: speed, direction,
+      lastProgressAt: this.elapsed, stoppedSince: null, stopReason: 'none' });
   }
 
   private spawnWalker(x: number): void {
@@ -282,8 +296,9 @@ export class ActiveMobilitySystem {
     mesh.position.set(x, SIDEWALK_Y, z);
     this.group.add(mesh);
     const exitDirection: 1 | -1 = this.random() > .5 ? 1 : -1;
-    this.walkers.push({ visual, mesh, slot, roadSlot: null, arrived: 0, batchIndex: 0, x, z, speed: .72 + this.random() * .22,
-      state: fromBeach ? 'approach-cycle' : 'approach-road', exitDirection });
+    this.walkers.push({ id: this.nextEntityId('pedestrian'), visual, mesh, slot, roadSlot: null, arrived: 0, batchIndex: 0, x, z,
+      speed: .72 + this.random() * .22, state: fromBeach ? 'approach-cycle' : 'approach-road', exitDirection,
+      lastProgressAt: this.elapsed });
   }
 
   update(delta: number): void {
@@ -334,6 +349,7 @@ export class ActiveMobilitySystem {
     const previousZ = worker.z;
     worker.z = Math.min(this.southWalkZ, worker.z + .48 * dt);
     const travel = worker.z - previousZ;
+    if (travel > .001) worker.lastProgressAt = this.elapsed;
     worker.mesh.position.set(worker.x, worker.z >= this.roadSouthEdgeZ ? 0.036 : SIDEWALK_Y, worker.z);
     worker.visual.animate(dt, travel);
     if (worker.z >= this.southWalkZ - .001) {
@@ -367,13 +383,23 @@ export class ActiveMobilitySystem {
   }
 
   private prepareCrossings(dt: number): void {
+    // Recupera apenas referências comprovadamente inválidas; não move nem teleporta entidades.
+    this.roadBatch = this.roadBatch.filter(walker => this.walkers.includes(walker)
+      && ['form-road', 'cross-road', 'exit'].includes(walker.state));
+    for (const walker of this.walkers) {
+      if (walker.state === 'form-road' && !this.roadBatch.includes(walker)) walker.state = 'wait-road';
+    }
+    if (this.cycleBatch && (!this.walkers.includes(this.cycleBatch)
+      || !['wait-cycle', 'cross-cycle'].includes(this.cycleBatch.state))) this.cycleBatch = null;
     this.roadCooldown = Math.max(0, this.roadCooldown - dt);
     this.cycleCooldown = Math.max(0, this.cycleCooldown - dt);
     if (!this.cycleBatch && this.cycleCooldown === 0) {
       this.cycleBatch = this.walkers.filter(w => w.state === 'wait-cycle').sort((a, b) => a.arrived - b.arrived)[0] ?? null;
     }
     const stoppedDrain = this.traffic.areVehiclesStoppedForCrossing();
-    const drain = this.drainRoadQueue || stoppedDrain;
+    // Uma aproximação vazia também satisfaz `areVehiclesStoppedForCrossing`, mas
+    // isso não é autorização para um pedestre isolado parar toda a avenida.
+    const drain = this.drainRoadQueue || (this.traffic.isCrossingStopActive() && stoppedDrain);
     if (!this.holdRoadBatches && !this.roadBatch.length && (this.roadCooldown === 0 || drain)) {
       const waiting = this.walkers.filter(w => w.state === 'wait-road').sort((a, b) => a.arrived - b.arrived);
       if (drain ? waiting.length > 0 : waiting.length >= CROSSING_RULES.roadGroupSize) {
@@ -415,6 +441,16 @@ export class ActiveMobilitySystem {
         const motion = advanceWithRoom(cyclist.speed, cyclist.baseSpeed, room, dt, 1.5, 3.5);
         cyclist.speed = motion.speed;
         cyclist.x += direction * motion.distance;
+        if (motion.distance > .001) {
+          cyclist.lastProgressAt = this.elapsed;
+          cyclist.stoppedSince = null;
+          cyclist.stopReason = 'none';
+        } else if (cyclist.speed <= CROSSING_RULES.stoppedSpeed) {
+          cyclist.stoppedSince ??= this.elapsed;
+          cyclist.stopReason = this.cycleBatch && distance >= CROSSING_RULES.cycleStopDistance - .001
+            ? 'crossing' : playerDistance >= 0 && playerDistance <= CYCLIST_YIELD_LOOKAHEAD
+              ? 'player' : ahead ? 'cyclist-ahead' : 'none';
+        }
         cyclist.visual.animate(dt, motion.distance);
         cyclist.mesh.position.set(cyclist.x, 0, cyclist.z);
         if (cyclist.x > this.maxX + ORLA_SCENERY_MARGIN || cyclist.x < this.minX - ORLA_SCENERY_MARGIN) {
@@ -546,6 +582,7 @@ export class ActiveMobilitySystem {
           break;
       }
       const dx = walker.x - oldX, dz = walker.z - oldZ, traveled = Math.hypot(dx, dz);
+      if (traveled > .001) walker.lastProgressAt = this.elapsed;
       const heading = traveled > .000001 ? Math.atan2(dx, dz) : 0;
       const turn = Math.atan2(Math.sin(heading - walker.mesh.rotation.y), Math.cos(heading - walker.mesh.rotation.y)) * (1 - Math.exp(-12 * dt));
       walker.mesh.rotation.y += turn;
@@ -566,6 +603,39 @@ export class ActiveMobilitySystem {
   private random(): number {
     this.randomSeed = (this.randomSeed * 16807) % 2147483647;
     return (this.randomSeed - 1) / 2147483646;
+  }
+
+  private nextEntityId(kind: 'pedestrian' | 'cyclist'): string {
+    return `${kind}-${++this.entityIdSequence}`;
+  }
+
+  getDiagnostics(): MobilityDiagnostics {
+    const entities: MobilityDiagnostics['entities'] = [
+      ...this.walkers.map(walker => ({ id: walker.id, kind: 'pedestrian' as const, state: walker.state,
+        lastProgressSecondsAgo: Math.max(0, this.elapsed - walker.lastProgressAt) })),
+      ...this.cyclists.map(cyclist => ({ id: cyclist.id, kind: 'cyclist' as const, state: cyclist.stopReason,
+        lastProgressSecondsAgo: Math.max(0, this.elapsed - cyclist.lastProgressAt) })),
+      ...(this.injuredWorker ? [{ id: 'injured-worker', kind: 'injured-worker' as const, state: this.injuredWorker.state,
+        lastProgressSecondsAgo: Math.max(0, this.elapsed - this.injuredWorker.lastProgressAt) }] : []),
+    ];
+    const legitimateWalkerWait = new Set<WalkerState>(['wait-cycle', 'wait-road', 'form-road']);
+    const persistentInvalidBlocks = entities.filter(entity => entity.lastProgressSecondsAgo >= 20
+      && !(entity.kind === 'pedestrian' && legitimateWalkerWait.has(entity.state as WalkerState))
+      && !(entity.kind === 'injured-worker' && ['waiting', 'safe'].includes(entity.state))
+      && !(entity.kind === 'cyclist' && ['crossing', 'player', 'cyclist-ahead'].includes(entity.state)))
+      .map(entity => `${entity.id}:${entity.state}:${entity.lastProgressSecondsAgo.toFixed(1)}s`);
+    return {
+      elapsedSeconds: this.elapsed,
+      activeNpcs: this.walkers.length + this.cyclists.length + (this.injuredWorker ? 1 : 0),
+      pedestrians: this.walkers.length,
+      cyclists: this.cyclists.length,
+      waitingPedestrians: this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road').length,
+      crossingOccupied: this.roadBatch.some(walker => walker.state === 'cross-road'),
+      roadBatchHeld: this.holdRoadBatches,
+      walkerSpawningPaused: this.walkerSpawningPaused,
+      entities,
+      persistentInvalidBlocks,
+    };
   }
 
   dispose(): void {
