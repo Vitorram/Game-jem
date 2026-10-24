@@ -1,10 +1,10 @@
-/** Independent soundtrack controller. No scene or screen imports. */
-export type MusicCue = "intro" | "loading" | "gameplay" | "gameplaySpeed";
+/** Owns one looping track. Changing cue stops the old screen's music immediately. */
+export type MusicCue = 'intro' | 'loading' | 'gameplay' | 'gameplaySpeed';
 const TRACKS: Record<MusicCue, string> = {
-  intro: "/assets/audio/Intro.mp3",
-  loading: "/assets/audio/Carregamento.mp3",
-  gameplay: "/assets/audio/Gameplay Default.mp3",
-  gameplaySpeed: "/assets/audio/Gameplay Speed.mp3",
+  intro: '/assets/audio/Intro.mp3',
+  loading: '/assets/audio/Carregamento.mp3',
+  gameplay: '/assets/audio/Gameplay Default.mp3',
+  gameplaySpeed: '/assets/audio/Gameplay Speed.mp3',
 };
 
 export class MusicManager {
@@ -14,72 +14,67 @@ export class MusicManager {
   private muted = false;
   private transitionId = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private pending: Promise<void> | null = null;
+  private fade = 1;
 
   get cue(): MusicCue | null { return this.currentCue; }
   setVolume(volume: number) {
+    if (!Number.isFinite(volume)) return;
     this.volume = Math.max(0, Math.min(1, volume));
-    if (this.current) this.current.volume = this.muted ? 0 : this.volume;
+    this.applyVolume();
   }
-  setMuted(muted: boolean) {
-    this.muted = muted;
-    if (this.current) this.current.volume = muted ? 0 : this.volume;
-  }
-  async play(cue: MusicCue, fadeMs = 500): Promise<void> {
-    if (this.currentCue === cue && this.current && !this.current.paused) return;
-    this.clearFade();
+  setMuted(muted: boolean) { this.muted = muted; this.applyVolume(); }
+  play(cue: MusicCue, fadeMs = 500): Promise<void> {
+    if (this.currentCue === cue && this.current) {
+      if (this.pending) return this.pending;
+      if (!this.current.paused) return Promise.resolve();
+    } else {
+      this.stop();
+      this.current = new Audio(TRACKS[cue]);
+      this.current.loop = true;
+      this.current.preload = 'auto';
+      this.currentCue = cue;
+    }
+    const next = this.current;
     const transition = ++this.transitionId;
-    const previous = this.current;
-    const next = new Audio(TRACKS[cue]);
-    next.loop = true;
-    next.preload = "auto";
-    next.volume = 0;
-    this.current = next;
-    this.currentCue = cue;
-    try {
-      await next.play();
-    } catch (error) {
-      if (transition === this.transitionId) {
-        this.current = previous;
-        this.currentCue = null;
-      }
-      next.pause();
-      throw error; // Browser autoplay policy: call after a user gesture.
-    }
-    if (transition !== this.transitionId) { next.pause(); return; }
-    const duration = Math.max(0, fadeMs);
-    if (duration === 0) {
-      next.volume = this.muted ? 0 : this.volume;
-      previous?.pause();
-      return;
-    }
-    const target = this.muted ? 0 : this.volume;
-    const start = Date.now();
-    const previousVolume = previous?.volume ?? 0;
-    this.timer = setInterval(() => {
+    this.clearFade();
+    this.fade = 0;
+    this.applyVolume();
+    const request = next.play().then(() => {
       if (transition !== this.transitionId) return;
-      const t = Math.min(1, (Date.now() - start) / duration);
-      next.volume = Math.max(0, Math.min(1, target * t));
-      if (previous) previous.volume = Math.max(0, Math.min(1, previousVolume * (1 - t)));
-      if (t >= 1) {
-        this.clearFade();
-        previous?.pause();
-        if (previous) previous.src = "";
-      }
-    }, 30);
+      const duration = Number.isFinite(fadeMs) ? Math.max(0, fadeMs) : 0;
+      if (!duration) { this.fade = 1; this.applyVolume(); return; }
+      const start = Date.now();
+      this.timer = setInterval(() => {
+        this.fade = Math.min(1, (Date.now() - start) / duration);
+        this.applyVolume();
+        if (this.fade === 1) this.clearFade();
+      }, 30);
+    }).finally(() => {
+      if (transition === this.transitionId) this.pending = null;
+    });
+    this.pending = request;
+    return request;
   }
-  stop() {
+  pause() {
     this.clearFade();
     ++this.transitionId;
+    this.pending = null;
     this.current?.pause();
-    if (this.current) this.current.src = "";
+  }
+  stop() {
+    this.pause();
+    if (this.current) this.current.src = '';
     this.current = null;
     this.currentCue = null;
   }
   dispose() { this.stop(); }
+  private applyVolume() {
+    if (this.current) this.current.volume = this.muted ? 0 : this.volume * this.fade;
+  }
   private clearFade() {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer !== null) clearInterval(this.timer);
     this.timer = null;
   }
 }
-
 export const gameMusic = new MusicManager();

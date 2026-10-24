@@ -17,8 +17,10 @@ import MobilityTutorialGuide, { type MobilityTutorialStep } from './MobilityTuto
 import InfrastructureTutorialGuide, { type InfrastructureTutorialStep } from './InfrastructureTutorialGuide';
 import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
 import { suburbanGameState } from '@/game/core/GameState';
+
 import { gameMusic } from '@/game/audio/musicManager';
 import { coopRoleToPlayerId, getCoopClient, type CoopMessage, type CoopPlayer, type CoopRole } from '@/game/coop/CoopClient';
+
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -190,7 +192,6 @@ export default function GameCanvas() {
   };
 
   const startAnalystTutorial = () => {
-    void gameMusic.play('loading').catch(() => {});
     setStoryOpen(false);
     if (coopSession) {
       clientTutorialOpen();
@@ -255,18 +256,7 @@ export default function GameCanvas() {
   }, [isOriginalOrla]);
 
   const tutorialOpen = analystTutorialStep !== null || mobilityTutorialStep !== null || infrastructureTutorialStep !== null;
-  // Keep the tense loading soundtrack through all three tutorials.
-  // Switch only when the final tutorial finishes (or the tutorial is skipped).
-  useEffect(() => {
-    if (error || sceneId !== 'fase1-orla') return;
-    if (storyOpen || tutorialOpen) {
-      void gameMusic.play('loading').catch(() => {});
-    } else if (status === 'playing') {
-      void gameMusic.play('gameplay').catch(() => {});
-    }
-  }, [sceneId, storyOpen, tutorialOpen, status, error]);
-
-  useEffect(() => () => { gameMusic.stop(); }, []);
+  useGameAudio({ screen: 'game', status, preparing: !initialized || storyOpen || tutorialOpen || sceneId !== 'fase1-orla', error: !!error });
 
   useEffect(() => {
     if (!coopSession || !coopClient.current || status !== 'playing' || coopTutorialWaiting) return;
@@ -357,6 +347,7 @@ export default function GameCanvas() {
               <button className="pause-secondary" onClick={returnToMenu}>Sair</button>
               <button className="pause-secondary" onClick={() => setPauseSettingsOpen(value => !value)}>{pauseSettingsOpen ? 'Fechar configurações' : 'Configurações'}</button>
             </div>}
+            {!error && status === 'paused' && pauseSettingsOpen && <AudioControls />}
             {status !== 'paused' && <div className="stack">ANALISAR <i /> ORGANIZAR <i /> REPARAR</div>}
           </div>
         </div>
@@ -453,6 +444,7 @@ export default function GameCanvas() {
             <kbd>Q</kbd> {isAnalystTablet ? 'Guardar tablet' : 'Abrir tablet'}
             {!isAnalystTablet && analystAttention && <span className="tablet-alert-dot" aria-label="Chamado aguardando" />}
           </button> : <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>}
+
           {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Habilidade 4 · Desviar elétricos'].map((label, index) => {
             const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;
             const target = activeSkill === index;
@@ -478,5 +470,6 @@ export default function GameCanvas() {
     </section>
   );
 }
+
 
 
