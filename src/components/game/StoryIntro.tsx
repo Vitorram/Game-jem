@@ -40,7 +40,7 @@ function CinematicWorld({ shot, reducedMotion, paused }: IntroPlayback) {
   </div>;
 }
 
-export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
+export default function StoryIntro({ onComplete, onCoopRequested }: { onComplete: () => void; onCoopRequested?: () => void }) {
   const root = useRef<HTMLDivElement>(null);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const finishing = useRef(false);
@@ -105,7 +105,7 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
     <div className={styles.vignette} aria-hidden="true" />
     <header className={styles.topbar}>
       <span className={styles.signature}><b>S</b> SUBURBAN <i /> <small>PRÓLOGO</small></span>
-      <nav aria-label="Controles do prólogo"><button onClick={() => setPaused(value => !value)} aria-label={paused ? 'Continuar prólogo' : 'Pausar prólogo'}>{paused ? '▶' : 'Ⅱ'}</button><button onClick={finish}>Pular <span>↗</span></button></nav>
+      <nav aria-label="Controles do prólogo"><button onClick={() => setPaused(value => !value)} aria-label={paused ? 'Continuar prólogo' : 'Pausar prólogo'}>{paused ? '▶' : 'Ⅱ'}</button>{onCoopRequested && <button onClick={onCoopRequested}>Coop online</button>}<button onClick={finish}>Pular <span>↗</span></button></nav>
     </header>
     <section key={`narrative-${clock.beat}`} className={styles.narrative}>
       {finale && <div className={styles.titleReveal}><h1>SUBURBAN</h1></div>}

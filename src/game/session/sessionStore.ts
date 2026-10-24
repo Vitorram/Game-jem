@@ -182,7 +182,6 @@ class SessionStore {
       else if (event.type === 'order-expired') {
         const definitionId = this.definitionsByOrderId.get(event.orderId);
         if (definitionId) this.onOrderExpired?.(definitionId, this.session?.snapshot().status === 'playing');
-        if (this.session?.snapshot().status === 'playing') this.onPauseForPenalty?.();
       }
     }
   }

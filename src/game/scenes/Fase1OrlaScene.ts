@@ -33,6 +33,7 @@ export type MobilityTutorialSnapshot = {
   facingConeCrate: boolean;
 };
 export type InfrastructureTutorialSnapshot = { readyToRepair: boolean };
+export type CoopPlayerPose = { x: number; z: number; rotation: number };
 
 /** Cena da Orla; recursos próprios liberados em dispose. */
 export class Fase1OrlaScene implements GameScene {
@@ -50,6 +51,8 @@ export class Fase1OrlaScene implements GameScene {
   private readonly objectiveMarker = new TeamObjectiveMarker();
   private readonly analystCabin: AnalystCabin;
   private readonly spawnPositions = new Map<PlayerId, { x: number; z: number }>();
+  private readonly remotePlayerTargets = new Map<PlayerId, CoopPlayerPose>();
+  private coopPlayerId: PlayerId | null = null;
   readonly items = new ItemInteractions(this.map, this.players.map(player => player.id));
   private readonly itemVisuals = new ItemVisuals(this.map, this.mapView.group, this.players);
   readonly risks = new RiskWorkflow(
@@ -158,13 +161,37 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   selectPlayer(id: PlayerId): void {
-    if (this.disposed || !this.canSelectPlayer(id)) return;
+    if (this.disposed || (this.coopPlayerId ? id !== this.coopPlayerId : !this.canSelectPlayer(id))) return;
     this.stopMovement();
     suburbanGameState.setActiveCharacter(id);
     if (this.risks.selectRole(id)) this.syncRisks();
   }
 
   canSelectPlayer(id: PlayerId): boolean { return this.phase?.canSelectPlayer(id) ?? true; }
+
+  setCoopPlayerId(id: PlayerId): void {
+    this.coopPlayerId = id;
+    this.remotePlayerTargets.clear();
+  }
+
+  getPlayerPose(id: PlayerId): CoopPlayerPose | null {
+    const player = this.players[id - 1];
+    return player ? { x: player.position.x, z: player.position.z, rotation: player.mesh.rotation.y } : null;
+  }
+
+  setRemotePlayerPose(id: PlayerId, pose: CoopPlayerPose): void {
+    if (!this.coopPlayerId || id === this.coopPlayerId || !this.players[id - 1]
+      || ![pose.x, pose.z, pose.rotation].every(Number.isFinite)) return;
+    this.remotePlayerTargets.set(id, pose);
+  }
+
+  /** Executa uma ação remota com o personagem dono do comando sem trocar a câmera local. */
+  runAsPlayer<T>(id: PlayerId, action: () => T): T {
+    const previous = suburbanGameState.activeCharacter;
+    suburbanGameState.setActiveCharacter(id);
+    try { return action(); }
+    finally { suburbanGameState.setActiveCharacter(previous); }
+  }
 
   interact(): void {
     if (this.disposed) return;
@@ -488,11 +515,25 @@ export class Fase1OrlaScene implements GameScene {
     this.activeMobility.setPlayerPosition(pedestrianPosition);
     this.traffic.update(dt);
     this.activeMobility.update(dt);
-    this.phase?.update(dt, this.player);
+    this.phase?.update(dt, this.coopPlayerId ? this.players[0] : this.player);
     this.trafficSignals.setFaulty(this.phase?.isSignalFaulty() ?? false);
     this.trafficSignals.update();
     this.updateProblemPresentation();
     for (const player of this.players) {
+      const remotePose = this.coopPlayerId && player.id !== this.coopPlayerId
+        ? this.remotePlayerTargets.get(player.id) : undefined;
+      if (remotePose) {
+        const previousX = player.position.x, previousZ = player.position.z;
+        const previousRotation = player.mesh.rotation.y;
+        const blend = 1 - Math.exp(-18 * Math.min(dt, 0.05));
+        player.mesh.position.x = MathUtils.lerp(previousX, remotePose.x, blend);
+        player.mesh.position.z = MathUtils.lerp(previousZ, remotePose.z, blend);
+        const difference = Math.atan2(Math.sin(remotePose.rotation - previousRotation), Math.cos(remotePose.rotation - previousRotation));
+        player.mesh.rotation.y += difference * blend;
+        const distance = Math.hypot(player.position.x - previousX, player.position.z - previousZ);
+        player.animateWalking(dt, distance, dt > 0 ? difference * blend / dt : 0);
+        continue;
+      }
       const movementResolver = player.active && player.role === 'infraestrutura' && !this.phase?.isServicing(player)
         ? this.resolveInfrastructureMovement
         : player.role === 'mobilidade' ? this.resolveMobilityMovement : this.resolveOrlaMovement;

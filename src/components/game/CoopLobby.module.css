@@ -1,0 +1,46 @@
+.backdrop { position: fixed; z-index: 1200; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(7 19 25 / 82%); backdrop-filter: blur(8px); color: #f5f1dc; }
+.panel { width: min(100%, 850px); max-height: min(92vh, 900px); overflow: auto; padding: clamp(20px, 4vw, 38px); border: 1px solid #76918b; border-radius: 22px; background: linear-gradient(145deg, #173747, #102a36); box-shadow: 0 28px 90px #07151dbb; }
+.header { display: flex; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+.eyebrow { color: #e4bd5b; font-size: 11px; font-weight: 900; letter-spacing: .17em; }
+.header h1 { margin: 8px 0; font-size: clamp(28px, 5vw, 42px); line-height: 1; letter-spacing: -.045em; }
+.header p { max-width: 580px; margin: 0; color: #b8cbc5; line-height: 1.5; }
+.close { align-self: flex-start; width: 38px; height: 38px; border: 1px solid #64817c; border-radius: 50%; background: #203f4a; color: #ffedc2; font-size: 25px; cursor: pointer; }
+.roles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.roleCard { position: relative; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 16px 12px; border: 1px solid #476b6d; border-radius: 15px; background: #203e48; color: inherit; text-align: left; cursor: pointer; transition: border-color .18s, transform .18s, background .18s; }
+.roleCard:hover:not(:disabled) { transform: translateY(-2px); border-color: #e9c45d; }
+.roleCard[data-selected] { border: 2px solid #f0c654; background: #2b4a4c; box-shadow: 0 0 0 3px #f0c65420; }
+.roleCard:disabled { opacity: .55; cursor: not-allowed; }
+.avatar { display: grid; flex: 0 0 54px; place-items: center; width: 54px; height: 54px; overflow: hidden; border: 2px solid #ffe8a2; border-radius: 16px 16px 19px 19px; box-shadow: inset 0 -8px 0 #101c2c55; }
+.avatar svg { display: block; width: 100%; height: 100%; }
+.roleText { display: grid; gap: 4px; min-width: 0; }
+.roleText b { font-size: 14px; }
+.roleText small,.roleText em { color: #b8cbc5; font-size: 11px; font-style: normal; line-height: 1.35; }
+.roleText em { color: #f0d47d; }
+.check { position: absolute; top: 8px; right: 10px; color: #f3ca57; font-weight: 1000; }
+.entry { display: grid; gap: 16px; margin-top: 22px; }
+.entry label { display: grid; gap: 7px; color: #c1d4cf; font-size: 12px; font-weight: 800; }
+.entry input,.join input { min-width: 0; padding: 12px 14px; border: 1px solid #597c7c; border-radius: 10px; outline: none; background: #102d39; color: #fff2d0; font: inherit; }
+.entry input:focus,.join input:focus { border-color: #f0c654; }
+.entryButtons { display: flex; gap: 12px; }
+.primary,.secondary,.join button,.start { min-height: 44px; padding: 0 18px; border: 1px solid #f1c95c; border-radius: 11px; background: #f1c95c; color: #172c35; font-size: 13px; font-weight: 900; cursor: pointer; }
+.primary:hover,.start:hover { background: #ffe18a; }
+.primary:disabled,.start:disabled { opacity: .46; cursor: not-allowed; }
+.join { display: flex; flex: 1; gap: 8px; }
+.join input { flex: 1; text-transform: uppercase; letter-spacing: .16em; }
+.join button,.secondary { border-color: #6c9087; background: transparent; color: #e5edcf; }
+.note { margin: 0; color: #9fb8b2; font-size: 12px; }
+.note code { color: #f0d47d; }
+.roomControls { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: stretch; margin-top: 21px; }
+.roomCode,.waiting,.countdown { display: flex; flex-direction: column; justify-content: center; min-height: 112px; padding: 17px; border: 1px solid #476b6d; border-radius: 14px; background: #1b3945; }
+.roomCode span { color: #aac0b8; font-size: 10px; font-weight: 900; letter-spacing: .14em; }
+.roomCode b { margin: 4px 0; color: #f4cf63; font-size: 35px; letter-spacing: .18em; }
+.roomCode small { color: #a8c0ba; font-size: 11px; }
+.waiting { display: grid; grid-template-columns: 1fr auto; gap: 10px; color: #c1d4cf; font-size: 13px; }
+.waiting > span { grid-column: 1 / -1; }
+.waiting .start { grid-column: 1 / -1; }
+.countdown { align-items: center; color: #f3cf62; font-size: clamp(16px, 3vw, 24px); font-weight: 1000; letter-spacing: .08em; }
+.error { margin-top: 16px; padding: 12px 14px; border: 1px solid #c97669; border-radius: 10px; background: #4c2b31; color: #ffe1cf; font-size: 13px; }
+.footer { display: flex; justify-content: space-between; gap: 12px; margin-top: 21px; color: #8da9a3; font-size: 11px; }
+.footer button { border: 0; background: none; color: #e9c45d; font: inherit; cursor: pointer; }
+.clockEffect { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; }
+@media (max-width: 680px) { .roles { grid-template-columns: 1fr; } .roleCard { padding: 11px 12px; } .avatar { flex-basis: 40px; width: 40px; height: 40px; } .roomControls { grid-template-columns: 1fr; } .roomCode { min-height: auto; } .entryButtons { flex-direction: column; } .join { min-height: 44px; } .footer { flex-direction: column; } }

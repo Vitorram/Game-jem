@@ -26,8 +26,6 @@ export class OrlaPhase {
   private signalRepairCompleted = false;
   private rescueProtected = false;
   private rushFlowSeconds = 0;
-  private rescueBaseline = 0;
-  private rescueTarget = 0;
   private service: { id: string; elapsed: number } | null = null;
   isServicing(player: Player): boolean {
     const problem = this.service ? this.problem(this.service.id) : undefined;
@@ -274,10 +272,15 @@ export class OrlaPhase {
       this.patch(crossing.id, { instruction: this.crossingInstruction() });
     }
     const rescue = this.problem('cyclist-assist');
-    if (rescue?.stage === 'active' && rescue.status === 'ACTIVE'
-      && this.pedestrians.getWorkerRescueState() === 'crossing' && !this.completedSteps.has(701)) {
-      this.step(rescue.id, 701);
-      this.patch(rescue.id, { instruction: 'O entregador está atravessando devagar. Mantenha os carros parados e aguarde ele chegar à calçada.' });
+    if (rescue?.stage === 'active' && rescue.status === 'ACTIVE') {
+      const workerState = this.pedestrians.getWorkerRescueState();
+      if (workerState === 'crossing' && !this.completedSteps.has(701)) {
+        this.step(rescue.id, 701);
+        this.patch(rescue.id, { instruction: 'O entregador está atravessando. Mantenha os carros parados; quando ele chegar à calçada, use 1 para concluir o resgate.' });
+      } else if (workerState === 'safe' && !this.completedSteps.has(702)) {
+        const instruction = 'O entregador chegou à calçada. Mobilidade: use 1 para liberar a via e concluir o resgate.';
+        if (rescue.instruction !== instruction) this.patch(rescue.id, { instruction });
+      }
     }
     if (this.rescueBubble && this.elapsedMs >= this.rescueBubbleUntilMs) this.rescueBubble.visible = false;
     const rush = this.problem('rush-hour');
@@ -456,28 +459,22 @@ export class OrlaPhase {
         ?? (player.position.z >= 4 ? 'orla-eastbound' : null);
       if (!roadId) return true;
       if (action === 'blockAll' && !this.rescueProtected) {
-        const progress = this.pedestrians.getCrossingProgress();
-        this.rescueBaseline = progress.crossed;
-        this.rescueTarget = progress.pending;
         this.traffic.applyMobilityAction(roadId, 'release');
         this.traffic.setCrossingGuarded(true);
         this.pedestrians.setWalkerSpawningPaused(true);
         this.pedestrians.setRoadBatchHold(false);
         this.rescueProtected = true;
         this.pedestrians.startWorkerCrossing();
-        this.patch(rescue.id, { instruction: 'Trânsito retido. O entregador e os pedestres vão atravessar; aguarde todos chegarem à calçada.' });
+        this.patch(rescue.id, { instruction: 'Trânsito retido. Acompanhe o entregador; quando ele chegar à calçada, use 1 para concluir o resgate.' });
         return true;
       }
       if (action === 'release') {
         const workerPosition = this.pedestrians.getWorkerRescuePosition();
-        const progress = this.pedestrians.getCrossingProgress();
-        const pedestriansSafe = progress.crossed >= this.rescueBaseline + this.rescueTarget
-          && progress.pending === 0 && !progress.occupied && progress.waiting === 0;
-        if (this.completedSteps.has(701) && this.pedestrians.getWorkerRescueState() === 'safe' && workerPosition && pedestriansSafe) {
+        if (this.completedSteps.has(701) && this.pedestrians.getWorkerRescueState() === 'safe' && workerPosition) {
           this.traffic.setCrossingGuarded(false);
           this.traffic.setAssistedCrossingRequested(false);
           this.pedestrians.setWalkerSpawningPaused(false);
-          this.pedestrians.setRoadBatchHold(true);
+          this.pedestrians.setRoadBatchHold(false);
           this.traffic.applyMobilityAction(roadId, 'release');
           this.resolve(rescue.id, 702);
           if (this.rescueBubble) {
@@ -486,8 +483,6 @@ export class OrlaPhase {
             this.rescueBubbleUntilMs = this.elapsedMs + 4_200;
           }
           this.beginCinematic(workerPosition, .8, 4.2);
-        } else if (this.pedestrians.getWorkerRescueState() === 'safe' && !pedestriansSafe) {
-          this.patch(rescue.id, { instruction: 'O entregador chegou à calçada. Mantenha os carros parados até todos os pedestres terminarem a travessia.' });
         }
         return true;
       }
@@ -604,7 +599,7 @@ export class OrlaPhase {
         const state = this.pedestrians.getWorkerRescueState();
         const prompt = !this.rescueProtected ? 'USE 3 PARA PARAR O TRÂNSITO E PROTEGER A TRAVESSIA'
           : state === 'crossing' ? 'ENTREGADOR ATRAVESSANDO · AGUARDE NA FAIXA'
-            : state === 'safe' ? 'ENTREGADOR NA CALÇADA · USE 1 PARA LIBERAR A VIA'
+            : state === 'safe' ? 'ENTREGADOR NA CALÇADA · USE 1 PARA CONCLUIR O RESGATE'
               : 'TRÂNSITO PARADO · AGUARDE A TRAVESSIA SEGURA';
         return { target: this.targetFor(player, problem), prompt };
       }

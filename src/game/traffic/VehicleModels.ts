@@ -7,7 +7,7 @@ export const VEHICLE_VISUAL_SCALE: Record<VehicleKind, number> = {
   hatch: .54, sedan: .54, suv: .59, pickup: .59, truck: .58, bus: .62, motorcycle: .56,
   'ev-sedan': .56, 'ev-crossover': .57,
 };
-export type VehicleModel = { group: Group; wheels: Mesh[]; brakeLights: Mesh[]; length: number; width: number; kind: VehicleKind };
+export type VehicleModel = { group: Group; wheels: Mesh[]; brakeLights: Mesh[]; hazardLights: Mesh[]; length: number; width: number; kind: VehicleKind };
 
 /** Modelos voltados para +Z. Geometrias e materiais pertencem à fábrica. */
 export class VehicleModels {
@@ -26,7 +26,7 @@ export class VehicleModels {
   create(kind: VehicleKind, color: string): VehicleModel {
     const group = new Group();
     group.name = `vehicle-${kind}`;
-    const wheels: Mesh[] = [], brakeLights: Mesh[] = [];
+    const wheels: Mesh[] = [], brakeLights: Mesh[] = [], hazardLights: Mesh[] = [];
     const part = (name: string, paint: string, x: number, y: number, z: number, w: number, h: number, l: number, flat = false, glow = false) => {
       const mesh = new Mesh(flat ? this.box : this.rounded, this.material(paint, glow));
       mesh.name = name;
@@ -35,6 +35,14 @@ export class VehicleModels {
       mesh.castShadow = true;
       mesh.receiveShadow = true;
       group.add(mesh);
+      return mesh;
+    };
+    const indicator = (name: string, x: number, y: number, z: number) => {
+      const mesh = part(name, '#ffb52e', x, y, z, .2, .1, .055, false, true);
+      mesh.visible = false;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      hazardLights.push(mesh);
       return mesh;
     };
     const wheel = (x: number, z: number, radius = .23, thickness = .16) => {
@@ -67,11 +75,13 @@ export class VehicleModels {
         part('rider-leg', '#40536a', side * .19, .56, -.12, .13, .36, .26);
         const arm = part('rider-arm', '#e8b564', side * .24, .93, .17, .12, .14, .45);
         arm.rotation.x = -.3;
+        indicator('hazard-front', side * .15, .68, .56);
+        indicator('hazard-rear', side * .15, .64, -.59);
       }
       const helmet = new Mesh(this.sphere, this.material(color));
       helmet.scale.set(.24, .25, .24); helmet.position.set(0, 1.37, -.09); group.add(helmet);
       part('helmet-visor', '#263c51', 0, 1.39, .1, .35, .12, .11);
-      return { group, wheels, brakeLights, length: 1.5, width: .65, kind };
+      return { group, wheels, brakeLights, hazardLights, length: 1.5, width: .65, kind };
     }
     if (kind === 'ev-sedan') {
       const length = 2.35, width = 1.02;
@@ -86,6 +96,8 @@ export class VehicleModels {
         part('ev-side-glass', '#6e979a', side * width * .44, .78, -.04, .025, .22, .86, true);
         part('ev-daylight', '#fff4ce', side * width * .31, .5, length / 2 + .018, .24, .055, .035, false, true);
         brakeLights.push(part('ev-tail-light', '#ff6558', side * width * .32, .54, -length / 2 - .018, .23, .075, .035, false, true));
+        indicator('ev-hazard-front', side * width * .34, .62, length / 2 + .025);
+        indicator('ev-hazard-rear', side * width * .34, .62, -length / 2 - .025);
         wheel(side * width * .48, -.7, .25, .17);
         wheel(side * width * .48, .72, .25, .17);
       }
@@ -93,7 +105,7 @@ export class VehicleModels {
       part('ev-rear-trim', '#f78b79', 0, .55, -length / 2 - .02, width * .58, .045, .025, false, true);
       part('ev-front-bumper', '#edf0e6', 0, .33, length / 2, width * .86, .1, .1);
       part('ev-rear-bumper', '#34484d', 0, .32, -length / 2, width * .84, .1, .1);
-      return { group, wheels, brakeLights, length, width, kind };
+      return { group, wheels, brakeLights, hazardLights, length, width, kind };
     }
     if (kind === 'ev-crossover') {
       const length = 2.42, width = 1.08;
@@ -108,6 +120,8 @@ export class VehicleModels {
         part('ev-crossover-window-pillar', '#263a40', side * width * .44, 1.02, -.03, .05, .32, .09, true);
         part('ev-crossover-light', '#fff2c8', side * width * .31, .61, length / 2 + .018, .22, .085, .035, false, true);
         brakeLights.push(part('ev-crossover-tail-light', '#f36558', side * width * .34, .67, -length / 2 - .018, .18, .17, .035, false, true));
+        indicator('ev-crossover-hazard-front', side * width * .34, .77, length / 2 + .025);
+        indicator('ev-crossover-hazard-rear', side * width * .34, .77, -length / 2 - .025);
         wheel(side * width * .48, -.73, .27, .18);
         wheel(side * width * .48, .73, .27, .18);
       }
@@ -117,7 +131,7 @@ export class VehicleModels {
       part('ev-crossover-rear-bumper', '#34494c', 0, .36, -length / 2, width * .86, .12, .1);
       part('ev-crossover-roof-rail-left', '#c7ddd2', -.37, 1.19, -.02, .05, .06, 1.13);
       part('ev-crossover-roof-rail-right', '#c7ddd2', .37, 1.19, -.02, .05, .06, 1.13);
-      return { group, wheels, brakeLights, length, width, kind };
+      return { group, wheels, brakeLights, hazardLights, length, width, kind };
     }
     if (kind === 'truck') {
       const length = 3.15, width = 1.12;
@@ -131,12 +145,14 @@ export class VehicleModels {
         part('mirror', '#29363e', side * width * .54, 1.02, 1.32, .12, .18, .12);
         part('headlight', '#fff0bb', side * width * .33, .56, length / 2 - .12, .22, .14, .04, false, true);
         brakeLights.push(part('tail-light', '#ff6958', side * width * .34, .48, -length / 2 + .16, .18, .12, .04, false, true));
+        indicator('truck-hazard-front', side * width * .33, .61, length / 2 + .015);
+        indicator('truck-hazard-rear', side * width * .4, .49, -length / 2 + .16);
         wheel(side * width * .46, .95, .27);
         wheel(side * width * .46, -.88, .27);
       }
       part('front-bumper', '#d9e0d7', 0, .36, 1.46, width * .92, .14, .12);
       part('rear-bumper', '#36434d', 0, .34, -1.42, width * .9, .12, .1);
-      return { group, wheels, brakeLights, length, width, kind };
+      return { group, wheels, brakeLights, hazardLights, length, width, kind };
     }
     const bus = kind === 'bus', pickup = kind === 'pickup', suv = kind === 'suv';
     const length = bus ? 3.7 : pickup ? 2.5 : kind === 'sedan' ? 2.35 : suv ? 2.2 : 1.9;
@@ -159,6 +175,10 @@ export class VehicleModels {
       part('mirror', color, side * width * .56, bus ? 1.12 : .85, length * .31, .14, .12, .18);
       part('headlight', '#fff0bb', side * width * .31, .57, length / 2 + .018, .23, .13, .04, false, true);
       brakeLights.push(part('tail-light', '#ff6958', side * width * .32, .55, -length / 2 - .018, .17, .13, .04, false, true));
+      const signalY = bus ? 1.53 : height - .08;
+      const signalZ = bus ? length * .44 : length / 2 + .025;
+      indicator('hazard-front', side * width * .32, signalY, signalZ);
+      indicator('hazard-rear', side * width * .32, signalY, -signalZ);
       wheel(side * width * .48, -length * .31, bus ? .29 : .23);
       wheel(side * width * .48, length * .31, bus ? .29 : .23);
       if (bus) {
@@ -180,7 +200,7 @@ export class VehicleModels {
     part('front-bumper', '#e3e7d9', 0, .32, length / 2, width * .86, .1, .1);
     part('rear-bumper', '#e3e7d9', 0, .32, -length / 2, width * .86, .1, .1);
     part('plate', '#fff7df', 0, .44, -length / 2 - .025, .27, .1, .025, true);
-    return { group, wheels, brakeLights, length, width, kind };
+    return { group, wheels, brakeLights, hazardLights, length, width, kind };
   }
 
   dispose() {

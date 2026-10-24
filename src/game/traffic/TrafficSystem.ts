@@ -35,6 +35,7 @@ type Vehicle = {
   homeLane: Lane;
   preferredLane: Lane;
   kind: VehicleKind;
+  hazardLights: Mesh[];
   speed: number;
   crossingCommitted: boolean;
   maxSpeed: number;
@@ -135,6 +136,7 @@ export class TrafficSystem {
   private spawnedCount = 0;
   private disposed = false;
   private roadStatePublishElapsed = 0;
+  private hazardBlinkElapsed = 0;
 
   constructor(map: GridMap) {
     this.group.name = 'traffic-flow';
@@ -167,6 +169,7 @@ export class TrafficSystem {
         this.group.add(mesh);
         const maxSpeed = 1.6 + ((vehicleIndex + laneIndex) % 3) * 0.35;
         this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+          hazardLights: mesh.userData.hazardLights as Mesh[],
           speed: maxSpeed, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
           chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
       }
@@ -692,6 +695,7 @@ export class TrafficSystem {
     this.group.add(mesh);
     const maxSpeed = 1.6 + this.randomTraffic() * 0.7;
     this.vehicles.push({ mesh, lane, homeLane: lane, preferredLane: lane, kind: mesh.userData.vehicleKind as VehicleKind,
+      hazardLights: mesh.userData.hazardLights as Mesh[],
       speed: 0, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
       chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null });
     return true;
@@ -716,6 +720,7 @@ export class TrafficSystem {
     const chargeRing = this.createChargeRing();
     mesh.add(chargeRing);
     this.vehicles.push({ mesh, lane, homeLane: greenLane, preferredLane: greenLane, kind, speed: 0, crossingCommitted: false, maxSpeed,
+      hazardLights: mesh.userData.hazardLights as Mesh[],
       laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION, chargeTargetIndex,
       chargeElapsed: 0, charging: false, chargeRing });
     return true;
@@ -753,6 +758,8 @@ export class TrafficSystem {
   update(delta: number): void {
     if (this.disposed || !Number.isFinite(delta) || delta <= 0) return;
     const dt = Math.min(delta, 0.05);
+    this.hazardBlinkElapsed = (this.hazardBlinkElapsed + dt) % 0.68;
+    const hazardsLit = this.hazardBlinkElapsed < 0.34;
     this.roadStatePublishElapsed += dt;
     this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
@@ -807,6 +814,10 @@ export class TrafficSystem {
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
       vehicle.mesh.position.x += vehicle.lane.direction * travel;
+      const stoppedAtCrosswalk = stopBeforeCrossing && vehicle.speed <= 0.06
+        && crossingDistance >= -CROSSING_CAR_CLEARANCE
+        && crossingDistance <= CROSSING_RULES.roadStopDistance + 0.55;
+      vehicle.hazardLights.forEach(light => { light.visible = stoppedAtCrosswalk && hazardsLit; });
       if (vehicle.laneChangeElapsed < LANE_CHANGE_DURATION) {
         vehicle.laneChangeElapsed = Math.min(LANE_CHANGE_DURATION, vehicle.laneChangeElapsed + dt);
         const progress = vehicle.laneChangeElapsed / LANE_CHANGE_DURATION;
@@ -1035,6 +1046,7 @@ export class TrafficSystem {
     const color = requestedColor ?? FLEET_COLORS[seqIndex % FLEET_COLORS.length];
     const model = this.vehicleModels.create(kind, color);
     vehicle.userData.vehicleKind = kind;
+    vehicle.userData.hazardLights = model.hazardLights;
     model.group.rotation.y = Math.PI / 2;
     model.group.scale.setScalar(VEHICLE_VISUAL_SCALE[kind]);
     model.group.position.y = -0.27;

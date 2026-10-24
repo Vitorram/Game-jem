@@ -204,12 +204,12 @@ function Summary({ snapshot, onMenu }: { snapshot: SessionSnapshot; onMenu?: () 
 function PenaltyAlert({ feedback, finished, onContinue }: {
   feedback: SessionView['feedback']; finished: boolean; onContinue?: () => void;
 }) {
-  if (!feedback || (feedback.event.type !== 'order-expired' && feedback.event.type !== 'xp-penalty')) return null;
+  // Prazo vencido é informado pelo toast sem bloquear a simulação. A penalidade
+  // de XP causada por outras ações continua pedindo confirmação e pausando o jogo.
+  if (!feedback || feedback.event.type !== 'xp-penalty') return null;
   const event = feedback.event;
-  const amount = event.type === 'order-expired' ? event.penalty : event.amount;
-  const explanation = event.type === 'order-expired'
-    ? 'A missão ficou sem ser concluída por 60 segundos. Esse prazo terminou e a tarefa foi perdida.'
-    : event.reason;
+  const amount = event.amount;
+  const explanation = event.reason;
   return (
     <div className={styles.penaltyOverlay} role="alertdialog" aria-modal="true" aria-labelledby="penalty-title">
       <div className={styles.penaltyCard}>

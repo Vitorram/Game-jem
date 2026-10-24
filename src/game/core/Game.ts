@@ -20,6 +20,7 @@ import type { PlayerId } from '../entities/Player';
 import type { AbilitySnapshot, InfraTool, MapPoint } from './AbilityLab';
 import type { ResponseTeam } from './GameState';
 import type { RepairPuzzleType } from '../session/repairPuzzleTypes';
+import type { CoopAction, CoopPlayerPose } from '../network/CoopClient';
 
 export type GameSceneId = 'test' | 'fase1-orla';
 export type GameStatus = 'ready' | 'playing' | 'paused' | 'finished';
@@ -57,6 +58,8 @@ export class Game {
   private pendingTabletOpen = false;
   /** Chamados resolvidos que já levaram o jogador ao tablet uma vez para arquivar. */
   private readonly promptedArchiveIds = new Set<string>();
+  private coopPlayerId: PlayerId | null = null;
+  private sendCoopAction?: (action: CoopAction) => void;
 
   constructor(
     private host: HTMLElement,
@@ -206,6 +209,76 @@ export class Game {
     });
   }
 
+  /** Starts a synchronized online round without the long solo tutorial sequence. */
+  startCoop(role: PlayerId, sendAction: (action: CoopAction) => void): boolean {
+    if (this.status !== 'ready' || this.disposed) return false;
+    this.coopPlayerId = role;
+    this.sendCoopAction = sendAction;
+    this.mandatoryTutorialActive = false;
+    this.tutorialStage = 0;
+    this.start('fase1-orla');
+    const current = this.scenes.current;
+    if (this.status !== 'playing' || !(current instanceof Fase1OrlaScene)) return false;
+    current.setCoopPlayerId(role);
+    current.selectPlayer(role);
+    this.onPlayerSelected?.(role);
+    return true;
+  }
+
+  get isCoopMode(): boolean { return this.coopPlayerId !== null; }
+  get coopRole(): PlayerId | null { return this.coopPlayerId; }
+
+  getCoopPlayerPose(): CoopPlayerPose | null {
+    if (!this.coopPlayerId) return null;
+    const current = this.scenes.current;
+    return current instanceof Fase1OrlaScene ? current.getPlayerPose(this.coopPlayerId) : null;
+  }
+
+  applyRemoteCoopPose(role: PlayerId, pose: CoopPlayerPose): void {
+    const current = this.scenes.current;
+    if (this.coopPlayerId && role !== this.coopPlayerId && current instanceof Fase1OrlaScene) {
+      current.setRemotePlayerPose(role, pose);
+    }
+  }
+
+  applyRemoteCoopPause(paused: boolean): void {
+    if (!this.coopPlayerId || this.status === 'ready' || this.status === 'finished') return;
+    const next: GameStatus = paused ? 'paused' : 'playing';
+    if (next !== this.status) this.changeStatus(next);
+  }
+
+  applyRemoteCoopAction(role: PlayerId, action: CoopAction): void {
+    if (!this.coopPlayerId || role === this.coopPlayerId || this.status !== 'playing') return;
+    const current = this.scenes.current;
+    if (!(current instanceof Fase1OrlaScene)) return;
+    current.runAsPlayer(role, () => {
+      switch (action.kind) {
+        case 'interact': current.interact(); break;
+        case 'select-problem': suburbanGameState.selectProblem(action.problemId); break;
+        case 'analyze': current.analyzeProblem(action.problemId); break;
+        case 'dispatch':
+          suburbanGameState.selectProblem(action.problemId);
+          current.dispatchTeam(action.team);
+          break;
+        case 'reinforce': current.requestReinforcements(action.problemId); break;
+        case 'archive':
+          if (current.archiveResolvedProblem(action.problemId)) sessionStore.archiveCompleted(action.problemId);
+          break;
+        case 'mobility': current.useMobilityHotkey(action.key); break;
+        case 'repair': current.completeRepairPuzzle(action.puzzle); break;
+      }
+    });
+    if (action.kind === 'repair' && this.repairPuzzleOpen && this.activeRepairType === action.puzzle) {
+      this.repairPuzzleOpen = false;
+      current.setTutorialMovementEnabled(true);
+      current.setTutorialCollisionProtection(false);
+      this.onRepairPuzzleChange?.(false);
+    }
+    if (action.kind === 'archive' || action.kind === 'repair') this.checkSessionEnd();
+  }
+
+  private broadcastCoopAction(action: CoopAction): void { this.sendCoopAction?.(action); }
+
   startOrlaWithAnalystTutorial(): void {
     if (this.status !== 'ready' || this.disposed) return;
     this.mandatoryTutorialActive = true;
@@ -319,6 +392,8 @@ export class Game {
     this.observedCallIds.clear();
     this.promptedArchiveIds.clear();
     this.pendingTabletOpen = false;
+    this.coopPlayerId = null;
+    this.sendCoopAction = undefined;
     this.input.clear();
     suburbanGameState.setActiveCharacter(1);
     const laboratory = new TestScene(this.onAbilities, this.input);
@@ -379,6 +454,7 @@ export class Game {
 
   canSelectPlayer(id: PlayerId): boolean {
     if (this.disposed || this.status !== 'playing') return false;
+    if (this.coopPlayerId) return id === this.coopPlayerId;
     if (this.mandatoryTutorialActive) return id === (this.tutorialStage >= 30 ? 1 : this.tutorialStage >= 10 ? 2 : 3);
     const current = this.scenes.current;
     if (!(current instanceof Fase1OrlaScene) || id === 3) return true;
@@ -392,7 +468,10 @@ export class Game {
         || this.tutorialStage === 13 || this.tutorialStage === 17
         || this.tutorialStage === 33 || this.tutorialStage === 35)) return;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.interact();
+    if (current instanceof Fase1OrlaScene) {
+      current.interact();
+      if (this.coopPlayerId) this.broadcastCoopAction({ kind: 'interact' });
+    }
   }
 
   selectProblem(id: string): void {
@@ -400,12 +479,15 @@ export class Game {
     const scene = this.scenes.current;
     if (scene instanceof Fase1OrlaScene && scene.player.role !== 'analista') return;
     suburbanGameState.selectProblem(id);
+    if (this.coopPlayerId) this.broadcastCoopAction({ kind: 'select-problem', problemId: id });
   }
 
   analyzeProblem(id: string): boolean {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    return scene instanceof Fase1OrlaScene && scene.analyzeProblem(id);
+    const analyzed = scene instanceof Fase1OrlaScene && scene.analyzeProblem(id);
+    if (analyzed && this.coopPlayerId) this.broadcastCoopAction({ kind: 'analyze', problemId: id });
+    return analyzed;
   }
 
   requestReinforcements(id: string): boolean {
@@ -414,6 +496,7 @@ export class Game {
     if (!(scene instanceof Fase1OrlaScene)) return false;
     const dispatched = scene.requestReinforcements(id);
     if (!dispatched) return false;
+    if (this.coopPlayerId) this.broadcastCoopAction({ kind: 'reinforce', problemId: id });
     const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
     const assigned = problem?.requiredTeams?.find(team => problem.dispatchedTeams.includes(team));
     if (assigned) this.autoSelectPlayer(assigned === 'infraestrutura' ? 1 : 2);
@@ -425,6 +508,7 @@ export class Game {
     const scene = this.scenes.current;
     if (!(scene instanceof Fase1OrlaScene) || !scene.archiveResolvedProblem(id)) return false;
     sessionStore.archiveCompleted(id);
+    if (this.coopPlayerId) this.broadcastCoopAction({ kind: 'archive', problemId: id });
     if (!suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED')) this.autoSelectPlayer(2);
     this.checkSessionEnd();
     return true;
@@ -439,6 +523,9 @@ export class Game {
     const used = (scene instanceof Fase1OrlaScene) && scene.useMobilityHotkey(key);
     if (used && this.mandatoryTutorialActive && tutorialKeys[mobilityStep] === key) {
       this.tutorialStage += 1;
+    }
+    if (used && this.coopPlayerId && key in { Digit1: 1, Digit2: 1, Digit3: 1, Digit4: 1 }) {
+      this.broadcastCoopAction({ kind: 'mobility', key: key as 'Digit1' | 'Digit2' | 'Digit3' | 'Digit4' });
     }
     return used;
   }
@@ -673,6 +760,7 @@ export class Game {
 
   private openRepairPuzzle(type: RepairPuzzleType = 'pole'): void {
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    if (this.coopPlayerId && this.coopPlayerId !== 1) return;
     this.repairPuzzleOpen = true;
     this.activeRepairType = type;
     this.input.clear();
@@ -698,6 +786,7 @@ export class Game {
     }
     if (current instanceof Fase1OrlaScene) {
       current.completeRepairPuzzle(this.activeRepairType);
+      if (this.coopPlayerId) this.broadcastCoopAction({ kind: 'repair', puzzle: this.activeRepairType });
       current.setTutorialMovementEnabled(true);
       current.setTutorialCollisionProtection(false);
     }
@@ -719,7 +808,11 @@ export class Game {
     if (this.mandatoryTutorialActive && !((this.tutorialStage === 3 && team === 'infraestrutura')
       || (this.tutorialStage === 4 && team === 'mobilidade'))) return false;
     const current = this.scenes.current;
-    return current instanceof Fase1OrlaScene ? current.dispatchTeam(team) : false;
+    const dispatched = current instanceof Fase1OrlaScene && current.dispatchTeam(team);
+    if (dispatched && this.coopPlayerId && suburbanGameState.selectedProblemId) {
+      this.broadcastCoopAction({ kind: 'dispatch', problemId: suburbanGameState.selectedProblemId, team });
+    }
+    return dispatched;
   }
 
   dispose() {

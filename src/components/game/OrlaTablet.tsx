@@ -160,6 +160,9 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
                 ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
                 : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
               : 'Escolha um alerta na lista ou no mapa para abrir os detalhes e preparar o atendimento.'}</p>
+            {selected && issue?.id === 'rush-hour' && !resolved && <div className="tablet-route-hint">
+              <span aria-hidden="true">↗</span><div><small>DICA DE ROTA</small><b>Se os elétricos acumularem na Avenida Verde, Mobilidade pode usar 4 para mudar a rota.</b></div>
+            </div>}
             {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : 'RISCO EM ANÁLISE'}</span><span>{issue.dispatchedTeams.length}/{requiredTeams.length} EQUIPES ACIONADAS</span></div>}
           </div>
           <div className="tablet-team-title"><span>PLANO DE RESPOSTA</span><small>{issue?.dispatchedTeams.length ?? 0}/{requiredTeams.length} EQUIPES</small></div>

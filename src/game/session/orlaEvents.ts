@@ -34,7 +34,7 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
   { id: 'cyclist-assist', title: 'Resgate do entregador 99', atMs: 50_000, warningMs: 0,
     teams: ['mobilidade'], position: { x: 0, z: 4.7 }, steps: [701, 702],
     warning: 'Um entregador de bicicleta se feriu e precisa atravessar a avenida. Mobilidade, proteja a travessia.',
-    instruction: 'Mobilidade: vá até o entregador, use 3 para parar os carros e acompanhe a travessia. Quando ele chegar à calçada, use 1 para reabrir a via.' },
+    instruction: 'Mobilidade: vá até o entregador e use 3 para parar os carros. Quando ele chegar à calçada, use 1 para liberar a via e concluir o resgate.' },
   { id: 'rush-hour', title: 'Fluxo intenso', atMs: 30_000, warningMs: 0,
     teams: ['mobilidade'], position: { x: -16, z: 8.2 }, steps: [301],
     warning: 'Fluxo intenso na Orla: mantenha as faixas abertas para o trânsito circular.',
