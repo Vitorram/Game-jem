@@ -80,13 +80,12 @@ export class Player {
     this.build(appearance);
     this.tablet.name = 'analyst-handheld-tablet';
     this.tablet.visible = false;
-    if (this.role === 'analista') {
-      this.torso.add(this.tablet);
-      this.tablet.position.set(0, -0.06, 0.45);
-      this.tablet.rotation.x = -0.65;
-      this.part(this.tablet, new BoxGeometry(0.54, 0.34, 0.05), '#173746', [0, 0, 0]);
-      this.part(this.tablet, new BoxGeometry(0.46, 0.26, 0.012), '#74d9d0', [0, 0, -0.03]);
-    }
+    // Toda personagem tem o tablet: no coop em dupla as equipes de campo também o usam.
+    this.torso.add(this.tablet);
+    this.tablet.position.set(0, -0.06, 0.45);
+    this.tablet.rotation.x = -0.65;
+    this.part(this.tablet, new BoxGeometry(0.54, 0.34, 0.05), '#173746', [0, 0, 0]);
+    this.part(this.tablet, new BoxGeometry(0.46, 0.26, 0.012), '#74d9d0', [0, 0, -0.03]);
     this.bag.scale.setScalar(0.78);
     this.mesh.scale.setScalar(PLAYER_VISUAL_SCALE);
     this.animate(0, 0, 0);
@@ -373,7 +372,7 @@ export class Player {
   setSeated(seated: boolean): void { this.seated = seated; }
 
   setTabletOpen(open: boolean): void {
-    this.tablet.visible = this.role === 'analista' && open;
+    this.tablet.visible = open;
   }
 
   private animate(dt: number, turning: number, traveled: number) {
