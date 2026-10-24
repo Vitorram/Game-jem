@@ -14,7 +14,7 @@ npm run coop:server
 Em outro terminal, `npm run dev`. Abra `http://localhost:3000/coop`.
 O Node executado diretamente **não carrega .env automaticamente**. Exporte as variáveis no terminal ou use `node --env-file=.env.local backend/server.mjs` com um arquivo que exista. O Next carrega suas próprias variáveis .env.
 
-Para testar entre computadores da mesma rede, inicie o frontend com `npm run dev -- --hostname 0.0.0.0` e acesse pelo IP do host. Sem `NEXT_PUBLIC_COOP_SERVER_URL`, o navegador HTTP usa o hostname da página na porta 3001. Uma configuração explícita com localhost só funciona na própria máquina; remova-a ou troque pelo IP do host. Libere as portas necessárias no firewall.
+Para testar entre computadores da mesma rede, inicie o frontend com `npm run dev -- --hostname 0.0.0.0` e acesse pelo IP do host. Configure `NEXT_PUBLIC_COOP_WS_URL` com `ws://IP-DO-HOST:3001/coop`; `localhost` só funciona na própria máquina. Libere as portas necessárias no firewall.
 
 ## Fluxo e regras
 
@@ -78,7 +78,9 @@ Configurações: COOP_HOST (0.0.0.0), COOP_PORT (3001), COOP_MAX_CONNECTIONS (25
 
 ## Produção
 
-Use TLS e proxy que suporte WebSocket. Configure NEXT_PUBLIC_COOP_SERVER_URL com o endereço **público** wss; essa variável vai para o bundle e nunca deve conter segredos.
+Use TLS e proxy que suporte WebSocket. Configure `NEXT_PUBLIC_COOP_WS_URL` com o endereço **público** wss (por exemplo, `wss://game-jem.onrender.com/coop`); essa variável vai para o bundle e nunca deve conter segredos. No Vercel, adicione-a aos ambientes Production e Preview que forem usados e faça um novo deploy para incorporar o valor. Sem a variável, produção usa `wss://game-jem.onrender.com/coop` e desenvolvimento usa `ws://localhost:3001/coop`.
+
+No Render, mantenha `NODE_ENV=production`, `COOP_HOST=0.0.0.0`, `COOP_PORT=10000` (ou a porta atribuída pelo serviço) e `COOP_ALLOWED_ORIGINS=https://suburban-tng.vercel.app`. A lista contém origens HTTPS exatas, sem caminho ou barra final; inclua também a origem Preview somente se ela precisar acessar o serviço. Não remova a validação de Origin. Confira `/health` para a disponibilidade HTTP e os logs do Render para conexões recusadas.
 
 Com NODE_ENV=production, COOP_ALLOWED_ORIGINS é obrigatório e conexões sem Origin ou fora da lista são recusadas. Em desenvolvimento, sem lista explícita, origens HTTP(S) precisam ter o mesmo hostname do backend (a porta pode ser diferente); clientes sem Origin são permitidos. Origin é proteção de navegador, não autenticação de identidade.
 

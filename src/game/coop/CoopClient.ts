@@ -78,13 +78,10 @@ function isServerMessage(value: unknown): value is CoopMessage {
   }
 }
 function defaultUrl(): string {
-  if (process.env.NEXT_PUBLIC_COOP_SERVER_URL) return process.env.NEXT_PUBLIC_COOP_SERVER_URL;
-  if (typeof window === 'undefined') return 'ws://localhost:3001/coop';
-  const url = new URL(window.location.href);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  if (url.protocol === 'ws:') url.port = '3001';
-  url.pathname = '/coop'; url.search = ''; url.hash = '';
-  return url.href;
+  const configuredUrl = process.env.NEXT_PUBLIC_COOP_WS_URL?.trim();
+  if (configuredUrl) return configuredUrl;
+  if (process.env.NODE_ENV === 'production') return 'wss://game-jem.onrender.com/coop';
+  return 'ws://localhost:3001/coop';
 }
 
 export class CoopClient {
@@ -112,8 +109,8 @@ export class CoopClient {
     let socket: WebSocket;
     try {
       const parsed = new URL(this.url);
-      if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password) throw new Error();
-      socket = new WebSocket(this.url);
+      if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/coop' || parsed.search || parsed.hash) throw new Error();
+      socket = new WebSocket(parsed.href);
     } catch { return Promise.reject(new Error('Endereço do servidor coop inválido.')); }
     this.socket = socket;
     this.changeState('connecting');
