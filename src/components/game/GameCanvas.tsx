@@ -36,10 +36,12 @@ export default function GameCanvas() {
   const coopClient = useRef<ReturnType<typeof getCoopClient> | null>(null);
   const coopRef = useRef<{ room: string; playerId: string; role: CoopRole; name: string; serverUrl: string; players?: CoopPlayer[] } | null>(null);
   const suppressRemotePause = useRef(false);
+  const statusRef = useRef<GameStatus>('ready');
   const [coopSession, setCoopSession] = useState<{ room: string; playerId: string; role: CoopRole; name: string; serverUrl: string; players?: CoopPlayer[] } | null>(null);
   const [coopRoster, setCoopRoster] = useState<CoopPlayer[]>([]);
   const [coopTutorialWaiting, setCoopTutorialWaiting] = useState(false);
   const [coopTutorialReady, setCoopTutorialReady] = useState(false);
+  const [coopFailure, setCoopFailure] = useState(false);
   const [sceneId, setSceneId] = useState<GameSceneId>('test');
   const isLaboratory = sceneId === 'test';
   const isOriginalOrla = sceneId === 'fase1-orla';
@@ -47,7 +49,8 @@ export default function GameCanvas() {
   const [initialized, setInitialized] = useState(false);
   const [storyOpen, setStoryOpen] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
-  const isAnalystTablet = isOriginalOrla && selectedPlayer === 3;
+  const [analystTabletOpen, setAnalystTabletOpen] = useState(false);
+  const isAnalystTablet = isOriginalOrla && selectedPlayer === 3 && analystTabletOpen;
   const [closeView, setCloseView] = useState(false);
   const [analystAttention, setAnalystAttention] = useState(false);
   const [analystTutorialStep, setAnalystTutorialStep] = useState<AnalystTutorialStep | null>(null);
@@ -64,12 +67,35 @@ export default function GameCanvas() {
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
   coopRef.current = coopSession;
+  const failCoop = (message: string) => {
+    setCoopFailure(true);
+    suppressRemotePause.current = true;
+    if (statusRef.current === 'playing') game.current?.togglePause();
+    suppressRemotePause.current = false;
+    setError(message);
+  };
 
   useEffect(() => {
     try {
       const saved = sessionStorage.getItem('suburban-coop-session');
-      if (saved) setCoopSession(JSON.parse(saved));
-    } catch { sessionStorage.removeItem('suburban-coop-session'); }
+      if (saved) {
+        setCoopFailure(true);
+        const session = JSON.parse(saved);
+        const client = getCoopClient();
+        const currentRoom = client.currentRoom;
+        const currentPlayer = currentRoom?.players.find(player => player.id === session?.playerId);
+        if (!session || !client.hasSession(session.playerId, session.room)
+          || !currentRoom || currentRoom.phase === 'lobby' || !currentPlayer || currentPlayer.role !== session.role) {
+          sessionStorage.removeItem('suburban-coop-session');
+          setError('A sessão coop expirou. Volte às salas para reunir sua equipe.');
+          return;
+        }
+        setCoopSession({
+          room: currentRoom.code, playerId: currentPlayer.id, role: currentPlayer.role,
+          name: currentPlayer.name, serverUrl: client.url, players: currentRoom.players,
+        });
+      }
+    } catch { setError('Não foi possível recuperar a sessão. Volte ao menu para começar novamente.'); }
   }, []);
 
   useEffect(() => {
@@ -78,41 +104,50 @@ export default function GameCanvas() {
     const client = getCoopClient(coopSession.serverUrl);
     coopClient.current = client;
     let ready = true;
+    let tutorialTimer: ReturnType<typeof setTimeout> | undefined;
     const onMessage = (message: CoopMessage) => {
       if (!ready) return;
       if (message.type === 'move') game.current?.applyCoopPose(message.role, message.x, message.z, message.yaw);
       else if (message.type === 'action') game.current?.applyCoopAction(message.role, message.action);
       else if (message.type === 'room') setCoopRoster(message.players);
       else if (message.type === 'tutorial-start') {
-        window.setTimeout(() => {
+        clearTimeout(tutorialTimer);
+        tutorialTimer = setTimeout(() => {
+          if (!ready || !client.hasSession(coopSession.playerId, coopSession.room)) return;
           game.current?.finishCoopTutorial();
           setCoopTutorialWaiting(false);
           setCoopTutorialReady(false);
+          if (statusRef.current === 'paused') client.pause(true);
         }, message.startDelayMs);
       } else if (message.type === 'pause' && game.current) {
         suppressRemotePause.current = true;
-        if ((message.paused && status !== 'paused') || (!message.paused && status === 'paused')) game.current.togglePause();
+        if ((message.paused && statusRef.current === 'playing') || (!message.paused && statusRef.current === 'paused')) game.current.togglePause();
         suppressRemotePause.current = false;
-      } else if (message.type === 'error') setError(message.message);
+      } else if (message.type === 'error') client.disconnect(message.message);
+      else if (message.type === 'session-ended' || message.type === 'connection' && message.state === 'disconnected') {
+        clearTimeout(tutorialTimer);
+        sessionStorage.removeItem('suburban-coop-session');
+        failCoop(message.message || 'Conexão perdida. Volte às salas para jogar novamente.');
+      }
       else if (message.type === 'peer-left') setCoopRoster(players => players.filter(player => player.id !== message.id));
     };
     client.on(onMessage);
-    void client.connect().catch(cause => setError(cause instanceof Error ? cause.message : 'Conexão coop perdida.'));
-    return () => { ready = false; client.off(onMessage); };
-  }, [coopSession, status]);
+    if (!client.hasSession(coopSession.playerId, coopSession.room)) failCoop('A sessão não está conectada. Volte às salas.');
+    return () => { ready = false; client.off(onMessage); clearTimeout(tutorialTimer); };
+  }, [coopSession]);
 
   useEffect(() => {
     if (!host.current) return;
     let instance: Game;
     try {
       instance = new Game(host.current, value => {
+        statusRef.current = value;
         setStatus(value);
         if (value === 'playing') setCloseView(game.current?.isCloseView ?? false);
         if (coopRef.current && !suppressRemotePause.current && (value === 'paused' || value === 'playing')) coopClient.current?.pause(value === 'paused');
-      }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, (open, type) => { setRepairPuzzleOpen(open); if (type) setRepairPuzzleType(type); }, setObjectiveDistance, action => coopClient.current?.action(action));
+      }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, (open, type) => { setRepairPuzzleOpen(open); if (type) setRepairPuzzleType(type); }, setObjectiveDistance, action => coopClient.current?.action(action), setAnalystTabletOpen);
       game.current = instance;
       setInitialized(true);
-      setError(null);
     } catch (cause) {
       console.error('Falha ao inicializar o jogo:', cause);
       setError('Não foi possível iniciar o 3D. Verifique se a aceleração gráfica está habilitada e recarregue a página.');
@@ -149,6 +184,7 @@ export default function GameCanvas() {
   }, [status, error]);
 
   const returnToMenu = () => {
+    getCoopClient().disconnect();
     sessionStorage.removeItem('suburban-coop-session');
     window.location.assign('/');
   };
@@ -170,7 +206,9 @@ export default function GameCanvas() {
     setCloseView(false);
   };
 
-  const clientTutorialOpen = () => coopClient.current?.tutorialOpen();
+  const clientTutorialOpen = () => {
+    void coopClient.current?.tutorialOpen().catch(cause => failCoop(cause instanceof Error ? cause.message : 'Não foi possível iniciar o tutorial.'));
+  };
 
   const progressAnalystTutorial = (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => {
     const nextStep = analystTutorialStep === 1 && milestone === 'selected' ? 2
@@ -307,10 +345,13 @@ export default function GameCanvas() {
       {(status === 'paused' || error) && (
         <div className={`overlay${status === 'paused' && !error ? ' pause-overlay' : ''}`}>
           <div ref={panel} className="panel">
-            <span className="eyebrow">{error ? 'INICIALIZAÇÃO' : status === 'paused' ? 'SUBURBAN · ORLA' : 'O COMEÇO DE UM MUNDO'}</span>
+            <span className="eyebrow">{error ? coopFailure ? 'CONEXÃO COOP' : 'INICIALIZAÇÃO' : status === 'paused' ? 'SUBURBAN · ORLA' : 'O COMEÇO DE UM MUNDO'}</span>
             <h1>{error ? 'Ops, algo falhou.' : status === 'paused' ? <>Pausa<span>.</span></> : <>Como você<br />quer começar<span>?</span></>}</h1>
             <p>{error ?? (status === 'paused' ? pauseSettingsOpen ? 'CONTROLES\nWASD ou setas · mover\nE ou clique · interagir\nT · trocar personagem\nEsc · pausar e continuar' : '' : 'Jogue a fase da Orla ou explore as habilidades e os puzzles na área de testes.')}</p>
-            {error ? <button onClick={() => window.location.reload()}>Tentar novamente ↗</button> :
+            {error ? <button onClick={() => {
+              if (!coopFailure) { window.location.reload(); return; }
+              getCoopClient().disconnect(); sessionStorage.removeItem('suburban-coop-session'); window.location.assign('/coop');
+            }}>{coopFailure ? 'Voltar às salas ↗' : 'Tentar novamente ↗'}</button> :
               <button onClick={event => { game.current?.togglePause(); event.currentTarget.blur(); }}>Continuar →</button>}
             {!error && status === 'paused' && <div className="pause-actions">
               <button className="pause-secondary" onClick={returnToMenu}>Sair</button>
@@ -325,11 +366,14 @@ export default function GameCanvas() {
         <section className="coop-tutorial-card">
           <span className="eyebrow">TUTORIAL COLETIVO · SALA {coopSession.room}</span>
           <h2 id="coop-tutorial-title">Sua equipe: {coopSession.role === 'analista' ? 'Analista' : coopSession.role === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura'}</h2>
-          {coopSession.role === 'analista' ? <p>Use o tablet para analisar os chamados e coordenar as outras duas equipes. Sua equipe inicia na estação de observação.</p>
+          {coopSession.role === 'analista' ? <p>WASD move você e Shift corre. Pressione Q ou toque em Abrir tablet para analisar chamados e coordenar as equipes. Você fica parada no local enquanto usa o tablet; guarde com Q para voltar a andar. O trânsito e o relógio continuam.</p>
             : coopSession.role === 'mobilidade' ? <p>WASD move você, Shift corre e E interage. Organize o trânsito, proteja a área de trabalho e mantenha a ciclovia segura.</p>
               : <p>WASD move você, Shift corre e E interage. Vá até os equipamentos chamados e conclua os reparos quando a área estiver protegida.</p>}
           <p className="coop-tutorial-note">A partida e os chamados só começam quando todas as pessoas da sala confirmarem que entenderam seu papel.</p>
-          <button type="button" className="coop-tutorial-ready" disabled={coopTutorialReady} onClick={() => { setCoopTutorialReady(true); coopClient.current?.tutorialReady(true); }}>{coopTutorialReady ? 'Pronta · aguardando equipe…' : 'Entendi · estou pronta'}</button>
+          <button type="button" className="coop-tutorial-ready" disabled={coopTutorialReady} onClick={() => {
+            setCoopTutorialReady(true);
+            void coopClient.current?.tutorialReady(true).catch(cause => { setCoopTutorialReady(false); failCoop(cause instanceof Error ? cause.message : 'Não foi possível confirmar o tutorial.'); });
+          }}>{coopTutorialReady ? 'Pronta · aguardando equipe…' : 'Entendi · estou pronta'}</button>
         </section>
       </div>}
       {coopSession && !coopTutorialWaiting && <aside className="coop-team-hud" aria-label="Equipe cooperativa">
@@ -340,7 +384,7 @@ export default function GameCanvas() {
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
-        {isAnalystTablet && <OrlaTablet onAnalyze={id => game.current?.analyzeProblem(id)} onAction={id => {
+        {isAnalystTablet && <OrlaTablet onAnalyze={id => game.current?.analyzeProblem(id)} onCallTow={id => game.current?.callTow(id) ?? false} onAction={id => {
           if (!id) return;
           if (analystTutorialStep !== null) {
             if (analystTutorialStep === 2) game.current?.analyzeProblem(id);
@@ -352,7 +396,7 @@ export default function GameCanvas() {
           if (problem?.status === 'RESOLVED') game.current?.archiveResolvedProblem(id);
           else if (!problem?.analyzed) game.current?.analyzeProblem(id);
           else game.current?.requestReinforcements(id);
-        }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} />}
+        }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} onClose={analystTutorialStep === null ? () => game.current?.toggleAnalystTablet() : undefined} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
           step={analystTutorialStep}
           onBegin={beginAnalystTutorialSteps}
@@ -373,9 +417,9 @@ export default function GameCanvas() {
           onComplete={finishInfrastructureTutorial}
           onSkip={skipTutorial}
         />}
-        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
+        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : isOriginalOrla && selectedPlayer === 3 ? isAnalystTablet ? 'PARADA · Q guardar tablet / E ou clique · ação' : 'WASD · mover / Shift · correr / Q · abrir tablet' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}
-        {!isLaboratory && interactionPrompt && (promptIsInstruction
+        {!isLaboratory && interactionPrompt && (selectedPlayer !== 3 || isAnalystTablet) && (promptIsInstruction
           ? <div className={`${promptClassName} is-hotkey-hint`} role="status">{interactionPrompt}</div>
           : <button type="button" className={promptClassName} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }} aria-label={`Interagir: ${interactionPrompt}`}><kbd>E</kbd> / clique {interactionPrompt}</button>)}
 
@@ -405,7 +449,10 @@ export default function GameCanvas() {
 
         </div>}
         {isOriginalOrla && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
-          <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 3 ? 'Acionar equipe' : selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>
+          {selectedPlayer === 3 ? <button type="button" className={`analyst-tablet-toggle${analystAttention ? ' needs-attention' : ''}`} aria-expanded={isAnalystTablet} aria-controls="analyst-tablet" aria-keyshortcuts="Q" disabled={coopTutorialWaiting} onClick={event => { game.current?.toggleAnalystTablet(); event.currentTarget.blur(); }}>
+            <kbd>Q</kbd> {isAnalystTablet ? 'Guardar tablet' : 'Abrir tablet'}
+            {!isAnalystTablet && analystAttention && <span className="tablet-alert-dot" aria-label="Chamado aguardando" />}
+          </button> : <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>}
           {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Habilidade 4 · Desviar elétricos'].map((label, index) => {
             const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;
             const target = activeSkill === index;
@@ -413,7 +460,7 @@ export default function GameCanvas() {
             return <button key={label} disabled={locked} className={target ? 'tutorial-focus' : undefined} data-tutorial-target={target ? 'true' : undefined} onClick={event => { game.current?.useMobilityHotkey(`Digit${index + 1}`); event.currentTarget.blur(); }}>{index < 3 && <kbd>{index + 1}</kbd>} {label}</button>;
           })}
         </div>}
-        {(isOriginalOrla && selectedPlayer !== 3 || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div data-tutorial-target={mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? 'true' : undefined} className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}${mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? ' tutorial-focus' : ''}`} aria-label="Controles de movimento">
+        {(isOriginalOrla && !isAnalystTablet && !coopTutorialWaiting || (isLaboratory && selectedPlayer !== 3 && !abilities.editing)) && <div data-tutorial-target={mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? 'true' : undefined} className={`touch-controls${isLaboratory ? '' : ' orla-touch-controls'}${mobilityTutorialStep === 1 || mobilityTutorialStep === 5 || infrastructureTutorialStep === 1 ? ' tutorial-focus' : ''}`} aria-label="Controles de movimento">
           {directions.map(({ code, label, symbol }) => <button key={code} aria-label={label}
             onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); game.current?.input.setTouch(event.pointerId, code); }}
             onPointerUp={event => game.current?.input.setTouch(event.pointerId)}
@@ -427,7 +474,7 @@ export default function GameCanvas() {
             onLostPointerCapture={event => game.current?.input.setTouch(event.pointerId)}>Correr</button>}
         </div>}
       </>}
-      <footer className="bottom-bar"><span>{isLaboratory && selectedPlayer === 3 ? 'MOUSE' : 'WASD / SETAS'} <small>{isLaboratory && selectedPlayer === 3 ? 'ANALISAR' : 'MOVER · SHIFT CORRER'}</small></span><span>ESC <small>PAUSAR</small></span><span className="prototype-label">{isLaboratory ? 'HABILIDADES · SEM MISSÃO' : 'FASE 1 · ORLA'}</span></footer>
+      <footer className="bottom-bar"><span>{isAnalystTablet ? 'TABLET ABERTO' : isLaboratory && selectedPlayer === 3 ? 'MOUSE' : 'WASD / SETAS'} <small>{isAnalystTablet ? 'PARADA · MUNDO EM MOVIMENTO' : isLaboratory && selectedPlayer === 3 ? 'ANALISAR' : 'MOVER · SHIFT CORRER'}</small></span><span>ESC <small>PAUSAR</small></span><span className="prototype-label">{isLaboratory ? 'HABILIDADES · SEM MISSÃO' : 'FASE 1 · ORLA'}</span></footer>
     </section>
   );
 }

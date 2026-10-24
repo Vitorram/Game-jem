@@ -4,6 +4,10 @@ Next.js App Router + TypeScript + Three.js direto + GSAP. Cena de teste com joga
 
 ## Rodar
 
+O modo online em `/coop` usa um processo separado: `npm run coop:server`.
+Consulte [backend/README.md](backend/README.md) para salas públicas/privadas,
+variáveis de ambiente, permissões, limites e execução em rede.
+
 Use Node.js 22 ou 24. Na pasta do projeto:
 
 ```bash
@@ -189,14 +193,14 @@ Três missões perdidas encerram a rodada.
 | 2:30 | Falha de sensor. **Infraestrutura:** E no ponto e permanecer durante a instalação. |
 | 2:50 | Poste apagado. **Infraestrutura:** E no poste e puzzle de circuito. |
 
-Entre chamados, Mobilidade e Infraestrutura ficam selecionáveis para circular livremente. A chegada de uma ocorrência abre o tablet; ao acionar o reforço, o controle passa para a equipe responsável.
+Entre chamados, as três equipes podem circular livremente. A chegada de uma ocorrência seleciona a Analista no modo solo; o tablet é aberto manualmente com **Q** ou **Abrir tablet**. O botão sinaliza chamados aguardando análise ou arquivamento. Ao acionar o reforço no solo, o controle passa para a equipe responsável.
 
 O HUD mostra responsáveis, próximos passos, pedestres esperando e carros parados.
 **Marcar objetivo** escolhe a seta da ocorrência. Avisos mudam de cor com a espera;
 filas e perda de bônus tornam a demora perceptível. As teclas também têm botões de toque.
 
 **Controles:** WASD/setas para mover, Shift para correr, T para trocar de equipe,
-E para interagir e Esc para pausar. A Analista permanece na cabine, como antes.
+E para interagir e Esc para pausar. A Analista também anda e corre: **Q** ou o botão na tela abre/guarda seu tablet. Enquanto usa o tablet, fica parada no próprio local; trânsito, colisões e relógio continuam funcionando. Ao guardar, pode voltar a andar, sem ser transportada para a cabine. Durante a orientação inicial da Analista, o tablet permanece aberto até concluir ou pular o treino. No cooperativo, cada pessoa mantém sua própria equipe.
 No celular há botões de direção, corrida e ações das vias. Usar os botões de personagens
 seleciona a equipe; o anel no chão identifica quem está sob controle.
 

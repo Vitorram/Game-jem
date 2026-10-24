@@ -146,6 +146,16 @@ export class OrlaPhase {
     }
   }
 
+  callTow(id: string): boolean {
+    const event = ORLA_EVENTS[this.eventIndex];
+    const problem = event && this.problem(event.id);
+    if (!event || event.id !== 'roadside-breakdown' || id !== event.id || !problem?.analyzed
+      || problem.status === 'RESOLVED' || problem.towStatus !== 'not-called' || !this.traffic.callTowTruck()) return false;
+    this.step(id, 1001);
+    this.patch(id, { towStatus: 'en-route', instruction: 'Guincho acionado! Ele está vindo pela avenida. Aguarde a remoção do carro para liberar a faixa.' });
+    return true;
+  }
+
   archiveResolved(id: string): boolean {
     const event = ORLA_EVENTS[this.eventIndex];
     const problem = event && this.problem(event.id);
@@ -185,6 +195,8 @@ export class OrlaPhase {
       this.traffic.setElectricChargerBroken(false);
     } else if (id === 'minor-collision') {
       this.traffic.clearCollision();
+    } else if (id === 'roadside-breakdown') {
+      this.traffic.clearBreakdown();
     }
     this.rushFlowSeconds = 0;
     this.rushElectricDetourUsed = false;
@@ -200,7 +212,8 @@ export class OrlaPhase {
   private issueNext(): void {
     const event = ORLA_EVENTS[this.eventIndex];
     if (!event || this.elapsedMs < event.atMs || suburbanGameState.getProblems().length > 0) return;
-    const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition() : event.position;
+    const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition()
+      : event.id === 'roadside-breakdown' ? this.traffic.startBreakdown() ?? event.position : event.position;
     if (event.id === 'rush-hour') {
       this.rushFlowSeconds = 0;
       this.rushElectricDetourUsed = false;
@@ -210,6 +223,7 @@ export class OrlaPhase {
       type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
       label: event.title, position: { ...position }, status: 'ACTIVE', stage: 'warning',
       requiredTeams: [...event.teams], dispatchedTeams: [],
+      ...(event.id === 'roadside-breakdown' ? { towStatus: 'not-called' as const } : {}),
       instruction: 'Novo chamado recebido. Analista: confira o relatório e acione a equipe indicada.' }]);
     suburbanGameState.selectProblem(null);
     if (event.id === 'traffic-signal-failure') {
@@ -236,6 +250,7 @@ export class OrlaPhase {
       this.traffic.setElectricChargerBroken(true);
       this.beginCinematic(position, .72, 2.5);
     }
+    if (event.id === 'roadside-breakdown') this.beginCinematic(position, .62, 2.4);
   }
 
   advance(elapsedMs: number): void {
@@ -309,6 +324,17 @@ export class OrlaPhase {
     if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE' && !this.completedSteps.has(901)) {
       const waiting = this.traffic.getElectricQueueCount();
       if (waiting > 0) this.patch(chargerIssue.id, { instruction: `${waiting} carro${waiting === 1 ? '' : 's'} elétrico${waiting === 1 ? '' : 's'} na fila. Mobilidade: use a Habilidade 4 (tecla 4) para desviá-los para a rua normal.` });
+    }
+    const breakdown = this.problem('roadside-breakdown');
+    if (breakdown && breakdown.status !== 'RESOLVED' && breakdown.towStatus === 'en-route'
+      && this.traffic.getTowTruckState() === 'loading') {
+      this.patch(breakdown.id, { towStatus: 'loading', instruction: 'O guincho chegou e está prendendo o carro à plataforma. A faixa será liberada em instantes.' });
+    } else if (breakdown && breakdown.status !== 'RESOLVED' && breakdown.towStatus === 'loading'
+      && this.traffic.getTowTruckState() === 'departing') {
+      this.patch(breakdown.id, { towStatus: 'departing', instruction: 'Carro preso ao guincho. Ele está saindo da avenida; aguarde o veículo de apoio concluir o trajeto.' });
+    } else if (breakdown && breakdown.status !== 'RESOLVED' && this.traffic.getTowTruckState() === 'completed') {
+      this.patch(breakdown.id, { towStatus: 'done' });
+      this.resolve(breakdown.id, 1002);
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status === 'ACTIVE' && this.traffic.isIncidentProtected()) {

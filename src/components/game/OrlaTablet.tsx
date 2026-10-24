@@ -14,24 +14,36 @@ const teams: { id: ResponseTeam; label: string; short: string; color: string }[]
 ];
 
 function problemTitle(problem: UrbanProblem): string {
-  return problem.type === 'broken-light-pole' ? 'Poste danificado' : `${problem.label} · ocorrência`;
+  return problem.type === 'broken-light-pole' ? 'Poste danificado'
+    : problem.id === 'roadside-breakdown' ? 'Carro enguiçado na avenida' : `${problem.label} · ocorrência`;
 }
 
 function problemCategory(problem: UrbanProblem): string {
   return problem.type === 'broken-light-pole' ? 'ILUMINAÇÃO'
-    : problem.type === 'ev-charger-repair' ? 'MOBILIDADE ELÉTRICA' : 'SERVIÇO URBANO';
+    : problem.type === 'ev-charger-repair' ? 'MOBILIDADE ELÉTRICA'
+      : problem.id === 'roadside-breakdown' ? 'EMERGÊNCIA VIÁRIA' : 'SERVIÇO URBANO';
 }
+
+const towContacts = [
+  { id: 'mechanic', name: 'Oficina Móvel da Orla', service: 'MECÂNICA NO LOCAL', number: '0800 000 0130' },
+  { id: 'traffic', name: 'Central de Trânsito', service: 'SINALIZAÇÃO E FLUXO', number: '0800 000 0110' },
+  { id: 'tow', name: 'Guincho Rota Verde', service: 'REBOQUE 24 HORAS', number: '0800 000 0240' },
+] as const;
 
 export type AnalystTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
 
-export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutorialProgress }: {
+export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialStep, onTutorialProgress, onClose }: {
   onAction: (problemId?: string) => void;
   onAnalyze?: (problemId: string) => void;
+  onCallTow?: (problemId: string) => boolean;
+  onClose?: () => void;
   tutorialStep?: AnalystTutorialStep | null;
   onTutorialProgress?: (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => void;
 }) {
   const [, refresh] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [phoneOpen, setPhoneOpen] = useState(false);
+  const [phoneFeedback, setPhoneFeedback] = useState('');
   useEffect(() => {
     const timer = window.setInterval(() => refresh(value => value + 1), 250);
     return () => window.clearInterval(timer);
@@ -48,6 +60,11 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
   const requiredTeams = issue ? teams.filter(team => !issue.requiredTeams || issue.requiredTeams.includes(team.id)) : [];
   const nextTeam = requiredTeams.find(team => !issue?.dispatchedTeams.includes(team.id));
   const resolved = !!issue && issue.status === 'RESOLVED';
+  const isTowIssue = issue?.id === 'roadside-breakdown';
+  const canCallTow = issue?.towStatus === 'not-called';
+  const towProgressLabel = issue?.towStatus === 'en-route' ? 'GUINCHO A CAMINHO'
+    : issue?.towStatus === 'loading' ? 'REMOÇÃO EM ANDAMENTO'
+      : issue?.towStatus === 'departing' || issue?.towStatus === 'done' ? 'FAIXA LIBERADA' : 'AGUARDANDO CHAMADA';
   const activeCount = problems.filter(problem => problem.status !== 'RESOLVED').length;
   const queuedVehicles = state.phase?.queuedVehicles ?? 0;
   const waitingPedestrians = state.phase?.waitingPedestrians ?? 0;
@@ -56,7 +73,10 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
     : queuedVehicles >= 5 || peakCongestion >= .32 ? 'yellow' : 'green';
   const pedestrianZone: ZoneLevel = waitingPedestrians >= 5 ? 'red' : waitingPedestrians >= 3 ? 'yellow' : 'green';
   const allDispatched = requiredTeams.length > 0 && requiredTeams.every(team => issue?.dispatchedTeams.includes(team.id));
-  const actionLabel = tutorialStep !== undefined && tutorialStep !== null ? (!selectedInGame ? 'CONFIRMAR CHAMADO' : nextTeam ? 'SOLICITAR EQUIPE' : 'EQUIPES ACIONADAS') : resolved ? 'ARQUIVAR CHAMADO - RECEBER XP' : !selected ? 'ANALISAR CHAMADO' : !allDispatched ? 'SOLICITAR REFOR\u00C7O' : 'EQUIPES EM CAMPO';
+  const actionLabel = tutorialStep !== undefined && tutorialStep !== null ? (!selectedInGame ? 'CONFIRMAR CHAMADO' : nextTeam ? 'SOLICITAR EQUIPE' : 'EQUIPES ACIONADAS')
+    : resolved ? 'ARQUIVAR CHAMADO - RECEBER XP' : !selected ? 'ANALISAR CHAMADO'
+      : isTowIssue ? !issue?.analyzed ? 'ANALISAR CHAMADO' : canCallTow ? 'ABRIR LISTA TELEFÔNICA' : towProgressLabel
+        : !allDispatched ? 'SOLICITAR REFORÇO' : 'EQUIPES EM CAMPO';
   const infrastructureDispatched = issue?.dispatchedTeams.includes('infraestrutura') ?? false;
   const mobilityDispatched = issue?.dispatchedTeams.includes('mobilidade') ?? false;
 
@@ -64,10 +84,29 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
     if (selectedId && !problems.some(problem => problem.id === selectedId)) setSelectedId(null);
   }, [selectedId, problems]);
 
+  useEffect(() => {
+    if (!isTowIssue || resolved) setPhoneOpen(false);
+  }, [isTowIssue, resolved]);
+
   const analyze = (problemId: string) => {
     setSelectedId(problemId);
     onTutorialProgress?.('selected');
     if (tutorialStep === undefined || tutorialStep === null) onAnalyze?.(problemId);
+  };
+
+  const chooseTowContact = (contactId: string) => {
+    if (contactId !== 'tow') {
+      setPhoneFeedback(contactId === 'mechanic'
+        ? 'A oficina não consegue remover o carro da faixa. Escolha um serviço de reboque.'
+        : 'A central orienta o trânsito, mas não reboca veículos. Escolha um serviço de guincho.');
+      return;
+    }
+    if (!issue || !onCallTow?.(issue.id)) {
+      setPhoneFeedback('Não foi possível completar a ligação. Tente novamente.');
+      return;
+    }
+    setPhoneFeedback('Guincho acionado. Acompanhe a chegada pela avenida.');
+    setPhoneOpen(false);
   };
 
   useEffect(() => {
@@ -92,12 +131,13 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
     return result;
   }, [problems]);
 
-  return <section className="orla-tablet" aria-label="Tablet de análise da Analista">
+  return <section id="analyst-tablet" className="orla-tablet" aria-label="Tablet de análise da Analista">
     <div className="tablet-shell">
       <header className="tablet-topline">
         <div className="tablet-brand"><span className="tablet-logo">S</span><span>SUBURBAN <small>TERMINAL DE CAMPO</small></span></div>
         <div className="tablet-live"><i /> ORLA · AO VIVO</div>
-        <span className="tablet-battery" aria-label="Bateria cheia"><i /><i /><i /><i /></span>
+        {onClose ? <button type="button" className="tablet-close" aria-keyshortcuts="Q" onClick={onClose}><kbd>Q</kbd> Guardar tablet</button>
+          : <span className="tablet-battery" aria-label="Bateria cheia"><i /><i /><i /><i /></span>}
       </header>
       <div className="tablet-content">
         <div className="tablet-map-column">
@@ -140,14 +180,14 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
         <div className="tablet-incident-column">
           <div className="tablet-section-title"><span>02 / CENTRAL DE OCORRÊNCIAS</span><b className="active-tag"><i /> {activeCount} ATIVA{activeCount === 1 ? '' : 'S'}</b></div>
           <div className="tablet-workflow" aria-label="Fluxo de atendimento">
-            <span data-state={!issue ? 'waiting' : issue.analyzed ? 'done' : 'current'}><i>1</i><b>Analisar chamado</b></span>
+            <span data-state={!issue ? 'waiting' : issue.analyzed ? 'done' : 'current'}><i>1</i><b>{isTowIssue ? 'Analisar pane' : 'Analisar chamado'}</b></span>
             <em aria-hidden="true">›</em>
-            <span data-state={!issue ? 'waiting' : allDispatched ? 'done' : issue.analyzed ? 'current' : 'waiting'}><i>2</i><b>Solicitar reforço</b></span>
+            <span data-state={!issue ? 'waiting' : isTowIssue ? issue.towStatus === 'done' || resolved ? 'done' : issue.towStatus === 'not-called' && issue.analyzed ? 'current' : issue.towStatus === 'not-called' ? 'waiting' : 'current' : allDispatched ? 'done' : issue.analyzed ? 'current' : 'waiting'}><i>2</i><b>{isTowIssue ? 'Chamar guincho' : 'Solicitar reforço'}</b></span>
           </div>
           <div className="tablet-incident-list" role="list" aria-label="Lista de ocorrências">
             {problems.map(problem => <button key={problem.id} role="listitem" data-tutorial-target={tutorialStep === 1 && problem.status !== 'RESOLVED' ? 'true' : undefined} className={`tablet-incident-card${selectedId === problem.id ? ' is-selected' : ''}${problem.status === 'RESOLVED' ? ' is-resolved' : ''}${tutorialStep === 1 && problem.status !== 'RESOLVED' ? ' tutorial-focus' : ''}`} onClick={event => { analyze(problem.id); event.currentTarget.blur(); }}>
               <span className="incident-icon">{problem.type === 'broken-light-pole' || problem.type === 'ev-charger-repair' ? 'ϟ' : '!'}</span>
-              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.type === 'broken-light-pole' ? 'Av. da Orla' : problem.type === 'ev-charger-repair' ? 'Avenida Verde' : 'Setor Orla'} · {problem.dispatchedTeams.length}/{problem.requiredTeams?.length ?? 2} equipes</em></span>
+              <span className="incident-card-copy"><small>{problemCategory(problem)} · {problem.status === 'RESOLVED' ? 'RESOLVIDA' : problem.towStatus && problem.towStatus !== 'not-called' ? problem.towStatus === 'done' ? 'VIA LIBERADA' : problem.towStatus === 'loading' ? 'GUINCHO NO LOCAL' : 'GUINCHO A CAMINHO' : problem.status === 'MAINTENANCE' ? 'EM ATENDIMENTO' : 'ATENÇÃO'}</small><b>{problemTitle(problem)}</b><em>{problem.id === 'roadside-breakdown' ? 'Av. da Orla · faixa bloqueada' : problem.type === 'broken-light-pole' ? 'Av. da Orla' : problem.type === 'ev-charger-repair' ? 'Avenida Verde' : 'Setor Orla'}{problem.id === 'roadside-breakdown' ? '' : ` · ${problem.dispatchedTeams.length}/${problem.requiredTeams?.length ?? 2} equipes`}</em></span>
               <span className="incident-chevron">›</span>
             </button>)}
             {!problems.length && <div className="tablet-empty-list">A central está monitorando. O próximo chamado chega no horário previsto.</div>}
@@ -160,10 +200,10 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
                 ? 'A luminária está apagada e a estrutura do poste foi comprometida. Proteja o trecho antes do reparo elétrico.'
                 : 'Ocorrência registrada no mapa. Analise o local e escolha as equipes adequadas para o atendimento.')
               : 'Escolha um alerta na lista ou no mapa para abrir os detalhes e preparar o atendimento.'}</p>
-            {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : 'RISCO EM ANÁLISE'}</span><span>{issue.dispatchedTeams.length}/{requiredTeams.length} EQUIPES ACIONADAS</span></div>}
+            {selected && issue && <div className="detail-tags"><span>{issue.status === 'RESOLVED' ? 'RESOLVIDA' : isTowIssue && issue.towStatus !== 'not-called' ? towProgressLabel : 'RISCO EM ANÁLISE'}</span><span>{isTowIssue ? 'ATENDIMENTO DA ANALISTA' : `${issue.dispatchedTeams.length}/${requiredTeams.length} EQUIPES ACIONADAS`}</span></div>}
           </div>
-          <div className="tablet-team-title"><span>PLANO DE RESPOSTA</span><small>{issue?.dispatchedTeams.length ?? 0}/{requiredTeams.length} EQUIPES</small></div>
-          <div className="tablet-teams">
+          <div className="tablet-team-title"><span>{isTowIssue ? 'CONTATO DE EMERGÊNCIA' : 'PLANO DE RESPOSTA'}</span><small>{isTowIssue ? 'REBOQUE' : `${issue?.dispatchedTeams.length ?? 0}/${requiredTeams.length} EQUIPES`}</small></div>
+          {isTowIssue ? <div className="tow-status-card"><span className="tow-status-icon">{issue?.towStatus === 'done' ? '✓' : '↗'}</span><span><b>{towProgressLabel}</b><small>{issue?.towStatus === 'not-called' ? 'Analise o chamado e consulte os contatos disponíveis.' : issue?.towStatus === 'en-route' ? 'O veículo de apoio está se aproximando.' : issue?.towStatus === 'loading' ? 'O carro está sendo preso à plataforma.' : 'O guincho está retirando o carro da avenida.'}</small></span></div> : <div className="tablet-teams">
             {requiredTeams.map(team => {
               const dispatched = issue?.dispatchedTeams.includes(team.id) ?? false;
               const taskLabel = issue?.id === 'ev-charger-repair'
@@ -173,12 +213,23 @@ export default function OrlaTablet({ onAction, onAnalyze, tutorialStep, onTutori
                 <span className="team-check">{dispatched ? '✓' : '·'}</span><span><b>{team.label}</b><small>{dispatched ? 'A CAMINHO' : taskLabel}</small></span>
               </div>;
             })}
-          </div>
-          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && allDispatched && tutorialStep == null)} onClick={event => { onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : 'E'}</kbd></button>
-          <small className="tablet-action-hint">{!issue ? 'Aguarde o pr\u00F3ximo chamado da central.' : resolved ? 'Relat\u00F3rio conclu\u00EDdo. Arquive para registrar XP e liberar o pr\u00F3ximo chamado.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relat\u00F3rio e confirme a an\u00E1lise para continuar.' : allDispatched ? 'Refor\u00E7o solicitado. Escolha uma equipe liberada para agir.' : 'An\u00E1lise conclu\u00EDda. Solicite refor\u00E7o para liberar a equipe.'}</small>
+          </div>}
+          <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && (isTowIssue ? !!issue?.analyzed && !canCallTow : allDispatched && tutorialStep == null))} onClick={event => { if (isTowIssue && issue?.analyzed && canCallTow) { setPhoneFeedback(''); setPhoneOpen(true); } else onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : isTowIssue && canCallTow ? '☎' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : isTowIssue && canCallTow ? '☎' : 'E'}</kbd></button>
+          <small className="tablet-action-hint">{!issue ? 'Aguarde o pr\u00F3ximo chamado da central.' : resolved ? 'Relat\u00F3rio conclu\u00EDdo. Arquive para registrar XP e liberar o pr\u00F3ximo chamado.' : isTowIssue ? !issue.analyzed ? 'Leia o registro da pane para abrir os contatos de emergência.' : canCallTow ? 'Escolha o serviço correto na lista telefônica para enviar o guincho.' : 'Acompanhe a chegada e aguarde o reboque liberar a faixa.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relat\u00F3rio e confirme a an\u00E1lise para continuar.' : allDispatched ? 'Refor\u00E7o solicitado. Escolha uma equipe liberada para agir.' : 'An\u00E1lise conclu\u00EDda. Solicite refor\u00E7o para liberar a equipe.'}</small>
         </div>
       </div>
       <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>
     </div>
+    {phoneOpen && isTowIssue && <div className="tow-phone-overlay">
+      <div className="tow-phone-dialog" role="dialog" aria-modal="true" aria-labelledby="tow-phone-title" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') setPhoneOpen(false); }}>
+        <div className="tow-phone-header"><span className="tow-phone-mark">☎</span><div><small>CONTATOS DE EMERGÊNCIA</small><h2 id="tow-phone-title">Lista telefônica</h2></div><button type="button" className="tow-phone-close" aria-label="Fechar lista telefônica" onClick={() => setPhoneOpen(false)}>×</button></div>
+        <p className="tow-phone-description">O carro está bloqueando uma faixa. Ligue para o serviço que consegue remover o veículo.</p>
+        <div className="tow-contact-list">{towContacts.map(contact => <button type="button" className={`tow-contact-card${contact.id === 'tow' ? ' is-correct' : ''}`} key={contact.id} onClick={() => chooseTowContact(contact.id)}>
+          <span className="tow-contact-icon">{contact.id === 'tow' ? '↗' : contact.id === 'mechanic' ? '⚙' : '⇄'}</span><span className="tow-contact-copy"><b>{contact.name}</b><small>{contact.service}</small><em>{contact.number}</em></span><span className="tow-contact-arrow">›</span>
+        </button>)}</div>
+        {phoneFeedback && <div className="tow-phone-feedback" role="status">{phoneFeedback}</div>}
+        <small className="tow-phone-footnote">Números fictícios para esta simulação.</small>
+      </div>
+    </div>}
   </section>;
 }

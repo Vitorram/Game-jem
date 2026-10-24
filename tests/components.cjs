@@ -69,6 +69,17 @@ test('CT-6.1: guia da Analista anuncia a lição e oferece pular o tutorial', ()
   }
 });
 
+test('tablet portátil: botão para guardar acessível e tutorial sem fechamento antecipado', () => {
+  const html = render('OrlaTablet.tsx', { onAction: noop, onClose: noop });
+  assert.match(html, /id="analyst-tablet"/);
+  const close = buttons(html).find(action => action.text.includes('Guardar tablet'));
+  assert.ok(close);
+  assert.match(close.attributes, /type="button"/);
+  assert.match(close.attributes, /aria-keyshortcuts="Q"/);
+  const tutorial = render('OrlaTablet.tsx', { onAction: noop, tutorialStep: 0 });
+  assert.ok(!buttons(tutorial).some(action => action.text.includes('Guardar tablet')));
+});
+
 test('CT-6.1: alertas do tablet usam cor junto com símbolo e texto', () => {
   const { suburbanGameState } = require(path.join(SRC, 'game', 'core', 'GameState.ts'));
   suburbanGameState.reset();

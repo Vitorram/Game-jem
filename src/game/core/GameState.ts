@@ -2,6 +2,7 @@ import type { PlayerId } from '../entities/Player';
 
 export type ProblemStatus = 'ACTIVE' | 'MAINTENANCE' | 'RESOLVED';
 export type ResponseTeam = 'infraestrutura' | 'mobilidade';
+export type TowTruckStatus = 'not-called' | 'en-route' | 'loading' | 'departing' | 'done';
 export type UrbanProblem = {
   id: string;
   type: string;
@@ -14,6 +15,7 @@ export type UrbanProblem = {
   instruction?: string;
   startedAtMs?: number;
   analyzed?: boolean;
+  towStatus?: TowTruckStatus;
 };
 
 export type RoadState = {

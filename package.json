@@ -9,6 +9,7 @@
     "coop:server": "node backend/server.mjs",
     "typecheck": "tsc --noEmit",
     "test:characters": "node --test tests/player.cjs",
+    "test:coop": "node --test tests/coop-*.cjs",
     "test": "node --test tests/*.cjs"
   },
   "engines": {
@@ -19,7 +20,8 @@
     "next": "16.4.2",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "three": "0.186.1"
+    "three": "0.186.1",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
@@ -29,4 +31,3 @@
     "typescript": "7.0.2"
   }
 }
-

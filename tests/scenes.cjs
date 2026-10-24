@@ -444,7 +444,7 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
     orla.selectPlayer(id);
     const before = orla.players.map(player => player.mesh.position.clone());
     orla.update(0.05);
-    orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id || id === 3));
+    orla.players.forEach((player, i) => assert.equal(player.mesh.position.equals(before[i]), player.id !== id));
     for (let frame = 0; frame < 300; frame++) orla.update(0.05);
     assert.ok(Math.abs(orla.player.mesh.position.x) <= orla.map.width / 2 - orla.map.playerRadius);
     const playerZ = orla.player.mesh.position.z;
@@ -460,8 +460,8 @@ test('Orla move cada personagem selecionada, respeita o chão e libera recursos 
   assert.equal(shadowDispose.mock.callCount(), 1);
 });
 
-test('CT-3.1: veículos parados são sólidos para Mobilidade e Infraestrutura', () => {
-  for (const id of [1, 2]) {
+test('CT-3.1: veículos parados são sólidos para as três equipes', () => {
+  for (const id of [1, 2, 3]) {
     const orla = new Fase1OrlaScene({ isSprinting: () => false, getAxis: () => ({ x: 1, z: 0 }) });
     try {
       const [car, ...others] = orla.traffic.vehicles;
@@ -871,6 +871,33 @@ const { sessionStore } = require('../src/game/session/sessionStore.ts');
 const { ORLA_EVENTS } = require('../src/game/session/orlaEvents.ts');
 const { ORLA_SESSION_CONFIG } = require('../src/game/session/sessionData.ts');
 
+test('coop: reparo remoto não abre puzzle nem bloqueia a personagem local; conclusão é aplicada uma vez', t => {
+  for (const localId of [2, 3]) {
+    const { Game, Element } = gameHarness(t);
+    const puzzleChanges = [];
+    const game = new Game(new Element(), () => {}, undefined, undefined, undefined, undefined,
+      open => puzzleChanges.push(open));
+    try {
+      game.startCoopOrlaTutorial(localId);
+      game.finishCoopTutorial();
+      const scene = game.scenes.current;
+      const completed = [];
+      t.mock.method(scene, 'interact', () => game.openRepairPuzzle('pole'));
+      t.mock.method(scene, 'completeRepairPuzzle', type => completed.push({ type, actor: scene.player.role }));
+      game.applyCoopAction('infraestrutura', { type: 'interact', axis: { x: 0, z: 0 }, pose: { x: 1, z: 2, yaw: 0 } });
+      assert.equal(game.repairPuzzleOpen, false);
+      assert.equal(scene.tutorialMovementEnabled, true);
+      assert.equal(puzzleChanges.includes(true), false);
+      game.completeRepairPuzzle();
+      assert.equal(completed.length, 0, 'participante local não conclui reparo da outra equipe');
+      game.applyCoopAction('infraestrutura', { type: 'repair-complete' });
+      game.applyCoopAction('infraestrutura', { type: 'repair-complete' });
+      assert.deepEqual(completed, [{ type: 'pole', actor: 'infraestrutura' }]);
+      assert.equal(suburbanGameState.activeCharacter, localId);
+    } finally { game.dispose(); }
+  }
+});
+
 test('treino mantém o relógio em zero e libera a agenda somente ao terminar', t => {
   const { Game, Element, created } = gameHarness(t);
   const game = new Game(new Element(), () => {});
@@ -918,7 +945,7 @@ test('CT-5.3: pular o tutorial em qualquer etapa inicia a partida com tudo liber
   }
 });
 
-test('A4: o tablet abre sozinho uma vez por chamado e nunca desfaz a escolha do jogador', t => {
+test('A4: chamados selecionam a Analista uma vez e o tablet aguarda abertura manual', t => {
   const run = (renderer, from, to) => { for (let time = from; time <= to; time += 50) renderer.loop(time); return to; };
   // Sem interferência: ao fim da cena de câmera do chamado novo, a Analista assume.
   {
@@ -932,6 +959,7 @@ test('A4: o tablet abre sozinho uma vez por chamado e nunca desfaz a escolha do 
       time = run(renderer, time + 50, time + 4000);
       assert.equal(orla.phaseIsCinematic(), false);
       assert.equal(orla.player.id, 3, 'a Analista assume para analisar o chamado');
+      assert.equal(game.isAnalystTabletOpen, false, 'receber um chamado não imobiliza a Analista');
     } finally { game.dispose(); }
   }
   // Escolha manual durante a cena é respeitada; chamado resolvido puxa a Analista uma vez só.
@@ -954,9 +982,144 @@ test('A4: o tablet abre sozinho uma vez por chamado e nunca desfaz a escolha do 
       assert.equal(orla.player.id, 2, 'depois de sair, o jogador não é puxado de volta a cada quadro');
       assert.equal(game.analystNeedsAttention(), true, 'o lembrete continua no botão da Analista');
       game.selectPlayer(3);
-      assert.equal(game.analystNeedsAttention(), false, 'com a Analista selecionada não há lembrete');
+      assert.equal(game.analystNeedsAttention(), true, 'andando com o tablet guardado ainda há lembrete');
+      game.toggleAnalystTablet();
+      assert.equal(game.analystNeedsAttention(), false, 'o lembrete some ao abrir o tablet');
     } finally { game.dispose(); }
   }
+});
+
+test('Analista móvel: Q abre no local, bloqueia teclado e toque, e não pausa o mundo', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const changes = [];
+  const game = new Game(new Element(), () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, undefined, open => changes.push(open));
+  t.after(() => game.dispose());
+  game.start('fase1-orla');
+  game.selectPlayer(3);
+  const scene = game.scenes.current, player = scene.player, renderer = created[0];
+  const key = (code, extra = {}) => window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { code, ...extra }));
+  const spawn = player.position.clone();
+  assert.equal(player.seated, false);
+  assert.ok(spawn.x > scene.map.spawns[2].x + 1.18, 'nasce fora da cabine');
+  key('KeyD');
+  renderer.loop(0); renderer.loop(50); renderer.loop(100);
+  assert.ok(player.position.x > spawn.x, 'WASD movimenta a Analista');
+  const stop = player.position.clone();
+  key('KeyQ');
+  assert.equal(game.isAnalystTabletOpen, true);
+  assert.deepEqual(player.position, stop, 'abrir não teleporta');
+  assert.equal(player.mesh.getObjectByName('analyst-handheld-tablet').visible, true);
+  key('KeyQ', { repeat: true });
+  key('KeyQ', { ctrlKey: true });
+  assert.equal(game.isAnalystTabletOpen, true, 'repetição e atalhos do navegador não alternam');
+  key('KeyD'); game.input.setTouch(1, 'KeyS'); game.input.setTouch(2, 'ShiftLeft');
+  const trafficUpdate = t.mock.method(scene.traffic, 'update');
+  const before = game.session.snapshot().elapsedMs;
+  for (let time = 150; time <= 1000; time += 50) renderer.loop(time);
+  assert.deepEqual(player.position, stop, 'nenhum input move enquanto usa o tablet');
+  assert.ok(trafficUpdate.mock.callCount() > 0, 'trânsito continua atualizando');
+  assert.ok(game.session.snapshot().elapsedMs > before, 'relógio continua correndo');
+  key('KeyQ');
+  assert.equal(game.isAnalystTabletOpen, false);
+  assert.equal(player.mesh.getObjectByName('analyst-handheld-tablet').visible, false);
+  assert.deepEqual(game.input.getAxis(), { x: 0, z: 0 }, 'não reaproveita comandos pressionados no tablet');
+  renderer.loop(1050);
+  assert.deepEqual(player.position, stop, 'guardar também não teleporta');
+  game.input.setTouch(3, 'KeyD');
+  renderer.loop(1100);
+  assert.ok(player.position.x > stop.x, 'toque volta a movimentar');
+  assert.deepEqual(changes, [true, false]);
+});
+
+test('Analista móvel: tutorial, pausa, troca e menu mantêm tablet e movimento consistentes', t => {
+  const { Game, Element } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  t.after(() => game.dispose());
+  game.startOrlaWithAnalystTutorial();
+  assert.equal(game.isAnalystTabletOpen, true);
+  game.toggleAnalystTablet();
+  assert.equal(game.isAnalystTabletOpen, true, 'treino guiado mantém o tablet aberto');
+  game.startMobilityTutorial();
+  assert.equal(game.isAnalystTabletOpen, false);
+  assert.equal(game.scenes.current.analystTabletOpen, false);
+  game.skipTutorial();
+  game.selectPlayer(3);
+  game.toggleAnalystTablet();
+  game.togglePause();
+  game.toggleAnalystTablet();
+  assert.equal(game.isAnalystTabletOpen, true, 'pausa não altera o estado do tablet');
+  game.togglePause();
+  game.selectPlayer(2);
+  assert.equal(game.isAnalystTabletOpen, false);
+  game.toggleAnalystTablet();
+  assert.equal(game.isAnalystTabletOpen, false, 'outras equipes não abrem o tablet');
+  game.selectPlayer(3);
+  game.toggleAnalystTablet();
+  game.returnToMenu();
+  assert.equal(game.isAnalystTabletOpen, false);
+  game.startOrlaWithAnalystTutorial();
+  game.skipTutorial();
+  assert.equal(game.isAnalystTabletOpen, false, 'pular direto o treino libera a Analista para andar');
+});
+
+test('Analista móvel: ações exigem tablet aberto e atalhos enviam despacho no coop', t => {
+  const { Game, Element } = gameHarness(t);
+  const actions = [];
+  const game = new Game(new Element(), () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, action => actions.push(action));
+  t.after(() => game.dispose());
+  game.startCoopOrlaTutorial(3);
+  game.toggleAnalystTablet();
+  assert.equal(game.isAnalystTabletOpen, false, 'aguarda início coletivo');
+  game.finishCoopTutorial();
+  const scene = game.scenes.current;
+  const interact = t.mock.method(scene, 'interact', () => {});
+  const dispatch = t.mock.method(scene, 'dispatchTeam', () => true);
+  const analyze = t.mock.method(scene, 'analyzeProblem', () => true);
+  const key = code => window.dispatchEvent(Object.assign(new Event('keydown', { cancelable: true }), { code }));
+  game.interact(); key('Digit1'); key('Digit2');
+  assert.equal(game.analyzeProblem('test'), false);
+  assert.equal(interact.mock.callCount(), 0);
+  assert.equal(dispatch.mock.callCount(), 0);
+  assert.equal(analyze.mock.callCount(), 0);
+  assert.equal(actions.length, 0);
+  key('KeyQ');
+  key('Digit1'); key('Digit2');
+  assert.equal(dispatch.mock.callCount(), 2);
+  assert.deepEqual(actions, [
+    { type: 'dispatch', team: 'infraestrutura' }, { type: 'dispatch', team: 'mobilidade' },
+  ]);
+  game.interact();
+  assert.equal(interact.mock.callCount(), 1);
+  assert.equal(game.analyzeProblem('test'), true);
+  assert.equal(scene.player.id, 3, 'coop preserva o próprio papel');
+  game.toggleAnalystTablet();
+  const before = game.getCoopPose();
+  game.input.setTouch(1, 'KeyD');
+  scene.update(0.05);
+  assert.ok(game.getCoopPose().x > before.x, 'movimento entra na pose enviada ao coop');
+});
+
+test('Analista móvel: usar tablet na rua mantém colisões e não bloqueia ações remotas', t => {
+  const { Game, Element } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  t.after(() => game.dispose());
+  game.startCoopOrlaTutorial(3);
+  game.finishCoopTutorial();
+  const scene = game.scenes.current;
+  const road = scene.map.cellCenter(6, 10);
+  scene.player.setPosition(road.x, road.z);
+  game.toggleAnalystTablet();
+  const collision = t.mock.method(scene.traffic, 'getPlayerCollision', () => ({ x: 1, z: 0 }));
+  scene.update(0.05);
+  assert.ok(collision.mock.callCount() > 0, 'tablet não dá imunidade na rua');
+  assert.equal(scene.collisionRecovery.player.id, 3);
+  const interact = t.mock.method(scene, 'interact', () => {});
+  game.applyCoopAction('infraestrutura', { type: 'interact', axis: { x: 0, z: 0 }, pose: { x: 0, z: 0, yaw: 0 } });
+  assert.equal(interact.mock.callCount(), 1);
+  assert.equal(scene.player.id, 3);
+  assert.equal(game.isAnalystTabletOpen, true);
 });
 
 test('CT-5.1: durante o treino de Mobilidade e de Infraestrutura o jogador anda livremente', t => {

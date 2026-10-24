@@ -46,6 +46,7 @@ type Vehicle = {
   chargeRing: Group | null;
 };
 type ElectricCharger = { x: number; z: number; group: Group; statusLight: Mesh; statusMaterial: MeshStandardMaterial; broken: boolean };
+export type TowTruckState = 'idle' | 'approaching' | 'loading' | 'departing' | 'completed';
 export type MobilityRoadAction = 'release' | 'block' | 'blockAll' | 'reverse' | 'electricDetour';
 export type WorkZoneReadiness = {
   prepared: boolean;
@@ -90,6 +91,11 @@ export class TrafficSystem {
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.14, 0.84);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
+  private readonly towBeaconGeometry = new BoxGeometry(0.3, 0.1, 0.18);
+  private readonly towBeaconMaterial = new MeshStandardMaterial({ color: '#ffb331', emissive: '#f07812', emissiveIntensity: 2.2 });
+  private readonly towBedGeometry = new BoxGeometry(1.05, 0.09, 0.68);
+  private readonly towBoomGeometry = new BoxGeometry(0.09, 0.38, 0.09);
+  private readonly towEquipmentMaterial = new MeshStandardMaterial({ color: '#536f75', roughness: 0.75 });
   private readonly chargerBodyMaterial = new MeshStandardMaterial({ color: '#e6f0e7', roughness: 0.55 });
   private readonly chargerScreenMaterial = new MeshStandardMaterial({ color: '#385b68', emissive: '#16353d', roughness: 0.4 });
   private readonly chargerCableMaterial = new MeshStandardMaterial({ color: '#27363b', roughness: 0.8 });
@@ -131,6 +137,11 @@ export class TrafficSystem {
   private assistedCrossingRequested = false;
   private incidentVehicle: Vehicle | null = null;
   private collisionWarningVehicle: Vehicle | null = null;
+  private towTruck: Group | null = null;
+  private towTruckState: TowTruckState = 'idle';
+  private towTruckTimer = 0;
+  private towTruckTargetX = 0;
+  private towTruckDirection: 1 | -1 = 1;
   private readonly incidentLights = new Group();
   private incidentTime = 0;
   private trafficRandomSeed = 173;
@@ -363,6 +374,111 @@ export class TrafficSystem {
     this.incidentVehicle = vehicle;
     this.collisionWarningVehicle = null;
     vehicle.speed = 0;
+  }
+
+  /** Enguiça um carro numa faixa real para que a fila se forme atrás dele. */
+  startBreakdown(): { x: number; z: number } | null {
+    this.warnCollision();
+    if (!this.collisionWarningVehicle && !this.incidentVehicle) {
+      const lane = this.lanes.find(candidate => candidate.id === 'orla-eastbound-2');
+      if (lane) {
+        const mesh = this.makeVehicle('sedan', '#d15e55');
+        mesh.position.set(10, 0.27, lane.z);
+        mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
+        this.group.add(mesh);
+        const maxSpeed = 1.8;
+        this.collisionWarningVehicle = { mesh, lane, homeLane: lane, preferredLane: lane, kind: 'sedan',
+          speed: maxSpeed, crossingCommitted: false, maxSpeed, laneChangeFromZ: lane.z, laneChangeElapsed: LANE_CHANGE_DURATION,
+          chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null };
+        this.vehicles.push(this.collisionWarningVehicle);
+        for (const x of [-0.8, 0.8]) {
+          const light = new Mesh(this.barrierGeometry, this.barrierMaterial);
+          light.position.set(x, 0.55, 0);
+          light.scale.set(0.4, 1.5, 0.6);
+          this.incidentLights.add(light);
+        }
+        mesh.add(this.incidentLights);
+      }
+    }
+    this.startCollision();
+    return this.getIncidentPosition();
+  }
+
+  callTowTruck(): boolean {
+    if (!this.incidentVehicle || (this.towTruckState !== 'idle' && this.towTruckState !== 'completed')) return false;
+    const lane = this.incidentVehicle.lane;
+    this.towTruckDirection = lane.direction;
+    this.towTruckState = 'approaching';
+    this.towTruckTimer = 0;
+    this.towTruckTargetX = this.incidentVehicle.mesh.position.x - lane.direction * 2.35;
+    this.towTruck = this.makeVehicle('truck', '#e5a739');
+    this.towTruck.name = 'orla-tow-truck';
+    const entryX = lane.direction === 1 ? this.minX - 4 : this.minX + this.width + 4;
+    this.towTruck.position.set(entryX, 0.27, lane.z);
+    this.towTruck.rotation.y = lane.direction === 1 ? 0 : Math.PI;
+    const flatbed = new Mesh(this.towBedGeometry, this.towEquipmentMaterial);
+    flatbed.position.set(-0.92, 0.34, 0);
+    flatbed.name = 'tow-flatbed';
+    this.towTruck.add(flatbed);
+    const boom = new Mesh(this.towBoomGeometry, this.towBeaconMaterial);
+    boom.position.set(-1.38, 0.48, 0);
+    boom.rotation.z = -0.48;
+    boom.name = 'tow-boom';
+    this.towTruck.add(boom);
+    const beacon = new Mesh(this.towBeaconGeometry, this.towBeaconMaterial);
+    beacon.position.set(0, 0.72, 0);
+    beacon.name = 'tow-beacon';
+    this.towTruck.add(beacon);
+    this.group.add(this.towTruck);
+    return true;
+  }
+
+  getTowTruckState(): TowTruckState { return this.towTruckState; }
+
+  clearBreakdown(): void {
+    this.removeTowTruck();
+    this.towTruckState = 'idle';
+    this.clearCollision();
+  }
+
+  private updateTowTruck(dt: number): void {
+    if (!this.towTruck) return;
+    const beacon = this.towTruck.getObjectByName('tow-beacon');
+    if (beacon) beacon.visible = Math.floor(this.incidentTime * 5) % 2 === 0;
+    if (this.towTruckState === 'approaching') {
+      this.towTruck.position.x += this.towTruckDirection * 4.2 * dt;
+      if ((this.towTruck.position.x - this.towTruckTargetX) * this.towTruckDirection >= 0) {
+        this.towTruck.position.x = this.towTruckTargetX;
+        this.towTruckState = 'loading';
+        this.towTruckTimer = 0;
+      }
+      return;
+    }
+    if (this.towTruckState === 'loading') {
+      this.towTruckTimer += dt;
+      if (this.towTruckTimer >= 1.8) {
+        this.clearCollision();
+        this.towTruckState = 'departing';
+      }
+      return;
+    }
+    if (this.towTruckState === 'departing') {
+      this.towTruck.position.x += this.towTruckDirection * 4.2 * dt;
+      const outside = this.towTruckDirection === 1
+        ? this.towTruck.position.x > this.minX + this.width + 4
+        : this.towTruck.position.x < this.minX - 4;
+      if (outside) {
+        this.removeTowTruck();
+        this.towTruckState = 'completed';
+      }
+    }
+  }
+
+  private removeTowTruck(): void {
+    if (!this.towTruck) return;
+    this.group.remove(this.towTruck);
+    this.towTruck.clear();
+    this.towTruck = null;
   }
 
   clearCollision(): void {
@@ -767,6 +883,7 @@ export class TrafficSystem {
     this.updateCrossingSignal(dt);
     this.updateTrafficGeneration(dt);
     this.incidentTime += dt;
+    this.updateTowTruck(dt);
     this.incidentLights.visible = Math.floor(this.incidentTime * 3) % 2 === 0;
     for (const vehicle of [...this.vehicles]) {
       if (vehicle === this.incidentVehicle) continue;
@@ -1061,11 +1178,12 @@ export class TrafficSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.removeTowTruck();
     this.vehicleModels.dispose();
-    [this.barrierGeometry, this.coneGeometry, this.directionGeometry,
+    [this.barrierGeometry, this.coneGeometry, this.directionGeometry, this.towBeaconGeometry, this.towBedGeometry, this.towBoomGeometry,
       this.chargerBaseGeometry, this.chargerBodyGeometry, this.chargerScreenGeometry, this.chargerStatusGeometry, this.chargerPlugGeometry,
       this.chargerCableGeometry, this.chargeSegmentGeometry].forEach(geometry => geometry.dispose());
-    [this.barrierMaterial, this.chargerBodyMaterial, this.chargerScreenMaterial, this.chargerCableMaterial,
+    [this.barrierMaterial, this.towBeaconMaterial, this.towEquipmentMaterial, this.chargerBodyMaterial, this.chargerScreenMaterial, this.chargerCableMaterial,
       this.chargeSegmentOnMaterial, this.chargeSegmentOffMaterial, this.directionMaterial, this.greenDirectionMaterial, this.blockedDirectionMaterial]
       .forEach(material => material.dispose());
     this.chargers.forEach(charger => charger.statusMaterial.dispose());

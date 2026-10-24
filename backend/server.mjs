@@ -1,193 +1,309 @@
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
+import { WebSocketServer, WebSocket } from 'ws';
+import { ProtocolError, reject, ROLES, validateMessage, authorizeAction } from './protocol.mjs';
 
-const PORT = Number(process.env.COOP_PORT || 3001);
-const HOST = process.env.COOP_HOST || '0.0.0.0';
-const ROLES = ['analista', 'mobilidade', 'infraestrutura'];
-const rooms = new Map();
-const peers = new Set();
-
-function frame(text) {
-  const payload = Buffer.from(text);
-  const size = payload.length;
-  const header = size < 126 ? Buffer.from([0x81, size])
-    : size < 65536 ? Buffer.from([0x81, 126, size >> 8, size & 255])
-      : Buffer.from([0x81, 127, 0, 0, 0, 0, size >>> 24, size >>> 16 & 255, size >>> 8 & 255, size & 255]);
-  return Buffer.concat([header, payload]);
+export function readConfig(env = process.env) {
+  const integer = (key, fallback, min, max) => {
+    const value = env[key] === undefined ? fallback : Number(env[key]);
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error('Configuração inválida: ' + key);
+    return value;
+  };
+  const origins = (env.COOP_ALLOWED_ORIGINS || '').split(',').map(item => item.trim()).filter(Boolean);
+  for (const origin of origins) {
+    const parsed = new URL(origin);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.origin !== origin) throw new Error('COOP_ALLOWED_ORIGINS deve conter origens HTTP(S) completas.');
+  }
+  const production = env.NODE_ENV === 'production';
+  if (production && !origins.length) throw new Error('Defina COOP_ALLOWED_ORIGINS em produção.');
+  return {
+    host: env.COOP_HOST || '0.0.0.0', port: integer('COOP_PORT', 3001, 1, 65535),
+    maxPeers: integer('COOP_MAX_CONNECTIONS', 256, 3, 10000),
+    maxRooms: integer('COOP_MAX_ROOMS', 128, 1, 2000),
+    maxPerIp: integer('COOP_MAX_CONNECTIONS_PER_IP', 32, 3, 1000),
+    origins, production,
+  };
 }
 
-function send(peer, message) {
-  if (!peer.closed && !peer.socket.destroyed) peer.socket.write(frame(JSON.stringify(message)));
-}
+export function createCoopServer(options = {}) {
+  const config = {
+    host: '127.0.0.1', port: 0, maxPeers: 256, maxRooms: 128, maxPerIp: 32,
+    origins: [], production: false, maxPayload: 16 * 1024, maxBuffered: 512 * 1024,
+    heartbeatMs: 30000, idleMs: 300000, rate: 120, burst: 240,
+    startDelayMs: 1400, tutorialDelayMs: 500, logger: console, ...options,
+  };
+  const rooms = new Map();
+  const peers = new Set();
+  const attempts = new Map();
+  let closing = false;
+  let directoryTimer;
+  const wss = new WebSocketServer({ noServer: true, maxPayload: config.maxPayload, perMessageDeflate: false });
 
-function broadcast(room, message, except) {
-  for (const peer of room.players.values()) if (peer !== except) send(peer, message);
-}
-
-function roomSnapshot(room) {
-  return [...room.players.values()].map(peer => ({
+  function send(peer, message) {
+    if (peer.ws.readyState !== WebSocket.OPEN) return;
+    if (peer.ws.bufferedAmount > config.maxBuffered) { peer.ws.terminate(); return; }
+    peer.ws.send(JSON.stringify(message), error => { if (error) peer.ws.terminate(); });
+  }
+  function broadcast(room, message, except) {
+    for (const peer of room.players.values()) if (peer !== except) send(peer, message);
+  }
+  const roster = room => [...room.players.values()].map(peer => ({
     id: peer.id, name: peer.name, role: peer.role, ready: peer.ready,
     tutorialReady: peer.tutorialReady, host: peer === room.host,
   }));
-}
-
-function publishRoom(room) {
-  broadcast(room, { type: 'room', code: room.code, phase: room.phase, players: roomSnapshot(room) });
-}
-
-function removePeer(peer) {
-  if (peer.closed) return;
-  peer.closed = true;
-  peers.delete(peer);
-  const room = peer.room;
-  if (!room) return;
-  room.players.delete(peer.id);
-  if (room.players.size === 0) rooms.delete(room.code);
-  else {
-    if (room.host === peer) room.host = room.players.values().next().value;
-    if (room.phase !== 'lobby') {
-      broadcast(room, { type: 'peer-left', id: peer.id, name: peer.name });
-      if (room.players.size < 2) room.phase = 'lobby';
-    }
-    publishRoom(room);
+  function publishRoom(room) {
+    broadcast(room, { type: 'room', code: room.code, phase: room.phase, isPublic: room.isPublic, paused: room.paused, players: roster(room) });
   }
-}
-
-function fail(peer, message) { send(peer, { type: 'error', message }); }
-
-function receive(peer, message) {
-  if (!message || typeof message.type !== 'string') return;
-  if (message.type === 'join') {
-    if (peer.room) return fail(peer, 'Você já está em uma sala.');
-    const code = String(message.code || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || Math.random().toString(36).slice(2, 6).toUpperCase();
-    const name = String(message.name || 'Jogadora').trim().slice(0, 24) || 'Jogadora';
-    let room = rooms.get(code);
-    if (!room) {
-      room = { code, phase: 'lobby', players: new Map(), host: null };
-      rooms.set(code, room);
+  function directory() {
+    return [...rooms.values()].filter(room => room.isPublic && room.phase === 'lobby' && room.players.size < 3)
+      .map(room => ({ code: room.code, phase: room.phase, players: roster(room) }));
+  }
+  function publishDirectory() {
+    if (directoryTimer || closing) return;
+    directoryTimer = setTimeout(() => {
+      directoryTimer = undefined;
+      const message = { type: 'rooms', rooms: directory() };
+      for (const peer of peers) if (peer.subscribed && !peer.room) send(peer, message);
+    }, 50);
+    directoryTimer.unref();
+  }
+  function detach(peer) {
+    const room = peer.room;
+    peer.room = null;
+    if (!room) return;
+    room.players.delete(peer.id);
+    if (!room.players.size) rooms.delete(room.code);
+    else if (room.phase !== 'lobby') {
+      // No complete authoritative snapshot exists to resume or replace a player safely.
+      rooms.delete(room.code);
+      for (const member of room.players.values()) {
+        member.room = null;
+        send(member, { type: 'session-ended', code: 'PLAYER_LEFT', message: peer.name + ' saiu. A partida foi encerrada; reúna a equipe em uma nova sala.' });
+      }
+      room.players.clear();
+    } else {
+      if (room.host === peer) room.host = room.players.values().next().value;
+      publishRoom(room);
     }
-    if (room.phase !== 'lobby') return fail(peer, 'A partida desta sala já começou.');
-    if (room.players.size >= 3) return fail(peer, 'A sala já tem 3 jogadoras.');
-    const usedRoles = new Set([...room.players.values()].map(player => player.role));
-    const requestedRole = ROLES.includes(message.role) && !usedRoles.has(message.role) ? message.role : null;
-    const role = requestedRole || ROLES.find(candidate => !usedRoles.has(candidate));
-    if (!role) return fail(peer, 'Os três papéis já foram ocupados.');
-    peer.room = room;
-    peer.id = Math.random().toString(36).slice(2, 10);
-    peer.name = name;
-    peer.role = role;
-    peer.ready = false;
-    peer.tutorialReady = false;
+    publishDirectory();
+  }
+  function remove(peer) {
+    if (!peers.delete(peer)) return;
+    detach(peer);
+  }
+  function addPlayer(peer, room, message) {
+    if (room.phase !== 'lobby') reject('GAME_STARTED', 'A partida desta sala já começou.');
+    if (room.players.size >= 3) reject('ROOM_FULL', 'A sala já tem três pessoas.');
+    if ([...room.players.values()].some(player => player.role === message.role)) reject('ROLE_TAKEN', 'Esse papel já está ocupado. Escolha outra personagem.');
+    Object.assign(peer, { room, name: message.name, role: message.role, ready: false, tutorialReady: false, introDone: false });
     room.players.set(peer.id, peer);
     if (!room.host) room.host = peer;
-    send(peer, { type: 'joined', id: peer.id, role, code, host: room.host === peer });
+    send(peer, { type: 'joined', id: peer.id, role: peer.role, code: room.code, host: room.host === peer });
     publishRoom(room);
-    return;
+    publishDirectory();
   }
-  const room = peer.room;
-  if (!room) return fail(peer, 'Entre em uma sala antes de enviar ações.');
-  if (message.type === 'ready') {
-    if (room.phase !== 'lobby') return fail(peer, 'A sala já iniciou a partida.');
-    peer.ready = Boolean(message.ready);
-    peer.tutorialReady = false;
-    publishRoom(room);
-    return;
+  function requirePhase(room, ...phases) {
+    if (!phases.includes(room.phase)) reject('INVALID_PHASE', 'Essa ação não está disponível nesta etapa da partida.');
   }
-  if (message.type === 'start') {
-    if (peer !== room.host) return fail(peer, 'Somente a anfitriã pode iniciar a partida.');
-    if (room.phase !== 'lobby') return fail(peer, 'A sala já iniciou a partida.');
-    if (room.players.size < 3) return fail(peer, 'Para esta fase, é preciso reunir as três equipes: Analista, Mobilidade e Infraestrutura.');
-    if ([...room.players.values()].some(player => !player.ready)) return fail(peer, 'Todas precisam marcar “Pronta”.');
-    room.phase = 'story';
-    broadcast(room, { type: 'game-start', room: room.code, startDelayMs: 1400, players: roomSnapshot(room) });
-    publishRoom(room);
-    return;
-  }
-  if (message.type === 'tutorial-ready') {
-    if (room.phase !== 'tutorial') return;
-    peer.tutorialReady = Boolean(message.ready);
-    publishRoom(room);
+  function advanceTutorial(room) {
+    if (room.players.size !== 3 || ![...room.players.values()].every(player => player.introDone)) return;
+    room.phase = 'tutorial';
     if ([...room.players.values()].every(player => player.tutorialReady)) {
       room.phase = 'playing';
-      broadcast(room, { type: 'tutorial-start', startDelayMs: 500 });
-      publishRoom(room);
+      room.startAt = Date.now() + config.tutorialDelayMs;
+      broadcast(room, { type: 'tutorial-start', startDelayMs: config.tutorialDelayMs });
     }
-    return;
   }
-  if (message.type === 'tutorial-open') {
-    if (room.phase === 'story') {
-      room.phase = 'tutorial';
-      publishRoom(room);
+  function dispatch(peer, message) {
+    if (message.type === 'list-rooms') {
+      peer.subscribed = true;
+      send(peer, { type: 'rooms', rooms: directory() }); return;
     }
-    return;
+    if (message.type === 'leave') {
+      detach(peer); send(peer, { type: 'left' }); return;
+    }
+    if (['create-room', 'join', 'join-open'].includes(message.type)) {
+      if (peer.room) reject('ALREADY_JOINED', 'Você já está em uma sala.');
+      if (message.type === 'create-room') {
+        if (rooms.size >= config.maxRooms) reject('SERVER_FULL', 'O servidor atingiu o limite de salas. Tente novamente mais tarde.');
+        let code;
+        const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        do { code = [...randomBytes(8)].map(byte => alphabet[byte % alphabet.length]).join(''); } while (rooms.has(code));
+        const room = { code, phase: 'lobby', isPublic: message.isPublic, paused: false, startAt: 0, players: new Map(), host: null };
+        rooms.set(code, room);
+        addPlayer(peer, room, message); return;
+      }
+      const room = rooms.get(message.code);
+      if (!room || (message.type === 'join-open' && !room.isPublic)) reject('ROOM_NOT_FOUND', 'Sala indisponível. Confira o código ou atualize a lista.');
+      addPlayer(peer, room, message); return;
+    }
+    const room = peer.room;
+    if (!room || room.players.get(peer.id) !== peer) reject('NOT_IN_ROOM', 'Entre em uma sala antes de enviar ações.');
+    switch (message.type) {
+      case 'ready':
+        requirePhase(room, 'lobby'); peer.ready = message.ready; publishRoom(room); return;
+      case 'set-public':
+        if (peer !== room.host) reject('FORBIDDEN', 'Somente a anfitriã pode alterar a visibilidade.');
+        requirePhase(room, 'lobby'); room.isPublic = message.isPublic;
+        publishRoom(room); publishDirectory(); return;
+      case 'start':
+        if (peer !== room.host) reject('FORBIDDEN', 'Somente a anfitriã pode iniciar a partida.');
+        requirePhase(room, 'lobby');
+        if (room.players.size !== 3 || new Set(roster(room).map(player => player.role)).size !== ROLES.length) reject('TEAM_INCOMPLETE', 'Reúna Analista, Mobilidade e Infraestrutura para iniciar.');
+        if (roster(room).some(player => !player.ready)) reject('TEAM_NOT_READY', 'Todas precisam marcar “Pronta”.');
+        for (const member of room.players.values()) { member.introDone = false; member.tutorialReady = false; }
+        room.phase = 'story';
+        broadcast(room, { type: 'game-start', room: room.code, startDelayMs: config.startDelayMs, players: roster(room) });
+        publishRoom(room); publishDirectory(); return;
+      case 'tutorial-open':
+        requirePhase(room, 'story', 'tutorial'); peer.introDone = true; advanceTutorial(room); publishRoom(room); return;
+      case 'tutorial-ready':
+        requirePhase(room, 'story', 'tutorial');
+        if (!peer.introDone) reject('INTRO_REQUIRED', 'Conclua o prólogo antes de confirmar o tutorial.');
+        peer.tutorialReady = message.ready; advanceTutorial(room); publishRoom(room); return;
+      case 'pause':
+        requirePhase(room, 'playing');
+        if (room.paused !== message.paused) {
+          room.paused = message.paused;
+          broadcast(room, { type: 'pause', paused: room.paused, by: peer.name });
+          publishRoom(room);
+        }
+        return;
+      case 'move':
+      case 'action':
+        requirePhase(room, 'playing');
+        if (message.type === 'action') authorizeAction(peer.role, message.action);
+        if (room.paused || Date.now() < room.startAt) {
+          if (message.type === 'action') reject('GAME_PAUSED', 'A partida ainda não está liberada para essa ação.');
+          return; // Transient movement frames can safely be discarded across pause/start.
+        }
+        if (message.type === 'move') broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer);
+        else broadcast(room, { type: 'action', id: peer.id, role: peer.role, action: message.action }, peer);
+        return;
+    }
   }
-  if (message.type === 'move') {
-    if (room.phase !== 'playing' || !Number.isFinite(message.x) || !Number.isFinite(message.z) || !Number.isFinite(message.yaw)) return;
-    broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer);
-    return;
+  function receive(peer, data, binary) {
+    const now = Date.now();
+    peer.tokens = Math.min(config.burst, peer.tokens + (now - peer.tokenAt) * config.rate / 1000);
+    peer.tokenAt = now; peer.lastMessage = now;
+    if (peer.tokens < 1) { send(peer, { type: 'error', code: 'RATE_LIMITED', message: 'Muitas mensagens. Reconecte à sala.' }); peer.ws.close(1008, 'Rate limit'); return; }
+    peer.tokens--;
+    // Gameplay sends poses frequently; lobby/control operations have a separate, smaller budget.
+    // The total bucket above also covers malformed JSON and unknown commands.
+    if (binary) { peer.ws.close(1003, 'Text JSON required'); return; }
+    let raw;
+    try { raw = JSON.parse(data.toString('utf8')); }
+    catch { send(peer, { type: 'error', code: 'INVALID_JSON', message: 'Mensagem JSON inválida.' }); return; }
+    let message;
+    let result;
+    const requestId = typeof raw?.requestId === 'string' && raw.requestId.length <= 64 ? raw.requestId : undefined;
+    try {
+      message = validateMessage(raw);
+      if (!['move', 'action'].includes(message.type)) {
+        peer.controlTokens = Math.min(30, peer.controlTokens + (now - peer.controlAt) * 5 / 1000);
+        peer.controlAt = now;
+        if (peer.controlTokens < 1) reject('RATE_LIMITED', 'Aguarde um momento antes de enviar outro comando.');
+        peer.controlTokens--;
+      }
+      const previous = requestId && peer.requests.get(requestId);
+      if (previous) {
+        if (previous.body !== JSON.stringify(message)) reject('REQUEST_CONFLICT', 'Identificador de comando já utilizado.');
+        send(peer, previous.result); return;
+      }
+      dispatch(peer, message);
+      result = { type: 'ack', requestId };
+    } catch (error) {
+      if (!(error instanceof ProtocolError)) config.logger.error('Falha interna no comando coop', error);
+      result = { type: 'error', code: error instanceof ProtocolError ? error.code : 'INTERNAL_ERROR',
+        message: error instanceof ProtocolError ? error.message : 'Falha interna no servidor. Tente novamente.', ...(requestId ? { requestId } : {}) };
+    }
+    if (requestId || result.type === 'error') send(peer, result);
+    if (requestId && message && !peer.requests.has(requestId)) {
+      peer.requests.set(requestId, { body: JSON.stringify(message), result });
+      if (peer.requests.size > 128) peer.requests.delete(peer.requests.keys().next().value);
+    }
   }
-  if (message.type === 'action') {
-    if (room.phase !== 'playing' || !message.action || typeof message.action !== 'object') return;
-    broadcast(room, { type: 'action', id: peer.id, role: peer.role, action: message.action }, peer);
-    return;
-  }
-  if (message.type === 'pause') {
-    broadcast(room, { type: 'pause', paused: Boolean(message.paused), by: peer.name }, peer);
-  }
+  const json = (response, status, data, headers = {}) => {
+    response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers });
+    response.end(JSON.stringify(data));
+  };
+  const server = createServer((request, response) => {
+    let path;
+    try { path = new URL(request.url, 'http://localhost').pathname; }
+    catch { json(response, 400, { error: { code: 'BAD_REQUEST', message: 'URL inválida.' } }); return; }
+    if (path !== '/health' && path !== '/coop') { json(response, 404, { error: { code: 'NOT_FOUND', message: 'Rota não encontrada.' } }); return; }
+    if (!['GET', 'HEAD'].includes(request.method)) { json(response, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'Método não permitido.' } }, { Allow: 'GET, HEAD' }); return; }
+    if (path === '/coop') { json(response, 426, { error: { code: 'UPGRADE_REQUIRED', message: 'Use WebSocket em /coop.' } }, { Upgrade: 'websocket' }); return; }
+    json(response, closing ? 503 : 200, { ok: !closing, rooms: rooms.size, players: [...peers].filter(peer => peer.room).length, connections: peers.size });
+  });
+  server.headersTimeout = 10000;
+  server.requestTimeout = 15000;
+  server.on('upgrade', (request, socket, head) => {
+    socket.on('error', () => socket.destroy());
+    const deny = (status, reason) => socket.end('HTTP/1.1 ' + status + ' ' + reason + '\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+    if (closing) { deny(503, 'Service Unavailable'); return; }
+    if (request.url !== '/coop') { deny(404, 'Not Found'); return; }
+    const origin = request.headers.origin;
+    let originAllowed = !origin && !config.production;
+    if (origin) {
+      try {
+        const parsed = new URL(origin);
+        originAllowed = config.origins.length ? config.origins.includes(origin)
+          : !config.production && ['http:', 'https:'].includes(parsed.protocol) && parsed.hostname === new URL('http://' + request.headers.host).hostname;
+      } catch { originAllowed = false; }
+    }
+    if (!originAllowed) { deny(403, 'Forbidden'); return; }
+    const ip = request.socket.remoteAddress;
+    const now = Date.now();
+    let attempt = attempts.get(ip);
+    if (!attempt && attempts.size >= 10000) { deny(503, 'Service Unavailable'); return; }
+    if (!attempt || now - attempt.since >= 60000) { attempt = { since: now, count: 0 }; attempts.set(ip, attempt); }
+    attempt.count++;
+    if (attempt.count > 60 || [...peers].filter(peer => peer.ip === ip).length >= config.maxPerIp) { deny(429, 'Too Many Requests'); return; }
+    if (peers.size >= config.maxPeers) { deny(503, 'Service Unavailable'); return; }
+    wss.handleUpgrade(request, socket, head, ws => {
+      const peer = { ws, ip, id: randomUUID(), room: null, subscribed: false, alive: true, lastMessage: now, tokenAt: now, tokens: config.burst, controlAt: now, controlTokens: 30, requests: new Map() };
+      peers.add(peer);
+      ws.on('pong', () => { peer.alive = true; });
+      ws.on('message', (data, binary) => receive(peer, data, binary));
+      ws.on('close', () => remove(peer));
+      ws.on('error', () => { remove(peer); ws.terminate(); });
+    });
+  });
+  const heartbeat = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, attempt] of attempts) if (now - attempt.since >= 60000) attempts.delete(ip);
+    for (const peer of peers) {
+      if (!peer.alive || (!peer.room && now - peer.lastMessage > config.idleMs)) { peer.ws.terminate(); continue; }
+      peer.alive = false; peer.ws.ping();
+    }
+  }, config.heartbeatMs);
+  heartbeat.unref();
+  return {
+    server,
+    listen: () => new Promise((resolve, rejectListen) => {
+      const onError = error => { server.off('listening', onListening); rejectListen(error); };
+      const onListening = () => { server.off('error', onError); resolve(server.address()); };
+      server.once('error', onError); server.once('listening', onListening); server.listen(config.port, config.host);
+    }),
+    close: async () => {
+      closing = true; clearInterval(heartbeat); clearTimeout(directoryTimer);
+      for (const peer of peers) { send(peer, { type: 'session-ended', code: 'SERVER_SHUTDOWN', message: 'O servidor foi encerrado.' }); peer.ws.terminate(); }
+      await Promise.all([new Promise(resolve => wss.close(resolve)), new Promise(resolve => server.close(resolve))]);
+      rooms.clear(); peers.clear(); attempts.clear();
+    },
+  };
 }
 
-function parseFrames(peer, chunk) {
-  peer.buffer = Buffer.concat([peer.buffer, chunk]);
-  while (peer.buffer.length >= 2) {
-    const first = peer.buffer[0];
-    const opcode = first & 15;
-    const masked = (peer.buffer[1] & 128) !== 0;
-    let length = peer.buffer[1] & 127;
-    let offset = 2;
-    if (length === 126) {
-      if (peer.buffer.length < 4) return;
-      length = peer.buffer.readUInt16BE(2); offset = 4;
-    } else if (length === 127) {
-      if (peer.buffer.length < 10) return;
-      const longLength = peer.buffer.readBigUInt64BE(2);
-      if (longLength > 1024n * 1024n) return peer.socket.destroy();
-      length = Number(longLength); offset = 10;
-    }
-    const maskBytes = masked ? 4 : 0;
-    if (peer.buffer.length < offset + maskBytes + length) return;
-    const mask = masked ? peer.buffer.subarray(offset, offset + 4) : null;
-    offset += maskBytes;
-    const payload = Buffer.from(peer.buffer.subarray(offset, offset + length));
-    peer.buffer = peer.buffer.subarray(offset + length);
-    if (mask) for (let index = 0; index < payload.length; index++) payload[index] ^= mask[index & 3];
-    if (opcode === 8) { peer.socket.end(Buffer.from([0x88, 0x00])); removePeer(peer); return; }
-    if (opcode === 9) { peer.socket.write(Buffer.from([0x8a, 0x00])); continue; }
-    if (opcode !== 1) continue;
-    try { receive(peer, JSON.parse(payload.toString('utf8'))); }
-    catch { fail(peer, 'Mensagem inválida.'); }
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  try {
+    const app = createCoopServer(readConfig());
+    await app.listen();
+    console.log('SUBURBAN coop server listening on', app.server.address());
+    for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { void app.close().then(() => process.exit(0)); });
+  } catch (error) {
+    console.error('Falha ao iniciar o servidor coop:', error.message);
+    process.exitCode = 1;
   }
 }
-
-const server = createServer((request, response) => {
-  if (request.url === '/health') {
-    response.writeHead(200, { 'content-type': 'application/json', 'access-control-allow-origin': '*' });
-    response.end(JSON.stringify({ ok: true, rooms: rooms.size, players: peers.size }));
-    return;
-  }
-  response.writeHead(200, { 'content-type': 'text/plain; charset=utf-8', 'access-control-allow-origin': '*' });
-  response.end('SUBURBAN coop server is running. WebSocket endpoint: /coop');
-});
-
-server.on('upgrade', (request, socket) => {
-  const key = request.headers['sec-websocket-key'];
-  if (request.url?.split('?')[0] !== '/coop' || typeof key !== 'string') return socket.destroy();
-  const accept = createHash('sha1').update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64');
-  socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
-  const peer = { socket, buffer: Buffer.alloc(0), closed: false, room: null };
-  peers.add(peer);
-  socket.on('data', chunk => parseFrames(peer, chunk));
-  socket.on('close', () => removePeer(peer));
-  socket.on('error', () => removePeer(peer));
-});
-
-server.listen(PORT, HOST, () => console.log(`SUBURBAN coop server listening on http://${HOST}:${PORT}`));

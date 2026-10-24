@@ -49,9 +49,16 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
     instruction: 'Mobilidade: recolha o cone com E e leve até a caixa de cones. Use E junto à caixa para guardar.' },
 ];
 
+ORLA_EVENT_DEFINITIONS.push({ id: 'roadside-breakdown', title: 'Carro parado · faixa bloqueada', atMs: 225_000, warningMs: 0,
+  teams: [], position: { x: 10, z: 8.2 }, steps: [1001, 1002],
+  warning: 'Um carro enguiçou na avenida e está bloqueando uma faixa. Analista: consulte a lista telefônica e chame um guincho.',
+  instruction: 'Analista: abra a lista telefônica e ligue para o Guincho Rota Verde. Acompanhe o reboque até a faixa ser liberada.' });
+
 export const ORLA_EVENTS: readonly OrlaEvent[] = ORLA_EVENT_DEFINITIONS.sort((a, b) => a.atMs - b.atMs);
 
 export const ORLA_EVENT_STEPS: Record<number, { icon: string; label: string }> = {
+  1001: { icon: '☎', label: 'Analista: chamar o guincho' },
+  1002: { icon: '↗', label: 'Guincho: liberar a faixa' },
   101: { icon: '💡', label: 'Infra: reparar poste' },
   201: { icon: '🚶', label: 'Mob: 3 e aguardar travessia' },
   202: { icon: '▶', label: 'Mob: 1 para liberar fluxo' },

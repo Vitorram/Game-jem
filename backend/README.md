@@ -1,35 +1,103 @@
-# SUBURBAN Coop Server
+# Servidor cooperativo SUBURBAN
 
-Servidor de salas em tempo real para o modo cooperativo (3 pessoas, uma por papel). Não precisa instalar dependências adicionais; usa Node.js e WebSocket nativos.
+Backend Node.js (22/24) com HTTP e WebSocket via `ws`. Os estados das salas vivem em memória dentro de um único processo. O frontend Next.js não contém rotas de API nem banco de dados.
 
-## Desenvolvimento na mesma máquina
+## Executar
 
-Em um terminal, na raiz do projeto:
+Na raiz do projeto:
 
-```bash
+```sh
+npm ci
 npm run coop:server
 ```
 
-Em outro terminal:
+Em outro terminal, `npm run dev`. Abra `http://localhost:3000/coop`.
+O Node executado diretamente **não carrega .env automaticamente**. Exporte as variáveis no terminal ou use `node --env-file=.env.local backend/server.mjs` com um arquivo que exista. O Next carrega suas próprias variáveis .env.
 
-```bash
-npm run dev
+Para testar entre computadores da mesma rede, inicie o frontend com `npm run dev -- --hostname 0.0.0.0` e acesse pelo IP do host. Sem `NEXT_PUBLIC_COOP_SERVER_URL`, o navegador HTTP usa o hostname da página na porta 3001. Uma configuração explícita com localhost só funciona na própria máquina; remova-a ou troque pelo IP do host. Libere as portas necessárias no firewall.
+
+## Fluxo e regras
+
+- Criar sala gera código de oito caracteres. Salas podem ser públicas ou acessíveis somente pelo código; apenas a anfitriã muda a visibilidade.
+- A lista pública mostra apenas lobbies públicos com vagas. Atualizações são enviadas pelo servidor aos navegadores que solicitaram a lista.
+- Cada sala tem exatamente três papéis diferentes. Escolher um papel ocupado retorna erro; o servidor não troca a personagem silenciosamente.
+- Só a anfitriã inicia, com três pessoas prontas. Cada conexão confirma seu próprio prólogo antes do tutorial. O relógio é liberado quando as três confirmam o tutorial.
+- A pausa pertence à sala. Qualquer participante pode pausar/retomar, preservando o comportamento anterior. Movimento transitório em trânsito durante a pausa é descartado; ações recebem erro.
+- A saída de uma pessoa no lobby libera sua vaga e transfere a anfitriã. Após o início, encerra a sessão para as demais com uma mensagem explícita: não há snapshot completo que permita substituir a pessoa ou restaurar a partida com segurança.
+- Recarregar a página exige entrar novamente. O cliente não apresenta os dados antigos de sessionStorage como uma conexão recuperada.
+- Reiniciar o processo encerra todas as salas. Não há persistência.
+
+## API HTTP
+
+Respostas JSON com cache desabilitado; sem cabeçalhos CORS globais.
+
+| Rota | Resultado |
+| --- | --- |
+| GET /health (HEAD também) | 200, saúde e contagem de salas, pessoas em sala e conexões |
+| /health ou /coop com outro método | 405 e Allow |
+| GET /coop sem upgrade | 426 |
+| Rota inexistente | 404 |
+| Upgrade WebSocket /coop | 101 quando handshake, origem e limites são válidos |
+
+Os erros HTTP têm `{ error: { code, message } }`.
+A saúde não exige login; não devolve nomes, códigos privados nem segredos.
+
+## Protocolo WebSocket
+
+Comandos JSON: `create-room`, `join`, `join-open`, `list-rooms`, `leave`, `ready`, `set-public`, `start`, `tutorial-open`, `tutorial-ready`, `pause`, `move`, `action`.
+
+Os comandos de controle enviados pelo cliente incluem `requestId`. O servidor responde `ack` ou `error` com o mesmo identificador, além dos eventos de estado. Os últimos 128 resultados de cada conexão são deduplicados; reutilizar um ID com outro conteúdo retorna REQUEST_CONFLICT. Não há retentativa automática de mutações após timeout. O cliente encerra a conexão se uma confirmação não chega em oito segundos, pois o resultado seria incerto.
+
+Erros incluem `code` estável e `message` legível: INVALID_MESSAGE, INVALID_JSON, UNKNOWN_COMMAND, NOT_IN_ROOM, FORBIDDEN, ROOM_NOT_FOUND, ROOM_FULL, ROLE_TAKEN, ALREADY_JOINED, INVALID_PHASE, TEAM_INCOMPLETE, TEAM_NOT_READY, INTRO_REQUIRED, GAME_PAUSED, RATE_LIMITED, SERVER_FULL, REQUEST_CONFLICT, INTERNAL_ERROR.
+
+Campos desconhecidos, coerções de booleanos, nomes vazios/longos, papéis inválidos, ações desconhecidas, coordenadas não finitas e eixos fora de intervalo são rejeitados antes de alterar estado. Erros inesperados são registrados no servidor e recebem mensagem pública sem detalhes internos.
+
+## Identidade e permissões
+
+O jogo usa participantes convidados, sem cadastro, senha, JWT ou cookies de autenticação. A conexão recebe UUID aleatório; o servidor vincula a ela sala e papel. Campos enviados pelo navegador não podem trocar essa identidade.
+
+| Papel | Ações de jogo permitidas |
+| --- | --- |
+| Analista | interação, seleção/análise, acionamento de equipe, arquivo e guincho |
+| Mobilidade | interação e habilidades Digit1–Digit4 |
+| Infraestrutura | interação e conclusão de reparo |
+
+Apenas integrantes podem agir numa sala; somente a anfitriã inicia/muda visibilidade. IDs públicos de jogadores não autenticam ninguém. O código privado é um convite, não uma conta autenticada.
+
+## Transporte e limites
+
+- `ws` valida handshake, máscara, UTF-8, fragmentação e controles do protocolo.
+- Mensagens de texto limitadas a 16 KiB; binários recusados. Compressão desabilitada.
+- Máximo de 512 KiB de saída pendente por conexão; consumidores lentos são desconectados.
+- Limite total por conexão: 120 mensagens/s, com rajada de 240. Controle do lobby: 5/s, rajada de 30.
+- Até 60 tentativas de conexão por minuto por IP. Contagem utiliza o IP do socket, sem confiar em X-Forwarded-For.
+- Heartbeat a cada 30 s remove conexões sem pong. Conexões sem sala expiram após cinco minutos sem comandos.
+- Atualizações da lista são agrupadas em janelas de 50 ms e enviadas somente aos interessados.
+
+Configurações: COOP_HOST (0.0.0.0), COOP_PORT (3001), COOP_MAX_CONNECTIONS (256), COOP_MAX_CONNECTIONS_PER_IP (32), COOP_MAX_ROOMS (128), COOP_ALLOWED_ORIGINS (origens exatas separadas por vírgula).
+
+## Produção
+
+Use TLS e proxy que suporte WebSocket. Configure NEXT_PUBLIC_COOP_SERVER_URL com o endereço **público** wss; essa variável vai para o bundle e nunca deve conter segredos.
+
+Com NODE_ENV=production, COOP_ALLOWED_ORIGINS é obrigatório e conexões sem Origin ou fora da lista são recusadas. Em desenvolvimento, sem lista explícita, origens HTTP(S) precisam ter o mesmo hostname do backend (a porta pode ser diferente); clientes sem Origin são permitidos. Origin é proteção de navegador, não autenticação de identidade.
+
+Atrás de proxy, conexões podem compartilhar o mesmo IP de origem para os limites. Ajuste o limite e aplique rate limit por IP real no proxy; não habilite confiança irrestrita em cabeçalhos encaminhados.
+
+## Validação
+
+```sh
+npm run test:coop
+node --test --test-name-pattern="coop:" tests/scenes.cjs
+npm test
+npm run typecheck
+npm run build
 ```
 
-Abra `http://localhost:3000/coop` em três abas, crie uma sala na primeira e entre com o código nas outras. Cada participante fica com um papel diferente. Todas marcam **Estou pronta**; a anfitriã inicia. O prólogo ocorre em cada tela, e o tutorial apresenta as tarefas do papel de cada pessoa. A contagem, chamados e movimentação só começam quando todas confirmarem que estão prontas no tutorial.
+O repositório não possui script/configuração de lint. Os testes de coop usam portas locais efêmeras e encerram os próprios servidores; não precisam do servidor de desenvolvimento nem alteram salas reais.
 
-## Conectar computadores na mesma rede
+## Limites que permanecem
 
-1. Descubra o endereço IP local do computador que vai hospedar o jogo.
-2. Inicie o Next para aceitar conexões da rede: `npm run dev -- --hostname 0.0.0.0`.
-3. Inicie o coop server com `COOP_HOST=0.0.0.0` e libere as portas 3000 e 3001 no firewall local.
-4. Nas outras máquinas, configure `NEXT_PUBLIC_COOP_SERVER_URL=ws://IP-DO-HOST:3001/coop` antes de iniciar o Next. A variável é incorporada na build, então precisa ser definida antes de `npm run dev`/`npm run build`.
-5. Abra `http://IP-DO-HOST:3000/coop` em cada máquina.
+O servidor é autoritativo sobre sala, identidade, autorização e progressão do início; não sobre a simulação Three.js. Física, ocorrências, progresso de puzzles e placar ainda são calculados nos navegadores. Validação de tipo/papel não prova que um reparo foi resolvido nem elimina divergências de relógio/física ou trapaça de clientes modificados. Uma simulação autoritativa exige outra etapa arquitetural, com snapshots e comandos de domínio compartilhados.
 
-No PowerShell, pode iniciar o servidor com `$env:COOP_HOST='0.0.0.0'; npm run coop:server`. Para o Next, use `$env:NEXT_PUBLIC_COOP_SERVER_URL='ws://IP-DO-HOST:3001/coop'; npm run dev -- --hostname 0.0.0.0`.
-
-Para uma implantação pública, publique o servidor atrás de um proxy TLS que encaminhe WebSocket `/coop` para a porta 3001 e configure o cliente com `wss://SEU-DOMINIO/coop`. O servidor mantém salas em memória; reiniciá-lo encerra as salas. O endpoint `/health` informa se está ativo.
-
-## Estado sincronizado
-
-O servidor coordena salas, papéis, prontidão, início e o bloqueio conjunto do tutorial, e transmite posições/ações entre participantes. A simulação 3D e o relógio continuam rodando nos navegadores; o servidor não é autoritativo nem persiste partidas. Este MVP destina-se a sessões pequenas e confiáveis (LAN ou servidor próprio); não inclui matchmaking público, reconexão após atualizar a página ou proteção contra clientes modificados.
+Não há contas, matchmaking entre processos, reconexão de partida, armazenamento persistente nem recuperação após reinício. Não distribua salas entre réplicas independentes sem coordenação de estado.

@@ -1,37 +1,121 @@
-.page { min-height: 100svh; display: grid; place-items: center; padding: 28px; background: radial-gradient(ellipse at 75% 15%, #176080 0, transparent 42%), #061b31; color: #f8f2df; font-family: Arial, sans-serif; }
-.card { width: min(100%, 670px); padding: clamp(24px, 6vw, 54px); border: 1px solid #3b6d88; border-radius: 24px; background: linear-gradient(145deg, #10375a, #071d36 75%); box-shadow: 0 28px 70px #020e1fcc; }
-.back { color: #b7d8e7; text-decoration: none; font-size: 14px; }
-.kicker { display: block; margin-top: 28px; color: #73d8f2; font-weight: 800; font-size: 11px; letter-spacing: .16em; }
-.card h1 { font-size: clamp(38px, 8vw, 65px); line-height: .98; letter-spacing: -.05em; margin: 15px 0; }
-.card h1 em { font-style: normal; color: #f3bd4e; }
-.lead { max-width: 530px; color: #c1d6df; line-height: 1.55; margin: 0 0 28px; }
-.form { display: grid; gap: 16px; }
-.form label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; }
-.form small { font-weight: 400; color: #a9c4d2; }
-.form input, .form select { width: 100%; padding: 13px 14px; border: 1px solid #43718a; border-radius: 10px; background: #07182b; color: #fff; font-size: 16px; outline: none; }
-.form input:focus, .form select:focus { border-color: #7addf4; box-shadow: 0 0 0 3px #7addf433; }
-.roleDescription { padding: 12px 14px; background: #ffffff0b; border-radius: 9px; color: #bed2dd; font-size: 13px; }
-.primary, .secondary { min-height: 48px; border: 0; border-radius: 10px; padding: 12px 17px; font-size: 14px; font-weight: 800; cursor: pointer; }
-.primary { background: #0e96c9; color: white; }
-.primary:disabled { opacity: .48; cursor: not-allowed; }
-.secondary { border: 1px solid #f0bd50; background: #f0bd50; color: #09223a; }
-.lobby { display: grid; gap: 18px; }
-.roomCode { display: grid; justify-items: center; gap: 5px; padding: 20px; border: 1px dashed #61bed6; border-radius: 14px; background: #0a2744; }
-.roomCode small { color: #9fc4d3; font-size: 10px; letter-spacing: .15em; }
-.roomCode b { color: #f5c65e; font-size: 34px; letter-spacing: .18em; }
-.roomCode span, .empty { color: #b8ced9; font-size: 12px; }
-.players { display: grid; gap: 9px; }
-.player { display: flex; align-items: center; gap: 12px; padding: 11px; border-radius: 12px; background: #ffffff0a; }
-.avatar { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 50%; background: #0e94c5; color: white; font-weight: 900; }
-.player div { display: grid; gap: 4px; flex: 1; }
-.player b { font-size: 14px; }
-.player small { color: #abc5d1; }
-.ready, .waiting { font-size: 11px; font-weight: 800; }
-.ready { color: #7de0aa; }
-.waiting { color: #f1c259; }
-.empty { text-align: center; padding: 8px; }
-.lobbyActions { display: grid; grid-template-columns: 1fr 1.25fr; gap: 10px; align-items: center; }
-.lobbyActions p { grid-column: 1 / -1; color: #adc4d1; text-align: center; font-size: 13px; }
-.error { padding: 12px; border-radius: 9px; color: #ffd8cc; background: #8a2e29; }
-.footer { margin-top: 25px; color: #90abba; font-size: 11px; line-height: 1.5; }
-@media (max-width: 520px) { .lobbyActions { grid-template-columns: 1fr; } .roomCode b { font-size: 28px; } }
+.page { min-height: 100svh; display: grid; place-items: center; padding: 28px; background: radial-gradient(ellipse at 72% 12%, #176080 0, transparent 42%), #061b31; color: #263f45; font-family: Arial, sans-serif; }
+.card { width: min(100%, 760px); padding: clamp(22px, 4.5vw, 38px); border: 3px solid #172e39; border-radius: 20px; background: linear-gradient(180deg,#f2bd58 0 9px,#fff1cf 9px 100%); box-shadow: 0 7px 0 #0b202b,0 22px 60px #0008,inset 0 0 0 2px #fff9; }
+.back { color: #53665e; text-decoration: none; font-size: 13px; font-weight: 900; }
+.back:hover { color: #a66d22; }
+.kicker { display: block; margin-top: 17px; color: #8d6c36; font-weight: 900; font-size: 10px; letter-spacing: .16em; }
+.connectionStatus { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: #68766d; font-size: 10px; font-weight: 700; }
+.connectionStatus i { width: 7px; height: 7px; border-radius: 50%; background: #9a7042; }
+.connectionStatus[data-state="connected"] i { background: #34724c; }
+.connectionStatus[data-state="connecting"] i { background: #d99027; }
+.listError { display: grid; gap: 8px; padding: 14px; border: 1px solid #b57360; border-radius: 10px; background: #ffede0; color: #682e27; font-size: 12px; }
+.card button:disabled { cursor: not-allowed; opacity: .55; }
+.card button:focus-visible { outline: 3px solid #a66d22; outline-offset: 3px; }
+.card h1 { font-size: clamp(36px, 7vw, 58px); line-height: .98; letter-spacing: -.05em; margin: 11px 0; }
+.card h1 em { font-style: normal; color: #d99027; }
+.lead { max-width: 620px; color: #53665e; line-height: 1.5; margin: 0 0 20px; }
+.setup { display: grid; gap: 15px; }
+.nameField, .codeForm label { display: grid; gap: 7px; font-size: 13px; font-weight: 900; }
+.nameField input, .codeForm input { width: 100%; min-height: 45px; padding: 10px 13px; border: 2px solid #263f45; border-radius: 9px; background: #fff9e9; color: #263f45; font-size: 16px; outline: none; box-shadow: inset 0 2px 4px #263f4514; }
+.nameField input:focus, .codeForm input:focus { border-color: #d99027; box-shadow: 0 0 0 3px #f2bd5866; }
+.rolePicker { display: grid; gap: 9px; min-width: 0; }
+.rolePickerHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: #263f45; font-size: 13px; }
+.rolePickerHeading small { color: #68766d; font-size: 10px; font-weight: 600; text-align: right; }
+.roleCards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
+.roleCard { position: relative; display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 146px; overflow: hidden; padding: 0 14px 0 0; border: 2px solid #263f45; border-radius: 12px; background: #fff9e9; color: #263f45; text-align: left; cursor: pointer; transition: transform .16s ease, border-color .16s ease, box-shadow .16s ease, background .16s ease; box-shadow: 0 4px 0 #263f4530; }
+.roleCard:hover { transform: translateY(-2px); border-color: #d99027; }
+.roleCard:focus-visible { outline: 3px solid #d99027; outline-offset: 3px; }
+.roleCardSelected { border: 3px solid #d99027; background: #fff8e6; box-shadow: 0 4px 0 #a07838, 0 0 0 2px #f2bd5866; }
+.rolePortrait { position: relative; display: block; width: 112px; height: 142px; overflow: hidden; align-self: stretch; background: #e9bd71; }
+.rolePortraitImage { object-fit: cover; object-position: 50% 22%; }
+.roleCopy { display: grid; align-content: center; gap: 6px; min-width: 0; padding: 12px 0; }
+.roleCopy small { color: #94713a; font-size: 8px; font-weight: 900; letter-spacing: .11em; line-height: 1.2; }
+.roleCopy b { color: #263f45; font-size: 19px; line-height: 1.1; }
+.roleCopy > span { max-width: 390px; color: #53665e; font-size: 12px; font-weight: 600; line-height: 1.4; }
+.roleSelectMark { min-width: 76px; padding: 8px 10px; border: 2px solid #a07838; border-radius: 8px; background: #fff1cf; color: #775220; font-size: 10px; font-weight: 900; text-align: center; }
+.roleCardSelected .roleSelectMark { border-color: #203941; background: #edb94e; color: #233d44; }
+.entryChoices { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 9px; margin-top: 15px; }
+.primary, .secondary, .choiceButton, .joinButton { min-height: 48px; border: 3px solid #203941; border-radius: 9px; padding: 9px 13px; font-size: 13px; font-weight: 900; cursor: pointer; box-shadow: 0 4px 0 #a07838; }
+.primary { display: grid; align-content: center; gap: 3px; background: #edb94e; color: #233d44; text-align: left; }
+.primary span { color: #53665e; font-size: 10px; font-weight: 700; }
+.primary:hover:not(:disabled) { background: #f6c960; transform: translateY(-1px); }
+.primary:disabled, .joinButton:disabled { opacity: .48; cursor: not-allowed; }
+.choiceButton { display: grid; align-content: center; gap: 4px; background: #fff8e6; color: #233d44; text-align: left; }
+.choiceButton span { color: #68766d; font-size: 10px; font-weight: 600; line-height: 1.3; }
+.choiceButton:hover, .secondary:hover, .joinButton:hover:not(:disabled) { background: #fff0c9; }
+.browser, .codeForm { display: grid; gap: 12px; margin-top: 15px; padding: 15px; border: 2px solid #d9c99f; border-radius: 12px; background: #fff8e6; }
+.browserHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.browserHeading > div, .roomTopline > div { display: grid; gap: 4px; }
+.browserHeading small, .roomTopline small { color: #94713a; font-size: 8px; font-weight: 900; letter-spacing: .12em; }
+.browserHeading h2, .roomTopline h2 { margin: 0; color: #263f45; font-size: 20px; }
+.textButton { border: 0; padding: 7px; background: transparent; color: #8a5d1f; font-size: 11px; font-weight: 900; cursor: pointer; }
+.textButton:hover { color: #263f45; text-decoration: underline; }
+.openRooms { display: grid; gap: 8px; }
+.openRoom { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #d9c99f; border-radius: 10px; background: #fffdf5; }
+.openRoomPortraits { display: flex; padding-left: 4px; }
+.openRoomAvatar { width: 36px; height: 36px; margin-left: -4px; border: 2px solid #fff8e6; border-radius: 50%; object-fit: cover; object-position: center 22%; }
+.openRoomInfo { display: grid; gap: 3px; min-width: 0; }
+.openRoomInfo b { overflow: hidden; color: #263f45; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.openRoomInfo span { color: #53665e; font-size: 10px; font-weight: 800; }
+.openRoomInfo small { overflow: hidden; color: #94713a; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.joinButton { min-height: 38px; padding: 6px 12px; background: #edb94e; color: #233d44; }
+.emptyRooms { display: grid; justify-items: center; gap: 5px; padding: 22px 10px; color: #263f45; text-align: center; }
+.emptyRooms span { color: #68766d; font-size: 11px; }
+.codeForm { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+.codeForm .primary { min-width: 150px; }
+.lobby { display: grid; gap: 12px; margin-top: 16px; }
+.roomTopline { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.roomTopline h2 { font-size: clamp(19px, 4vw, 25px); }
+.roomCode { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 15px; border: 2px dashed #a07838; border-radius: 12px; background: #fff8e6; }
+.roomCode > div { display: grid; gap: 3px; }
+.roomCode small { color: #8d6c36; font-size: 8px; letter-spacing: .15em; font-weight: 900; }
+.roomCode b { color: #a66d22; font-size: 28px; letter-spacing: .16em; }
+.roomCode span { color: #53665e; font-size: 10px; }
+.secondary { background: #fffdf5; color: #233d44; }
+.visibilityRow { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 22px; }
+.publicBadge, .privateBadge { padding: 5px 8px; border-radius: 99px; font-size: 8px; font-weight: 900; letter-spacing: .1em; }
+.publicBadge { background: #d7ebc7; color: #315b3c; }
+.privateBadge { background: #e6e1d4; color: #5e594e; }
+.players { display: grid; gap: 7px; }
+.playerSlot { display: flex; align-items: center; gap: 11px; min-height: 70px; padding: 7px 11px; border: 1px solid #d9c99f; border-radius: 10px; background: #fff8e6; }
+.playerSlotEmpty { border-style: dashed; background: #fffdf5; }
+.avatar { position: relative; flex: 0 0 52px; width: 52px; height: 52px; overflow: hidden; border: 2px solid #d9b65f; border-radius: 9px; background: #f9eed4; }
+.avatarImage { object-fit: cover; object-position: center 22%; }
+.playerSlot > div { display: grid; flex: 1; gap: 3px; min-width: 0; }
+.playerSlot > div small { color: #94713a; font-size: 7px; font-weight: 900; letter-spacing: .08em; }
+.playerSlot > div b { color: #263f45; font-size: 13px; }
+.playerSlot > div span { color: #68766d; font-size: 10px; }
+.ready, .waiting { font-size: 10px; font-weight: 900; white-space: nowrap; }
+.ready { color: #34724c; }
+.waiting { color: #a66d22; }
+.lobbyActions { display: grid; grid-template-columns: 1fr 1.2fr; gap: 9px; align-items: center; }
+.lobbyActions p { grid-column: 1 / -1; margin: 0; color: #68766d; text-align: center; font-size: 11px; }
+.error { margin: 12px 0 0; padding: 10px 12px; border: 2px solid #9a3e34; border-radius: 9px; color: #682e27; background: #f9d9c7; font-size: 12px; }
+.footer { margin-top: 17px; color: #68766d; font-size: 10px; line-height: 1.5; }
+@media (max-width: 600px) {
+  .page { place-items: start center; padding: 14px; }
+  .card { padding: 22px 16px; border-radius: 17px; }
+  .roleCard { grid-template-columns: 88px minmax(0, 1fr); gap: 11px; min-height: 116px; padding-right: 9px; }
+  .rolePortrait { width: 88px; height: 112px; }
+  .roleCopy { gap: 4px; padding: 8px 0; }
+  .roleCopy small { font-size: 7px; }
+  .roleCopy b { font-size: 16px; }
+  .roleCopy > span { font-size: 10px; }
+  .roleSelectMark { display: none; }
+  .entryChoices { grid-template-columns: 1fr; }
+  .entryChoices > button { min-height: 46px; }
+  .entryChoices .primary { min-height: 54px; }
+}
+@media (max-width: 420px) {
+  .roomCode { align-items: flex-start; flex-direction: column; }
+  .roomCode .secondary { width: 100%; }
+  .codeForm { grid-template-columns: 1fr; }
+  .codeForm .primary { min-width: 0; }
+  .openRoom { grid-template-columns: 59px minmax(0, 1fr) auto; gap: 7px; padding: 8px; }
+  .openRoomPortraits { max-width: 59px; }
+  .openRoomAvatar { width: 30px; height: 30px; }
+  .joinButton { padding: 5px 8px; font-size: 11px; }
+  .roomTopline h2 { font-size: 18px; }
+  .playerSlot { gap: 8px; padding: 7px; }
+  .avatar { flex-basis: 45px; width: 45px; height: 50px; }
+  .ready, .waiting { font-size: 9px; }
+}
