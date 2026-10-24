@@ -535,3 +535,79 @@ test('fluxo intenso: pressionar 4 novamente não desfaz o desvio nem reinicia os
     assert.equal(problem('rush-hour').status,'RESOLVED');
   } finally { game.scene.dispose(); }
 });
+
+test('fluxo intenso: sem marca no asfalto nem pedido de cone, e o 4 vale fora da pista', () => {
+  const game = phase();
+  try {
+    skipTo(game, 'rush-hour'); dispatch(game, 'rush-hour');
+    assert.equal(game.scene.phase.markers.has('rush-hour'), false);
+    game.scene.selectPlayer(2);
+    const crate = game.scene.map.cellCenter(11, 5);
+    game.scene.player.setPosition(crate.x - 2, crate.z);
+    const guidance = game.scene.phase.guidance(game.scene.player);
+    assert.equal(guidance.target, null, 'a missão não aponta para um lugar da pista');
+    assert.doesNotMatch(guidance.prompt ?? '', /CONE/);
+    assert.equal(game.scene.useMobilityHotkey('Digit4'), true);
+    assert.equal(game.scene.traffic.isElectricDiversionActive(), true);
+    game.run(9);
+    assert.equal(problem('rush-hour').status, 'RESOLVED');
+  } finally { game.scene.dispose(); }
+});
+
+test('entregador: a via reabre assim que a faixa fica livre e ele segue caminho pela calçada', () => {
+  const game = phase();
+  try {
+    skipTo(game, 'cyclist-assist');
+    dispatch(game, 'cyclist-assist');
+    game.scene.selectPlayer(2);
+    game.scene.player.setPosition(0, 4.7);
+    game.scene.useMobilityHotkey('Digit3');
+    const mobility = game.scene.phase.pedestrians;
+    for (let i = 0; i < 400 && mobility.getWorkerRescueState() !== 'safe'; i++) game.run(.1);
+    assert.equal(mobility.getWorkerRescueState(), 'safe');
+    let waited = 0;
+    while (problem('cyclist-assist').status !== 'RESOLVED' && waited < 12) {
+      game.scene.useMobilityHotkey('Digit1');
+      if (problem('cyclist-assist').status === 'RESOLVED') break;
+      game.run(.5); waited += .5;
+    }
+    assert.equal(problem('cyclist-assist').status, 'RESOLVED', 'a via não deve esperar todos os pedestres do mapa');
+    assert.ok(waited < 12, `liberação demorou ${waited}s`);
+    const before = mobility.getWorkerRescuePosition();
+    game.run(6);
+    const after = mobility.getWorkerRescuePosition();
+    assert.ok(after && after.x > before.x + 1, 'o entregador se levanta e vai embora');
+    game.run(40);
+    assert.equal(mobility.getWorkerRescueState(), 'absent');
+  } finally { game.scene.dispose(); }
+});
+
+test('entregador seguro não desaparece enquanto a Mobilidade não reabre a via', () => {
+  const game = phase();
+  try {
+    skipTo(game, 'cyclist-assist');
+    dispatch(game, 'cyclist-assist');
+    game.scene.selectPlayer(2);
+    game.scene.player.setPosition(0, 4.7);
+    game.scene.useMobilityHotkey('Digit3');
+    for (let i = 0; i < 400 && game.scene.phase.pedestrians.getWorkerRescueState() !== 'safe'; i++) game.run(.1);
+    game.run(45);
+    assert.equal(game.scene.phase.pedestrians.getWorkerRescueState(), 'safe');
+    game.scene.useMobilityHotkey('Digit1');
+    assert.equal(problem('cyclist-assist').status, 'RESOLVED');
+  } finally { game.scene.dispose(); }
+});
+
+test('carro enguiçado não pede cone à Mobilidade', () => {
+  const game = phase();
+  try {
+    skipTo(game, 'roadside-breakdown');
+    game.scene.selectPlayer(2);
+    game.scene.items.give(2, 'cone');
+    const target = game.scene.traffic.getIncidentConeTarget();
+    game.scene.player.setPosition(target.x, target.z);
+    assert.notEqual(game.scene.phase.guidance(game.scene.player).prompt, 'COLOCAR CONE ANTES DO VEÍCULO');
+    game.scene.interact();
+    assert.equal(game.scene.items.heldBy(2), 'cone', 'o cone não é largado na pista');
+  } finally { game.scene.dispose(); }
+});

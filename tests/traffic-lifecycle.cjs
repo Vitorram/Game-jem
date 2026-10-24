@@ -201,3 +201,69 @@ test('simulação prolongada com deltas irregulares não perde progresso nem ent
     assert.ok(mobility.entities.every(entity => Number.isFinite(entity.lastProgressSecondsAgo)));
   } finally { w.dispose(); }
 });
+
+test('interdição retém os carros antes do ponto bloqueado, não onde estavam na pista', () => {
+  const w = world();
+  try {
+    w.traffic.setPlayerPosition({ x: 6, z: 3 });
+    const lane = w.traffic.lanes.find(item => item.id === 'orla-eastbound');
+    const vehicle = w.traffic.vehicles.find(item => item.lane === lane);
+    vehicle.mesh.position.x = -12;
+    vehicle.speed = vehicle.maxSpeed;
+    w.traffic.applyMobilityAction(lane.id, 'block');
+    simulate(w, 14);
+    assert.ok(w.traffic.vehicles.includes(vehicle));
+    assert.ok(vehicle.mesh.position.x > 0, `o carro devia avançar até a interdição, parou em x=${vehicle.mesh.position.x.toFixed(2)}`);
+    assert.ok(vehicle.mesh.position.x < 6, 'e parar antes do ponto bloqueado');
+  } finally { w.dispose(); }
+});
+
+test('desvio com o carregador quebrado tira os elétricos da faixa verde em vez de seguirem nela', () => {
+  const w = world();
+  try {
+    w.traffic.setScheduledDemand(.6);
+    simulate(w, 20);
+    w.traffic.setElectricChargerBroken(true);
+    simulate(w, 30);
+    const charger = w.traffic.getElectricChargerPosition();
+    w.traffic.applyMobilityAction('orla-green', 'electricDetour');
+    let passedBrokenCharger = false;
+    simulate(w, 25, [.05], () => {
+      passedBrokenCharger ||= w.traffic.vehicles.some(vehicle => vehicle.lane.type === 'GREEN'
+        && Math.abs(vehicle.mesh.position.x - charger.x) < .3);
+    });
+    const onMapGreen = w.traffic.vehicles.filter(vehicle => vehicle.lane.type === 'GREEN'
+      && Math.abs(vehicle.mesh.position.x) <= 20);
+    assert.equal(onMapGreen.length, 0, 'elétricos ainda na faixa verde: ' + onMapGreen.map(item => item.mesh.position.x.toFixed(1)));
+    assert.equal(passedBrokenCharger, false, 'ninguém atravessa o carregador quebrado pela faixa verde');
+    assert.deepEqual(w.traffic.getDiagnostics().persistentInvalidBlocks, []);
+  } finally { w.dispose(); }
+});
+
+test('guincho respeita o trânsito, embarca o carro na plataforma e libera a faixa', () => {
+  const w = world();
+  try {
+    w.traffic.setScheduledDemand(.6);
+    simulate(w, 30);
+    w.traffic.startBreakdown();
+    const car = w.traffic.incidentVehicle;
+    simulate(w, 5);
+    assert.equal(w.traffic.callTowTruck(), true);
+    const states = new Set();
+    let overlaps = 0;
+    simulate(w, 85, [.05], () => {
+      states.add(w.traffic.getTowTruckState());
+      const truck = w.traffic.towTruck;
+      if (!truck) return;
+      overlaps += w.traffic.vehicles.filter(other => other !== truck && other !== w.traffic.incidentVehicle
+        && Math.abs(other.mesh.position.z - truck.mesh.position.z) < .56
+        && Math.abs(other.mesh.position.x - truck.mesh.position.x) < 1.35).length;
+      if (w.traffic.getTowTruckState() === 'departing') assert.equal(car.mesh.parent, truck.mesh, 'o carro sai preso ao guincho');
+    });
+    assert.deepEqual([...states].filter(state => state !== 'idle'), ['approaching', 'loading', 'departing', 'completed']);
+    assert.equal(overlaps, 0, 'o guincho não atravessa outros veículos');
+    assert.equal(w.traffic.getIncidentPosition(), null);
+    assert.ok(!w.traffic.vehicles.includes(car));
+    assert.deepEqual(w.traffic.getDiagnostics().persistentInvalidBlocks, []);
+  } finally { w.dispose(); }
+});

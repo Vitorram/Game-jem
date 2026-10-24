@@ -12,7 +12,7 @@ export const ORLA_SESSION_CONFIG = {
   sequential: true,
   orders: ORLA_EVENTS.map(event => ({
     id: event.id, title: event.title, riskIds: event.steps,
-    timeLimitMs: 60_000,
+    timeLimitMs: event.timeLimitMs ?? 60_000,
     basePoints: 100, maxSpeedBonus: 50, expirationPenalty: 200,
   })),
 } as const satisfies SessionConfig;
