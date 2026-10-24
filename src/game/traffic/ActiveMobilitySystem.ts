@@ -11,7 +11,7 @@ import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 type WalkerState = 'approach-cycle' | 'wait-cycle' | 'cross-cycle' | 'approach-road' | 'wait-road' | 'form-road' | 'cross-road' | 'exit';
 type Walker = { id: string; slot: number; roadSlot: number | null; arrived: number; batchIndex: number; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; state: WalkerState; exitDirection: 1 | -1; lastProgressAt: number };
 type Cyclist = { id: string; visual: NpcVisual; mesh: Group; x: number; z: number; speed: number; baseSpeed: number; direction: 1 | -1; lastProgressAt: number; stoppedSince: number | null; stopReason: 'none' | 'crossing' | 'player' | 'cyclist-ahead' };
-type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe'; safeElapsed: number; lastProgressAt: number };
+type InjuredWorker = { visual: NpcVisual; mesh: Group; x: number; z: number; state: 'waiting' | 'crossing' | 'safe' | 'leaving'; safeElapsed: number; lastProgressAt: number };
 export type MobilityDiagnostics = {
   elapsedSeconds: number;
   activeNpcs: number;
@@ -36,7 +36,12 @@ const ROAD_WAIT_SLOTS = ROAD_WAIT_COLUMNS.length * 2;
 const FURNITURE_RELEASE_DISTANCE = 0.9;
 const CYCLIST_YIELD_LOOKAHEAD = 6;
 const CYCLIST_STOP_DISTANCE = 1.05;
-const WORKER_REST_SECONDS = 40;
+const WORKER_CROSSING_SPEED = .6;
+/** Depois de liberada a via, o entregador descansa um instante e segue pela calçada. */
+const WORKER_REST_SECONDS = 2.5;
+const WORKER_LEAVING_SPEED = .9;
+/** Estados de quem ainda vai atravessar (ou está atravessando) a avenida. */
+const ROAD_BOUND_STATES: readonly WalkerState[] = ['approach-road', 'wait-road', 'form-road', 'cross-road'];
 
 /** Travessias independentes para a ciclovia e a avenida, sem semaforos. */
 export class ActiveMobilitySystem {
@@ -94,13 +99,19 @@ export class ActiveMobilitySystem {
 
   setWalkerSpawningPaused(paused: boolean): void { this.walkerSpawningPaused = paused; }
 
-  getCrossingProgress(): { waiting: number; pending: number; crossed: number; occupied: boolean } {
+  /**
+   * `pending` conta todos os pedestres que ainda não saíram; `roadPending`, só quem
+   * já está a caminho da avenida (quem passeia na praia não segura a via).
+   */
+  getCrossingProgress(): { waiting: number; pending: number; roadPending: number; crossed: number; occupied: boolean } {
     return { waiting: this.walkers.filter(walker => walker.state === 'wait-road' || walker.state === 'form-road').length,
       pending: this.walkers.filter(walker => walker.state !== 'exit').length,
+      roadPending: this.walkers.filter(walker => ROAD_BOUND_STATES.includes(walker.state)).length,
       crossed: this.crossedPedestrians, occupied: this.roadBatch.some(walker => walker.state === 'cross-road') };
   }
 
   beginWorkerRescue(): void {
+    if (this.injuredWorker?.state === 'leaving') this.removeInjuredWorker();
     if (this.injuredWorker) return;
     const visual = this.npcModels.createInjuredDeliveryWorker();
     const mesh = visual.mesh;
@@ -116,9 +127,24 @@ export class ActiveMobilitySystem {
     this.traffic.setAssistedCrossingRequested(true);
   }
 
+  /** Via reaberta com o entregador na calçada: ele se levanta e vai embora pela calçada sul. */
+  releaseWorkerRescue(): void {
+    this.workerRescueRequested = false;
+    this.traffic.setAssistedCrossingRequested(false);
+    const worker = this.injuredWorker;
+    if (!worker || worker.state !== 'safe') return;
+    worker.state = 'leaving';
+    worker.safeElapsed = 0;
+  }
+
+  /** Chamado encerrado: quem já está indo embora termina o trajeto; quem não foi resgatado sai de cena. */
   cancelWorkerRescue(): void {
     this.workerRescueRequested = false;
     this.traffic.setAssistedCrossingRequested(false);
+    if (this.injuredWorker?.state !== 'leaving') this.removeInjuredWorker();
+  }
+
+  private removeInjuredWorker(): void {
     if (!this.injuredWorker) return;
     this.group.remove(this.injuredWorker.mesh);
     this.injuredWorker.visual.dispose();
@@ -126,7 +152,8 @@ export class ActiveMobilitySystem {
   }
 
   getWorkerRescueState(): 'absent' | 'waiting' | 'crossing' | 'safe' {
-    return this.injuredWorker?.state ?? 'absent';
+    const state = this.injuredWorker?.state ?? 'absent';
+    return state === 'leaving' ? 'safe' : state;
   }
 
   getWorkerRescuePosition(): { x: number; z: number } | null {
@@ -329,14 +356,22 @@ export class ActiveMobilitySystem {
   private moveInjuredWorker(dt: number): void {
     const worker = this.injuredWorker;
     if (!worker) return;
+    // Na calçada ele espera sentado até a Mobilidade reabrir a via; não some sozinho no meio do chamado.
     if (worker.state === 'safe') {
-      worker.safeElapsed += dt;
       worker.visual.animate(dt, 0);
-      if (worker.safeElapsed >= WORKER_REST_SECONDS) {
-        this.group.remove(worker.mesh);
-        worker.visual.dispose();
-        this.injuredWorker = null;
-      }
+      return;
+    }
+    if (worker.state === 'leaving') {
+      worker.safeElapsed += dt;
+      if (worker.safeElapsed < WORKER_REST_SECONDS) { worker.visual.animate(dt, 0); return; }
+      worker.visual.setSeated?.(false);
+      const step = WORKER_LEAVING_SPEED * dt;
+      worker.x += step;
+      worker.lastProgressAt = this.elapsed;
+      worker.mesh.rotation.y = Math.PI / 2;
+      worker.mesh.position.set(worker.x, 0.036, worker.z);
+      worker.visual.animate(dt, step);
+      if (worker.x > this.maxX + 6) this.removeInjuredWorker();
       return;
     }
     if (worker.state === 'waiting' && this.workerRescueRequested && this.traffic.isPedestrianCrossingClear()) {
@@ -347,7 +382,7 @@ export class ActiveMobilitySystem {
       return;
     }
     const previousZ = worker.z;
-    worker.z = Math.min(this.southWalkZ, worker.z + .48 * dt);
+    worker.z = Math.min(this.southWalkZ, worker.z + WORKER_CROSSING_SPEED * dt);
     const travel = worker.z - previousZ;
     if (travel > .001) worker.lastProgressAt = this.elapsed;
     worker.mesh.position.set(worker.x, worker.z >= this.roadSouthEdgeZ ? 0.036 : SIDEWALK_Y, worker.z);
@@ -621,7 +656,7 @@ export class ActiveMobilitySystem {
     const legitimateWalkerWait = new Set<WalkerState>(['wait-cycle', 'wait-road', 'form-road']);
     const persistentInvalidBlocks = entities.filter(entity => entity.lastProgressSecondsAgo >= 20
       && !(entity.kind === 'pedestrian' && legitimateWalkerWait.has(entity.state as WalkerState))
-      && !(entity.kind === 'injured-worker' && ['waiting', 'safe'].includes(entity.state))
+      && !(entity.kind === 'injured-worker' && ['waiting', 'safe', 'leaving'].includes(entity.state))
       && !(entity.kind === 'cyclist' && ['crossing', 'player', 'cyclist-ahead'].includes(entity.state)))
       .map(entity => `${entity.id}:${entity.state}:${entity.lastProgressSecondsAgo.toFixed(1)}s`);
     return {
@@ -642,11 +677,7 @@ export class ActiveMobilitySystem {
     if (this.disposed) return;
     this.disposed = true;
     this.traffic.setAssistedCrossingRequested(false);
-    if (this.injuredWorker) {
-      this.group.remove(this.injuredWorker.mesh);
-      this.injuredWorker.visual.dispose();
-      this.injuredWorker = null;
-    }
+    this.removeInjuredWorker();
     this.traffic.setPedestrianCrossingState(0, false);
     this.walkers.forEach(walker => walker.visual.dispose());
     this.cyclists.forEach(cyclist => cyclist.visual.dispose());

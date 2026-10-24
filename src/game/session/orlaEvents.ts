@@ -8,6 +8,8 @@ type OrlaEvent = {
   id: string; title: string; atMs: number; warningMs: number;
   teams: ResponseTeam[]; position: { x: number; z: number };
   warning: string; instruction: string; steps: number[];
+  /** Prazo próprio do chamado; o padrão é 60 s. */
+  timeLimitMs?: number;
 };
 
 const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
@@ -49,7 +51,8 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
     instruction: 'Mobilidade: recolha o cone com E e leve até a caixa de cones. Use E junto à caixa para guardar.' },
 ];
 
-ORLA_EVENT_DEFINITIONS.push({ id: 'roadside-breakdown', title: 'Carro parado · faixa bloqueada', atMs: 225_000, warningMs: 0,
+// O guincho dirige no trânsito real (e respeita a faixa de pedestres): o prazo cobre o trajeto.
+ORLA_EVENT_DEFINITIONS.push({ id: 'roadside-breakdown', title: 'Carro parado · faixa bloqueada', atMs: 225_000, warningMs: 0, timeLimitMs: 90_000,
   teams: [], position: { x: 10, z: 8.2 }, steps: [1001, 1002],
   warning: 'Um carro enguiçou na avenida e está bloqueando uma faixa. Analista: consulte a lista telefônica e chame um guincho.',
   instruction: 'Analista: abra a lista telefônica e ligue para o Guincho Rota Verde. Acompanhe o reboque até a faixa ser liberada.' });

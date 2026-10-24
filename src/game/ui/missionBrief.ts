@@ -9,7 +9,7 @@ const steps: Record<number, { team: string; action: string; location: string }> 
   201: { team: 'Mobilidade', action: 'Use 3 junto à faixa e aguarde os pedestres atravessarem. Infraestrutura já pode reparar quando a travessia começar.', location: 'Faixa de pedestres · semáforo' },
   601: { team: 'Infraestrutura', action: 'Use E junto ao semáforo e conclua o reparo. Mantenha a travessia protegida.', location: 'Semáforo da faixa de pedestres' },
   202: { team: 'Mobilidade', action: 'Travessia e reparo concluídos: use 1 junto à faixa para reabrir a via.', location: 'Faixa de pedestres' },
-  301: { team: 'Mobilidade', action: 'Use 4 para desviar os elétricos. Mantenha as vias principais abertas por 8 segundos; use 1 se houver bloqueio.', location: 'Avenida · siga a seta' },
+  301: { team: 'Mobilidade', action: 'Use 4 de qualquer ponto para desviar os elétricos. Mantenha as vias principais abertas por 8 segundos; use 1 se houver bloqueio. Não é preciso cone.', location: 'Qualquer ponto da Orla · sem cone' },
   401: { team: 'Infraestrutura', action: 'Use E junto ao sensor. Permaneça no local e conclua a calibração.', location: 'Sensor · siga a seta' },
   501: { team: 'Mobilidade', action: 'Pegue um cone no baú com E, coloque-o na marca com E e use 2 para bloquear o sentido.', location: 'Baú de cones → acidente · siga a seta' },
   502: { team: 'Infraestrutura', action: 'Área isolada: use E junto aos veículos e conclua o protocolo de segurança.', location: 'Veículos do acidente · siga a seta' },

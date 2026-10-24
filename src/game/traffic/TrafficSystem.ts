@@ -48,6 +48,8 @@ type Vehicle = {
   lastProgressAt: number;
   stoppedSince: number | null;
   stopReason: TrafficStopReason;
+  /** Guincho: participa do trânsito, mas só muda de faixa pela manobra de reboque. */
+  tow?: boolean;
 };
 export type TrafficStopReason = 'none' | 'incident' | 'manual-stop' | 'lane-blocked' | 'crossing'
   | 'cone' | 'vehicle-ahead' | 'charging' | 'player';
@@ -94,6 +96,24 @@ const CROSSING_BRAKE_DISTANCE = 7;
 const KEEP_CLEAR_SPEED = 0.3;
 /** Acima desta velocidade o carro atropela o personagem; abaixo dela é um obstáculo sólido. */
 const PLAYER_COLLISION_SPEED = 0.05;
+/** Quem chega a uma interdição para antes do ponto bloqueado, não onde estiver na pista. */
+const BLOCK_STOP_DISTANCE = CROSSING_RULES.roadConflictHalfWidth + 0.15;
+/** Durante o desvio, o elétrico reduz na faixa verde para abrir espaço e entrar na via comum. */
+const DETOUR_MERGE_SPEED_FACTOR = 0.45;
+const DETOUR_MERGE_AHEAD = 2.8;
+const TOW_SPEED = 2.6;
+/** O guincho entra fora da câmera, logo antes do trecho jogável. */
+const TOW_ENTRY_OFFSET = 5;
+/** Centro do guincho à frente do carro enguiçado: a plataforma traseira fica junto ao para-choque. */
+const TOW_PICKUP_OFFSET = 2.2;
+const TOW_MERGE_CLEARANCE = 2.4;
+const TOW_BED_PIVOT_X = 0.2;
+const TOW_BED_LENGTH = 1.15;
+const TOW_BED_TILT = 0.24;
+/** Posição local do carro já preso sobre a plataforma. */
+const TOW_BED_X = -0.38;
+const TOW_BED_Y = 0.33;
+const TOW_LOAD_SECONDS = 3.2;
 /** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
 
 /** Fluxo viário da Orla: avenidas comuns e faixa verde exclusiva para elétricos. */
@@ -112,7 +132,7 @@ export class TrafficSystem {
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
   private readonly towBeaconGeometry = new BoxGeometry(0.3, 0.1, 0.18);
   private readonly towBeaconMaterial = new MeshStandardMaterial({ color: '#ffb331', emissive: '#f07812', emissiveIntensity: 2.2 });
-  private readonly towBedGeometry = new BoxGeometry(1.05, 0.09, 0.68);
+  private readonly towBedGeometry = new BoxGeometry(TOW_BED_LENGTH, 0.06, 0.62);
   private readonly towBoomGeometry = new BoxGeometry(0.09, 0.38, 0.09);
   private readonly towEquipmentMaterial = new MeshStandardMaterial({ color: '#536f75', roughness: 0.75 });
   private readonly chargerBodyMaterial = new MeshStandardMaterial({ color: '#e6f0e7', roughness: 0.55 });
@@ -165,11 +185,11 @@ export class TrafficSystem {
   private assistedCrossingRequested = false;
   private incidentVehicle: Vehicle | null = null;
   private collisionWarningVehicle: Vehicle | null = null;
-  private towTruck: Group | null = null;
+  private towTruck: Vehicle | null = null;
   private towTruckState: TowTruckState = 'idle';
   private towTruckTimer = 0;
-  private towTruckTargetX = 0;
-  private towTruckDirection: 1 | -1 = 1;
+  /** Distância local (no sentido do guincho) de onde o carro começa a ser puxado. */
+  private towLoadFromX = 0;
   private readonly incidentLights = new Group();
   private incidentTime = 0;
   private trafficRandomSeed = 173;
@@ -452,81 +472,169 @@ export class TrafficSystem {
     return this.getIncidentPosition();
   }
 
+  /**
+   * O guincho vem pela faixa vizinha, ultrapassa o carro enguiçado, entra na faixa
+   * dele logo à frente e puxa o carro para a plataforma antes de sair da avenida.
+   */
   callTowTruck(): boolean {
-    if (!this.incidentVehicle || (this.towTruckState !== 'idle' && this.towTruckState !== 'completed')) return false;
-    const lane = this.incidentVehicle.lane;
-    this.towTruckDirection = lane.direction;
+    const incident = this.incidentVehicle;
+    if (!incident || (this.towTruckState !== 'idle' && this.towTruckState !== 'completed')) return false;
+    if (!this.getTowApproachLane(incident.lane)) return false;
+    this.towTruck = null;
     this.towTruckState = 'approaching';
     this.towTruckTimer = 0;
-    this.towTruckTargetX = this.incidentVehicle.mesh.position.x - lane.direction * 2.35;
-    this.towTruck = this.makeVehicle('truck', '#e5a739');
-    this.towTruck.name = 'orla-tow-truck';
-    const entryX = lane.direction === 1 ? this.roadMinX : this.roadMinX + this.roadSpan;
-    this.towTruck.position.set(entryX, 0.27, lane.z);
-    this.towTruck.rotation.y = lane.direction === 1 ? 0 : Math.PI;
-    const flatbed = new Mesh(this.towBedGeometry, this.towEquipmentMaterial);
-    flatbed.position.set(-0.92, 0.34, 0);
-    flatbed.name = 'tow-flatbed';
-    this.towTruck.add(flatbed);
-    const boom = new Mesh(this.towBoomGeometry, this.towBeaconMaterial);
-    boom.position.set(-1.38, 0.48, 0);
-    boom.rotation.z = -0.48;
-    boom.name = 'tow-boom';
-    this.towTruck.add(boom);
-    const beacon = new Mesh(this.towBeaconGeometry, this.towBeaconMaterial);
-    beacon.position.set(0, 0.72, 0);
-    beacon.name = 'tow-beacon';
-    this.towTruck.add(beacon);
-    this.group.add(this.towTruck);
+    this.trySpawnTowTruck();
     return true;
   }
 
   getTowTruckState(): TowTruckState { return this.towTruckState; }
 
   clearBreakdown(): void {
-    this.removeTowTruck();
+    // Já carregado, o guincho segue como trânsito comum até sair; antes disso não há o que rebocar.
+    if (this.towTruck && (this.towTruckState === 'approaching' || this.towTruckState === 'loading')) this.removeVehicle(this.towTruck);
+    this.towTruck = null;
     this.towTruckState = 'idle';
     this.clearCollision();
   }
 
+  private getTowApproachLane(incidentLane: Lane): Lane | null {
+    return this.lanes.filter(lane => lane.type === 'PRINCIPAL' && lane !== incidentLane && lane.direction === incidentLane.direction)
+      .sort((a, b) => Math.abs(a.z - incidentLane.z) - Math.abs(b.z - incidentLane.z))[0] ?? null;
+  }
+
+  private getTowPickupX(incident: Vehicle): number {
+    return incident.mesh.position.x + incident.lane.direction * TOW_PICKUP_OFFSET;
+  }
+
+  private trySpawnTowTruck(): void {
+    const incident = this.incidentVehicle;
+    const lane = incident && this.getTowApproachLane(incident.lane);
+    if (!lane) return;
+    // Com fila na entrada, o guincho surge no primeiro vão livre mais atrás, ainda fora da câmera.
+    const preferredX = lane.direction === 1 ? this.minX - TOW_ENTRY_OFFSET : this.minX + this.width + TOW_ENTRY_OFFSET;
+    const roadEntryX = lane.direction === 1 ? this.roadMinX : this.roadMinX + this.roadSpan;
+    let entryX: number | null = null;
+    for (let x = preferredX; (x - roadEntryX) * lane.direction >= 0; x -= lane.direction) {
+      if (this.vehicles.every(vehicle => Math.abs(vehicle.mesh.position.z - lane.z) >= 0.72
+        || Math.abs(vehicle.mesh.position.x - x) >= SAFE_GAP)) { entryX = x; break; }
+    }
+    if (entryX === null) return;
+    const mesh = this.makeTowTruck();
+    mesh.position.set(entryX, 0.27, lane.z);
+    mesh.rotation.y = lane.direction === 1 ? 0 : Math.PI;
+    this.group.add(mesh);
+    this.towTruck = { id: this.nextVehicleId(), mesh, lane, homeLane: lane, preferredLane: lane, kind: 'truck',
+      speed: TOW_SPEED * 0.8, crossingCommitted: false, maxSpeed: TOW_SPEED, laneChangeFromZ: lane.z,
+      laneChangeElapsed: LANE_CHANGE_DURATION, chargeTargetIndex: 0, chargeElapsed: 0, charging: false, chargeRing: null,
+      lastProgressAt: this.elapsedSeconds, stoppedSince: null, stopReason: 'none', tow: true };
+    this.vehicles.push(this.towTruck);
+    this.createdVehicleCount++;
+  }
+
+  /** Caminhão sem o baú de carga, com plataforma basculante presa a um pivô na frente. */
+  private makeTowTruck(): Group {
+    const mesh = this.makeVehicle('truck', '#e5a739');
+    mesh.name = 'orla-tow-truck';
+    for (const name of ['cargo-box', 'cargo-stripe']) {
+      const part = mesh.getObjectByName(name);
+      if (part) part.visible = false;
+    }
+    const pivot = new Group();
+    pivot.name = 'tow-bed-pivot';
+    pivot.position.set(TOW_BED_PIVOT_X, 0, 0);
+    const bed = new Mesh(this.towBedGeometry, this.towEquipmentMaterial);
+    bed.name = 'tow-flatbed';
+    bed.position.set(-TOW_BED_LENGTH / 2, 0.03, 0);
+    bed.castShadow = true;
+    bed.receiveShadow = true;
+    pivot.add(bed);
+    mesh.add(pivot);
+    const boom = new Mesh(this.towBoomGeometry, this.towBeaconMaterial);
+    boom.name = 'tow-boom';
+    boom.position.set(TOW_BED_PIVOT_X + 0.04, 0.22, 0);
+    mesh.add(boom);
+    const beacon = new Mesh(this.towBeaconGeometry, this.towBeaconMaterial);
+    beacon.name = 'tow-beacon';
+    beacon.position.set(0.55, 0.55, 0);
+    mesh.add(beacon);
+    return mesh;
+  }
+
+  /** Espaço para o guincho entrar na faixa do carro enguiçado sem encostar em ninguém. */
+  private towMergeIsClear(lane: Lane, truck: Vehicle): boolean {
+    return this.vehicles.every(other => other === truck || other === this.incidentVehicle
+      || (other.lane !== lane && Math.abs(other.mesh.position.z - lane.z) >= 0.72)
+      || Math.abs(other.mesh.position.x - truck.mesh.position.x) >= TOW_MERGE_CLEARANCE);
+  }
+
   private updateTowTruck(dt: number): void {
-    if (!this.towTruck) return;
-    const beacon = this.towTruck.getObjectByName('tow-beacon');
+    if (this.towTruckState === 'approaching' && !this.towTruck) this.trySpawnTowTruck();
+    const truck = this.towTruck;
+    if (!truck) return;
+    const beacon = truck.mesh.getObjectByName('tow-beacon');
     if (beacon) beacon.visible = Math.floor(this.incidentTime * 5) % 2 === 0;
+    const incident = this.incidentVehicle;
     if (this.towTruckState === 'approaching') {
-      this.towTruck.position.x += this.towTruckDirection * 4.2 * dt;
-      if ((this.towTruck.position.x - this.towTruckTargetX) * this.towTruckDirection >= 0) {
-        this.towTruck.position.x = this.towTruckTargetX;
+      if (!incident) { this.towTruckState = 'departing'; return; }
+      const distance = (this.getTowPickupX(incident) - truck.mesh.position.x) * truck.lane.direction;
+      const stopped = truck.speed <= CROSSING_RULES.stoppedSpeed;
+      if (truck.lane !== incident.lane) {
+        if (stopped && distance <= 0.05 && this.towMergeIsClear(incident.lane, truck)) this.startLaneTransition(truck, incident.lane);
+      } else if (stopped && truck.laneChangeElapsed >= LANE_CHANGE_DURATION) {
         this.towTruckState = 'loading';
         this.towTruckTimer = 0;
+        this.towLoadFromX = (incident.mesh.position.x - truck.mesh.position.x) * truck.lane.direction;
+        incident.mesh.remove(this.incidentLights);
+        this.incidentLights.clear();
       }
       return;
     }
     if (this.towTruckState === 'loading') {
-      this.towTruckTimer += dt;
-      if (this.towTruckTimer >= 1.8) {
-        this.clearCollision();
-        this.towTruckState = 'departing';
-      }
+      this.updateTowLoading(dt, truck);
       return;
     }
     if (this.towTruckState === 'departing') {
-      this.towTruck.position.x += this.towTruckDirection * 4.2 * dt;
-      const outside = this.towTruckDirection === 1
-        ? this.towTruck.position.x > this.roadMinX + this.roadSpan
-        : this.towTruck.position.x < this.roadMinX;
-      if (outside) {
-        this.removeTowTruck();
-        this.towTruckState = 'completed';
-      }
+      const x = truck.mesh.position.x;
+      if (truck.lane.direction === 1 ? x > this.minX + this.width + 1 : x < this.minX - 1) this.towTruckState = 'completed';
     }
   }
 
-  private removeTowTruck(): void {
-    if (!this.towTruck) return;
-    this.group.remove(this.towTruck);
-    this.towTruck.clear();
-    this.towTruck = null;
+  /** Até onde o guincho pode avançar: para ao lado do ponto de embarque e espera durante o carregamento. */
+  private getTowRoom(truck: Vehicle): number {
+    const incident = this.incidentVehicle;
+    if (this.towTruckState === 'loading') return 0;
+    if (this.towTruckState !== 'approaching' || !incident) return Infinity;
+    if (truck.lane === incident.lane) return 0;
+    return Math.max(0, (this.getTowPickupX(incident) - truck.mesh.position.x) * truck.lane.direction);
+  }
+
+  /** Inclina a plataforma, puxa o carro rampa acima, nivela e prende o carro ao guincho. */
+  private updateTowLoading(dt: number, truck: Vehicle): void {
+    this.towTruckTimer += dt;
+    const time = this.towTruckTimer;
+    const smooth = (value: number) => { const t = MathUtils.clamp(value, 0, 1); return t * t * (3 - 2 * t); };
+    const tilt = TOW_BED_TILT * (smooth(time / 0.6) - smooth((time - (TOW_LOAD_SECONDS - 0.6)) / 0.6));
+    const pivot = truck.mesh.getObjectByName('tow-bed-pivot');
+    if (pivot) pivot.rotation.z = tilt;
+    const car = this.incidentVehicle;
+    if (!car) { if (time >= TOW_LOAD_SECONDS) this.towTruckState = 'departing'; return; }
+    const pull = smooth((time - 0.6) / (TOW_LOAD_SECONDS - 1.2));
+    const localX = MathUtils.lerp(this.towLoadFromX, TOW_BED_X, pull);
+    // Altura da superfície da plataforma sob o centro do carro; antes da rampa, o carro segue no chão.
+    const height = Math.max(0, TOW_BED_Y - (TOW_BED_PIVOT_X - localX) * Math.sin(tilt));
+    const direction = truck.lane.direction;
+    car.mesh.position.set(truck.mesh.position.x + direction * localX, 0.27 + height, truck.mesh.position.z);
+    car.mesh.rotation.z = tilt * MathUtils.clamp(height / 0.08, 0, 1);
+    if (time < TOW_LOAD_SECONDS) return;
+    const index = this.vehicles.indexOf(car);
+    if (index >= 0) this.vehicles.splice(index, 1);
+    this.incidentVehicle = null;
+    if (this.collisionWarningVehicle === car) this.collisionWarningVehicle = null;
+    truck.mesh.add(car.mesh);
+    car.mesh.position.set(TOW_BED_X, TOW_BED_Y, 0);
+    car.mesh.rotation.set(0, 0, 0);
+    if (pivot) pivot.rotation.z = 0;
+    this.towTruckState = 'departing';
   }
 
   clearCollision(): void {
@@ -594,6 +702,12 @@ export class TrafficSystem {
     if (x < this.minX || x > this.minX + this.width) return null;
     const lane = this.lanes.reduce((nearest, candidate) => Math.abs(candidate.z - z) < Math.abs(nearest.z - z) ? candidate : nearest);
     return Math.abs(z - lane.z) <= 1.2 ? lane.id : null;
+  }
+
+  /** Ponto na calçada norte, junto ao meio-fio, fora de qualquer faixa de rolamento. */
+  getRoadsidePosition(x: number): { x: number; z: number } {
+    const northEdge = Math.min(...this.lanes.map(lane => lane.z)) - ROAD_LAYOUT.greenCenter;
+    return { x: MathUtils.clamp(x, this.minX + 0.8, this.minX + this.width - 0.8), z: northEdge - 0.5 };
   }
 
   getNearestPrincipalLanePosition(position: { x: number; z: number }): { x: number; z: number } {
@@ -949,7 +1063,7 @@ export class TrafficSystem {
       const gap = ahead - VEHICLE_LENGTH;
       const following = MathUtils.clamp((gap - 1.4) / (SAFE_GAP - 1.4), 0, 1);
       const coneAhead = obstructionDistance <= CONE_LOOKAHEAD;
-      if (vehicle !== this.collisionWarningVehicle) {
+      if (vehicle !== this.collisionWarningVehicle && !vehicle.tow) {
         if (coneAhead || vehicle.lane.status === 'blocked') this.tryChangeLane(vehicle, coneAhead);
         else this.tryReturnToPreferredLane(vehicle);
       }
@@ -971,20 +1085,27 @@ export class TrafficSystem {
         : MathUtils.clamp((obstructionDistance - CONE_STOP_DISTANCE) / (CONE_LOOKAHEAD - CONE_STOP_DISTANCE), 0, 1);
       const keepClearRoom = this.keepClearRoom(vehicle, crossingDistance);
       const playerBrake = vehicle.crossingCommitted ? 1 : this.getPlayerBrake(vehicle);
-      // Interditar a pista retém quem ainda vai chegar ao ponto bloqueado; quem já
+      // Interditar a pista retém quem ainda vai chegar ao ponto bloqueado: o carro
+      // segue até a retenção e para ali, sem frear no meio da avenida. Quem já
       // entrou na área de conflito ou passou dela segue até sair do mapa.
+      const blockDistance = this.blockAnchorX === null ? 0 : (this.blockAnchorX - vehicle.mesh.position.x) * vehicle.lane.direction;
       const pastBlock = vehicle.lane.status === 'blocked' && this.blockAnchorX !== null
-        && (this.blockAnchorX - vehicle.mesh.position.x) * vehicle.lane.direction < CROSSING_RULES.roadConflictHalfWidth;
-      const laneAvailable = vehicle.lane.status === 'open' || pastBlock || vehicle.crossingCommitted;
-      let targetSpeed = laneAvailable && !stopBeforeCrossing && !charging.stopped
-        ? vehicle.maxSpeed * following * coneBrake * playerBrake * charging.brake : 0;
+        && blockDistance < CROSSING_RULES.roadConflictHalfWidth;
+      const blockRoom = vehicle.lane.status === 'blocked' && !pastBlock && !vehicle.crossingCommitted
+        ? Math.max(0, blockDistance - BLOCK_STOP_DISTANCE) : Infinity;
+      const towRoom = vehicle === this.towTruck ? this.getTowRoom(vehicle) : Infinity;
+      // Na faixa verde durante o desvio, o elétrico desacelera para encontrar um vão e entrar na via comum.
+      const detourMerge = this.electricDetour && vehicle.lane.type === 'GREEN' && this.isElectricVehicle(vehicle.kind)
+        ? DETOUR_MERGE_SPEED_FACTOR : 1;
+      let targetSpeed = !stopBeforeCrossing && !charging.stopped
+        ? vehicle.maxSpeed * following * coneBrake * playerBrake * charging.brake * detourMerge : 0;
       if (vehicle === this.collisionWarningVehicle) targetSpeed *= 0.35;
       if (gap <= MIN_BUMPER_GAP) targetSpeed = 0;
       const stoppedAtCone = !vehicle.crossingCommitted && Number.isFinite(obstructionDistance) && obstructionDistance <= CONE_STOP_DISTANCE;
       const coneRoom = vehicle.crossingCommitted || !Number.isFinite(obstructionDistance)
         ? Infinity : Math.max(0, obstructionDistance - CONE_STOP_DISTANCE);
       const room = Math.min(crossingRoom, keepClearRoom, Math.max(0, gap - MIN_BUMPER_GAP), coneRoom,
-        charging.stopDistance);
+        charging.stopDistance, blockRoom, towRoom);
       const motion = advanceWithRoom(vehicle.speed, targetSpeed, room, dt, 1.8, TRAFFIC_BRAKING);
       vehicle.speed = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.speed;
       const travel = gap <= MIN_BUMPER_GAP || stoppedAtCone ? 0 : motion.distance;
@@ -1014,6 +1135,10 @@ export class TrafficSystem {
       }
       if ((vehicle.lane.direction === 1 && vehicle.mesh.position.x > this.roadMinX + this.roadSpan)
         || (vehicle.lane.direction === -1 && vehicle.mesh.position.x < this.roadMinX)) {
+        if (vehicle === this.towTruck) {
+          this.towTruck = null;
+          if (this.towTruckState !== 'idle') this.towTruckState = 'completed';
+        }
         this.removeVehicle(vehicle);
         this.exitedVehicleCount++;
       }
@@ -1074,7 +1199,7 @@ export class TrafficSystem {
     const greenLane = this.lanes.find(lane => lane.type === 'GREEN')!;
     if (this.electricDetour && vehicle.lane === greenLane) {
       const destination = this.lanes.filter(lane => lane.type === 'PRINCIPAL' && lane.direction === greenLane.direction && lane.status === 'open')
-        .filter(lane => this.hasSafeSpaceAt(lane, vehicle.mesh.position.x, lane.direction, vehicle))
+        .filter(lane => this.hasDetourMergeSpace(lane, vehicle))
         .sort((a, b) => this.getLaneCongestion(a) - this.getLaneCongestion(b))[0];
       if (destination) this.startLaneTransition(vehicle, destination);
       return;
@@ -1084,11 +1209,30 @@ export class TrafficSystem {
     }
   }
 
+  /**
+   * Vão para o elétrico deixar a faixa verde: quem está atrás na via comum tem
+   * distância para frear, e o carro da frente não fica colado no para-choque.
+   */
+  private hasDetourMergeSpace(lane: Lane, entering: Vehicle): boolean {
+    const behindNeeded = VEHICLE_LENGTH + (entering.speed < KEEP_CLEAR_SPEED ? 1.85 : 1.4);
+    return this.vehicles.filter(other => other !== entering
+      && (other.lane === lane || Math.abs(other.mesh.position.z - lane.z) < 0.72)).every(other => {
+      const offset = (other.mesh.position.x - entering.mesh.position.x) * lane.direction;
+      return offset >= 0 ? offset >= DETOUR_MERGE_AHEAD : -offset >= behindNeeded;
+    });
+  }
+
   private updateElectricCharging(vehicle: Vehicle, dt: number): { brake: number; stopped: boolean; stopDistance: number } {
     if (!this.isElectricVehicle(vehicle.kind) || vehicle.lane.type !== 'GREEN' || this.electricDetour) {
       if (vehicle.chargeRing) vehicle.chargeRing.visible = false;
       vehicle.charging = false;
-      return { brake: 1, stopped: false, stopDistance: Infinity };
+      vehicle.chargeElapsed = 0;
+      // Desviado mas ainda na faixa verde: espera a vez de sair antes do carregador quebrado, sem passar por ele.
+      const broken = this.electricDetour && this.isElectricVehicle(vehicle.kind) && vehicle.lane.type === 'GREEN'
+        ? this.chargers.map(charger => (charger.x - vehicle.mesh.position.x) * vehicle.lane.direction)
+          .filter((distance, index) => this.chargers[index].broken && distance >= 0.5).sort((a, b) => a - b)[0]
+        : undefined;
+      return { brake: 1, stopped: false, stopDistance: broken === undefined ? Infinity : Math.max(0, broken - 0.92) };
     }
     if (vehicle.chargeTargetIndex >= this.chargers.length) return { brake: 1, stopped: false, stopDistance: Infinity };
     let charger = this.chargers[vehicle.chargeTargetIndex];
@@ -1289,7 +1433,7 @@ export class TrafficSystem {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.removeTowTruck();
+    this.towTruck = null;
     this.vehicleModels.dispose();
     [this.barrierGeometry, this.coneGeometry, this.directionGeometry, this.towBeaconGeometry, this.towBedGeometry, this.towBoomGeometry,
       this.chargerBaseGeometry, this.chargerBodyGeometry, this.chargerScreenGeometry, this.chargerStatusGeometry, this.chargerPlugGeometry,
