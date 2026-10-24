@@ -109,9 +109,17 @@ export class CoopClient {
     let socket: WebSocket;
     try {
       const parsed = new URL(this.url);
-      if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/coop' || parsed.search || parsed.hash) throw new Error();
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+      if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      if (!['ws:', 'wss:'].includes(parsed.protocol) || parsed.username || parsed.password || !['/coop', '/coop/'].includes(parsed.pathname) || parsed.search || parsed.hash) {
+        throw new Error('Use uma URL ws:// ou wss:// terminada em /coop, sem credenciais, parâmetros ou fragmento.');
+      }
+      parsed.pathname = '/coop';
       socket = new WebSocket(parsed.href);
-    } catch { return Promise.reject(new Error('Endereço do servidor coop inválido.')); }
+    } catch (cause) {
+      const detail = cause instanceof Error && cause.message !== 'Invalid URL' ? ` ${cause.message}` : '';
+      return Promise.reject(new Error(`Endereço do servidor coop inválido.${detail}`));
+    }
     this.socket = socket;
     this.changeState('connecting');
     const promise = new Promise<void>((resolve, reject) => {
