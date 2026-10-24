@@ -135,3 +135,48 @@ test('deslocamentos repetidos não penetram quinas ou emendas entre tiles sólid
   }
 });
 
+
+
+test('instâncias estáticas preservam transformações e excluem animação, transparência e objetos ocultos', () => {
+  const {StaticSceneryBatches}=require('../src/game/map/StaticSceneryBatches.ts');
+  const root=new three.Group();root.position.set(8,0,3);
+  const parent=new three.Group();parent.position.set(2,0,-4);parent.rotation.y=.6;root.add(parent);
+  const geometry=new three.BoxGeometry(),material=new three.MeshStandardMaterial();
+  const sources=[];
+  for(let i=0;i<4;i++){const mesh=new three.Mesh(geometry,material);mesh.position.set(i,1,i*.2);parent.add(mesh);sources.push(mesh);}
+  const animated=new three.Group();root.add(animated);
+  for(let i=0;i<4;i++)animated.add(new three.Mesh(geometry,material));
+  const hidden=new three.Mesh(geometry,material);hidden.visible=false;root.add(hidden);
+  const transparent=new three.Mesh(geometry,new three.MeshStandardMaterial({transparent:true,opacity:.5}));root.add(transparent);
+  root.updateMatrixWorld(true);const expected=sources.map(mesh=>mesh.matrixWorld.clone());
+  const batches=new StaticSceneryBatches(root,new Set([animated]));
+  assert.equal(batches.meshes.length,1);const batch=batches.meshes[0];root.updateMatrixWorld(true);
+  for(let i=0;i<4;i++){const matrix=new three.Matrix4();batch.getMatrixAt(i,matrix);matrix.premultiply(batch.matrixWorld);matrix.elements.forEach((value,index)=>assert.ok(Math.abs(value-expected[i].elements[index])<1e-5));}
+  assert.ok(sources.every(mesh=>!mesh.visible));assert.ok(animated.children.every(mesh=>mesh.visible));assert.equal(transparent.visible,true);assert.equal(hidden.visible,false);
+  let buffers=0,geometries=0;batch.addEventListener('dispose',()=>buffers++);geometry.addEventListener('dispose',()=>geometries++);
+  batches.dispose();batches.dispose();assert.equal(buffers,1);assert.equal(geometries,0,'o dono continua responsável pela geometria compartilhada');assert.ok(sources.every(mesh=>mesh.visible));
+  geometry.dispose();material.dispose();transparent.material.dispose();
+});
+
+test('praia contínua anima por uniform sem recriar recursos e descarta tudo uma única vez', () => {
+  const {BeachSurface}=require('../src/game/map/BeachSurface.ts');
+  const beach=new BeachSurface(232,-76,-2,-8);
+  const shader={uniforms:{},vertexShader:'#include <common>\n#include <begin_vertex>',fragmentShader:'#include <common>\n#include <color_fragment>\n#include <roughnessmap_fragment>'};
+  beach.mesh.material.onBeforeCompile(shader,{});
+  const geometry=beach.mesh.geometry,material=beach.mesh.material;
+  beach.update(.5);beach.update(NaN);beach.update(-1);assert.equal(shader.uniforms.coastTime.value,.5);
+  assert.equal(beach.mesh.geometry,geometry);assert.equal(beach.mesh.material,material);
+  assert.match(shader.fragmentShader,/coastEdge/);assert.match(shader.fragmentShader,/coastDeep/);
+  let geos=0,mats=0;geometry.addEventListener('dispose',()=>geos++);material.addEventListener('dispose',()=>mats++);
+  beach.dispose();beach.dispose();assert.equal(geos,1);assert.equal(mats,1);
+});
+
+test('lotes estáticos são separados por região para manter o descarte fora da câmera', () => {
+  const {StaticSceneryBatches}=require('../src/game/map/StaticSceneryBatches.ts');
+  const root=new three.Group(),geometry=new three.BoxGeometry(),material=new three.MeshStandardMaterial();
+  for(const offset of [0,160]) for(let i=0;i<4;i++){const mesh=new three.Mesh(geometry,material);mesh.position.x=offset+i;root.add(mesh);}
+  const batches=new StaticSceneryBatches(root);
+  assert.equal(batches.meshes.length,2);
+  assert.ok(batches.meshes.every(mesh=>mesh.boundingSphere.radius<5),'um lote não engloba todas as regiões distantes');
+  batches.dispose();geometry.dispose();material.dispose();
+});
