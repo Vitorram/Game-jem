@@ -7,7 +7,7 @@ export type SessionView = {
 };
 
 /** Pontuação mínima para 1, 2 e 3 estrelas. Ajuste ao balanceamento da fase. */
-export const STAR_THRESHOLDS = [100, 350, 600] as const;
+export const STAR_THRESHOLDS = [1000, 1400, 1750] as const;
 
 export function starsFor(score: number): number {
   return STAR_THRESHOLDS.filter(minimum => score >= minimum).length;
@@ -16,9 +16,7 @@ export function starsFor(score: number): number {
 const EMPTY: SessionView = { snapshot: null, feedback: null };
 const PRIORITY: Partial<Record<SessionEvent['type'], number>> = {
   'order-completed': 3,
-  'order-expired': 2,
-  'xp-penalty': 2,
-  'xp-warning': 2,
+  'score-warning': 2,
   'order-arrived': 1,
 };
 
@@ -27,7 +25,7 @@ type Listener = () => void;
 /**
  * Ponte entre a cena (que avança o relógio) e o HUD React.
  * O React só é avisado quando algo muda de verdade: evento da partida
- * ou virada de segundo no cronômetro (no máximo 1 vez por segundo).
+ * ou virada de segundo no relógio (no máximo 1 vez por segundo).
  */
 class SessionStore {
   private session: GameSession | null = null;
@@ -36,8 +34,6 @@ class SessionStore {
   private lastSecond = -1;
   private seq = 0;
   private onRestart?: () => void;
-  private onOrderExpired?: (definitionId: string, continuePhase: boolean) => void;
-  private onPauseForPenalty?: () => void;
   private readonly definitionsByOrderId = new Map<number, string>();
 
   readonly subscribe = (listener: Listener): (() => void) => {
@@ -50,13 +46,9 @@ class SessionStore {
   bind(
     session: GameSession,
     onRestart?: () => void,
-    onOrderExpired?: (definitionId: string, continuePhase: boolean) => void,
-    onPauseForPenalty?: () => void,
   ): void {
     this.session = session;
     this.onRestart = onRestart;
-    this.onOrderExpired = onOrderExpired;
-    this.onPauseForPenalty = onPauseForPenalty;
     this.definitionsByOrderId.clear();
     this.view = EMPTY;
     this.lastSecond = -1;
@@ -68,8 +60,6 @@ class SessionStore {
     if (this.session !== session) return;
     this.session = null;
     this.onRestart = undefined;
-    this.onOrderExpired = undefined;
-    this.onPauseForPenalty = undefined;
     this.definitionsByOrderId.clear();
     this.view = EMPTY;
     this.emit();
@@ -113,24 +103,15 @@ class SessionStore {
     if (events.length) this.publish(session.snapshot(), events);
   }
 
-  penalizeXP(amount: number, reason: string): void {
-    if (!this.session) return;
-    const events = this.session.penalizeXP(amount, reason);
-    if (events.length) {
-      this.publish(this.session.snapshot(), events);
-      if (this.session.snapshot().status === 'playing') this.onPauseForPenalty?.();
-    }
-  }
-
   dismissFeedback(seq: number): void {
     if (this.view.feedback?.seq !== seq) return;
     this.view = { ...this.view, feedback: null };
     this.emit();
   }
 
-  warnXP(message: string): void {
+  warnScore(message: string): void {
     if (!this.session || this.session.snapshot().status !== 'playing') return;
-    this.publish(this.session.snapshot(), [{ type: 'xp-warning', message }]);
+    this.publish(this.session.snapshot(), this.session.warnScore(message));
   }
 
   archiveCompleted(definitionId: string): void {
@@ -147,7 +128,7 @@ class SessionStore {
     const events = session.advance(deltaMs);
     this.processOrderEvents(events);
     const snapshot = session.snapshot();
-    const second = Math.ceil(snapshot.remainingMs / 1000);
+    const second = Math.floor(snapshot.elapsedMs / 1000);
     if (events.length === 0 && second === this.lastSecond) return;
     this.lastSecond = second;
     this.publish(snapshot, events);
@@ -180,12 +161,6 @@ class SessionStore {
   private processOrderEvents(events: SessionEvent[]): void {
     for (const event of events) {
       if (event.type === 'order-arrived') this.definitionsByOrderId.set(event.order.id, event.order.definitionId);
-      else if (event.type === 'order-expired') {
-        const definitionId = this.definitionsByOrderId.get(event.orderId);
-        this.definitionsByOrderId.delete(event.orderId);
-        if (definitionId) this.onOrderExpired?.(definitionId, this.session?.snapshot().status === 'playing');
-        if (this.session?.snapshot().status === 'playing') this.onPauseForPenalty?.();
-      }
     }
   }
 
@@ -193,5 +168,3 @@ class SessionStore {
 }
 
 export const sessionStore = new SessionStore();
-
-

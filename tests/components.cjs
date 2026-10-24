@@ -261,7 +261,7 @@ test('IntroWorld: monta o cenário do jogo, mantém o tráfego vivo, encena a ba
   assert.equal(JSON.stringify(suburbanGameState.snapshot().roads), roadsBefore, 'prólogo não publica estado das vias da partida');
 });
 
-test('OrdersHud: tolera 3 expirações sem declarar derrota e exibe fim por 4 missões expiradas', t => {
+test('OrdersHud: exibe sistema de pontos sem expiração nem derrota por tempo limite', t => {
   const { GameSession } = require(path.join(SRC, 'game', 'session', 'GameSession.ts'));
   const { ORLA_SESSION_CONFIG } = require(path.join(SRC, 'game', 'session', 'sessionData.ts'));
   const { sessionStore } = require(path.join(SRC, 'game', 'session', 'sessionStore.ts'));
@@ -269,14 +269,18 @@ test('OrdersHud: tolera 3 expirações sem declarar derrota e exibe fim por 4 mi
   const session = new GameSession(ORLA_SESSION_CONFIG);
   sessionStore.bind(session);
   sessionStore.start();
-  // Expira os 4 primeiros chamados em série até encerrar a partida.
+  sessionStore.tick(10_000);
+  const fastHtml = render('OrdersHud.tsx', { paused: false });
+  assert.match(fastHtml, /PTS/);
+  assert.match(fastHtml, /\+200 pts/);
+  // Mesmo após longo tempo, a partida continua ativa, sem derrota e mantendo os 100 pontos base.
   for (let i = 0; i < 4; i++) sessionStore.tick(200_000);
-  assert.equal(session.snapshot().status, 'finished');
-  assert.equal(session.snapshot().expiredOrders, 4);
+  assert.equal(session.snapshot().status, 'playing');
+  assert.equal(session.snapshot().expiredOrders, 0);
+  assert.ok(session.snapshot().score >= 0);
   const html = render('OrdersHud.tsx', { paused: false });
-  assert.match(html, /VOCÊ PERDEU/);
-  assert.match(html, /Quatro missões venceram sem ser concluídas/);
-  assert.match(html, /Quatro missões expiraram/);
+  assert.doesNotMatch(html, /VOCÊ PERDEU/);
+  assert.match(html, /\+100 pts/);
   sessionStore.unbind(session);
 });
 

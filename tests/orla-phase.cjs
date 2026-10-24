@@ -239,13 +239,12 @@ test('rodada contínua: jogador resolve os 10 chamados em série e a fase encerr
   } finally { game.scene.dispose(); }
 });
 
-test('rodada contínua sem ações: expirações são repassadas à fase e a sessão encerra no limite', () => {
+test('rodada contínua sem ações: chamado permanece ativo sem expirar nem encerrar a partida', () => {
   const game = phase();
   orderIds.clear();
   try {
     const seen = [];
-    let guard = 0;
-    while (game.session.snapshot().status === 'playing' && guard++ < 360 * 20) {
+    for (let step = 0; step < 120 * 20; step++) {
       stepRound(game, snapshot => {
         for (const order of snapshot.orders) {
           orderIds.set(order.id, order.definitionId);
@@ -254,10 +253,11 @@ test('rodada contínua sem ações: expirações são repassadas à fase e a ses
       });
     }
     const result = game.session.snapshot();
-    assert.equal(result.status, 'finished');
-    assert.equal(result.expiredOrders, ORLA_SESSION_CONFIG.maxExpiredOrders);
+    assert.equal(result.status, 'playing');
+    assert.equal(result.expiredOrders, 0);
     assert.equal(result.completedOrders, 0);
-    assert.deepEqual(seen, ORLA_EVENTS.slice(0, ORLA_SESSION_CONFIG.maxExpiredOrders).map(event => event.id));
+    assert.equal(result.score, 0);
+    assert.deepEqual(seen, [ORLA_EVENTS[0].id]);
   } finally { game.scene.dispose(); }
 });
 

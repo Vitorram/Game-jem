@@ -184,21 +184,7 @@ export class Game {
       const orla = new Fase1OrlaScene(this.input, this.onRisks, this.onInteractionPrompt, type => this.openRepairPuzzle(type), this.onObjectiveDistance, step => sessionStore.resolveStep(step));
       this.scenes.setScene(orla);
       this.session = new GameSession(ORLA_SESSION_CONFIG);
-      sessionStore.bind(this.session, () => this.restartPhase(), (id, continuePhase) => {
-        orla.expirePhaseOrder(id, continuePhase);
-        const puzzleOrders: Record<RepairPuzzleType, string> = {
-          pole: 'broken-light-pole-1', signal: 'traffic-signal-failure', sensor: 'sensor-failure',
-          car: 'minor-collision', 'signal-check': 'signal-check', charger: 'ev-charger-repair',
-        };
-        if (this.repairPuzzleOpen && puzzleOrders[this.activeRepairType] === id) {
-          this.repairPuzzleOpen = false;
-          orla.setTutorialMovementEnabled(true);
-          orla.setTutorialCollisionProtection(false);
-          this.onRepairPuzzleChange?.(false);
-        }
-      }, () => {
-        if (this.status === 'playing') this.togglePause();
-      });
+      sessionStore.bind(this.session, () => this.restartPhase());
       sessionStore.start();
       if (this.mandatoryTutorialActive || cooperativeWaitingTutorial) sessionStore.setPaused(true);
       else {
@@ -811,8 +797,6 @@ export class Game {
     if (event.repeat) return;
     if (event.code === 'Escape') {
       event.preventDefault();
-      const feedback = sessionStore.getSnapshot().feedback?.event;
-      if (feedback?.type === 'order-expired' || feedback?.type === 'xp-penalty') return;
       this.togglePause();
       return;
     }

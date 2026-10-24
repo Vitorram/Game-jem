@@ -1423,10 +1423,18 @@ test('fase real: aviso, reparo, tempo durante puzzle, fim por expirações e rei
   assert.equal(result.score, 0);
   game.completeRepairPuzzle(); game.interact();
   assert.equal(sessionStore.getSnapshot().snapshot.score, result.score);
-  // Sem concluir nada, os chamados expiram em série até o limite e a fase encerra.
+  // Sem limite de tempo punitivo: os chamados não expiram sozinhos; a fase encerra ao concluir as 10 ocorrências.
   renderer.loop(time += left());
+  assert.equal(statuses.at(-1), 'playing');
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 0);
+  for (const event of ORLA_EVENTS) {
+    sessionStore.tick(Math.max(1, event.atMs - game.session.snapshot().elapsedMs));
+    for (const step of event.steps) sessionStore.resolveEvent(event.id, step);
+    sessionStore.archiveCompleted(event.id);
+  }
+  renderer.loop(time += 50);
   assert.equal(statuses.at(-1), 'finished');
-  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, ORLA_SESSION_CONFIG.maxExpiredOrders);
+  assert.equal(sessionStore.getSnapshot().snapshot.completedOrders, ORLA_EVENTS.length);
   const counts = watchResources(orla.scene);
   sessionStore.restart();
   assert.equal(statuses.at(-1), 'playing');
@@ -1479,9 +1487,10 @@ test('prazo encerra ações, relógio ignora pausa e menu desmonta a sessão', t
   game.togglePause(); renderer.loop(100000);
   assert.equal(sessionStore.getSnapshot().snapshot.remainingMs, 358000);
   game.togglePause(); renderer.loop(100100); renderer.loop(458100);
-  assert.equal(statuses.at(-1), 'finished');
-  // Em série, cada chamado ignorado expira sozinho; ao atingir o limite a fase encerra.
-  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, ORLA_SESSION_CONFIG.maxExpiredOrders);
+  assert.equal(statuses.at(-1), 'playing');
+  // Sem limite de tempo punitivo, o chamado permanece aguardando resolução e não há expirações.
+  assert.equal(sessionStore.getSnapshot().snapshot.expiredOrders, 0);
+  assert.equal(sessionStore.getSnapshot().snapshot.score, 0);
   game.interact();
   assert.equal(suburbanGameState.snapshot().selectedProblemId, null);
   game.returnToMenu();

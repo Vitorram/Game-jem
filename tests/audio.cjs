@@ -21,7 +21,7 @@ test('Intro only in menu; loading through story and all tutorial stages; gamepla
 test('only actual completed tasks reward coins; arrivals and penalties have distinct cues', () => {
   assert.equal(soundForFeedback('order-completed'), 'coin');
   assert.equal(soundForFeedback('order-arrived'), 'notification');
-  assert.equal(soundForFeedback('xp-penalty'), 'warning');
+  assert.equal(soundForFeedback('score-warning'), 'warning');
   assert.equal(soundForFeedback('risk-resolved'), null);
 });
 function setup() {

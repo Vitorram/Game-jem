@@ -5,14 +5,15 @@ export type OrderDefinition = {
   title: string;
   /** IDs dos riscos, na ordem exigida. Cada risco aparece uma vez no pedido. */
   riskIds: readonly number[];
+  /** Janela de tempo de referência (ms) para cálculo do bônus de agilidade (não expira a tarefa). */
   timeLimitMs: number;
   basePoints: number;
   maxSpeedBonus: number;
-  expirationPenalty: number;
+  expirationPenalty?: number;
 };
 
 export type SessionConfig = {
-  phaseDurationMs: number;
+  phaseDurationMs?: number;
   orderIntervalMs: number;
   firstOrderDelayMs: number;
   /** Catálogo percorrido ciclicamente, sem aleatoriedade implícita. */
@@ -21,8 +22,6 @@ export type SessionConfig = {
   scheduledAtMs?: readonly number[];
   /** Em campanhas guiadas, só há um chamado e o próximo espera o arquivamento. */
   sequential?: boolean;
-  /** Encerra a partida após este número de pedidos expirados. */
-  maxExpiredOrders?: number;
 };
 
 export type ActiveOrder = {
@@ -54,13 +53,13 @@ export type SessionEvent =
   | { type: 'order-arrived'; order: ActiveOrder }
   | { type: 'risk-resolved'; orderId: number; riskId: number }
   | { type: 'order-completed'; orderId: number; basePoints: number; speedBonus: number; points: number }
-  | { type: 'order-expired'; orderId: number; penalty: number; reason: 'deadline' | 'phase-ended' }
-  | { type: 'xp-penalty'; amount: number; reason: string }
-  | { type: 'xp-warning'; message: string };
+  | { type: 'score-warning'; message: string };
+
+const DEFAULT_PHASE_DURATION_MS = 360_000;
 
 /** Relógio simulado: sem Three, DOM, Date, timers, callbacks ou recursos a descartar. */
 export class GameSession {
-  private readonly config: SessionConfig;
+  private readonly config: SessionConfig & { phaseDurationMs: number };
   private status: SessionStatus = 'menu';
   private elapsedMs = 0;
   private score = 0;
@@ -68,14 +67,18 @@ export class GameSession {
   private expiredOrders = 0;
   private orders: ActiveOrder[] = [];
   private issuedOrders = 0;
-  /** Prazo congelado quando uma missão sequencial já foi concluída e aguarda arquivamento. */
+  /** Momento de conclusão quando uma missão sequencial já foi concluída e aguarda arquivamento. */
   private readonly completedAtMs = new Map<number, number>();
   // Mantido entre reinícios para não aceitar uma resolução antiga em uma nova partida.
   private nextOrderId = 1;
 
   constructor(config: SessionConfig) {
     this.validate(config);
-    this.config = structuredClone(config);
+    const cloned = structuredClone(config);
+    this.config = {
+      ...cloned,
+      phaseDurationMs: cloned.phaseDurationMs ?? DEFAULT_PHASE_DURATION_MS,
+    };
   }
 
   snapshot(): SessionSnapshot {
@@ -130,8 +133,8 @@ export class GameSession {
 
   /**
    * Recebe tempo decorrido em milissegundos (inclusive frações). Não limite o delta
-   * com o teto da física: avanços grandes processam todas as chegadas/expirações.
-    * No prazo exato, a tarefa expira; pedidos ativos mantêm o próprio prazo no acréscimo.
+   * com o teto da física: avanços grandes processam todas as chegadas de chamados.
+   * Sem cronômetros fatais: chamados permanecem ativos até serem resolvidos pela equipe.
    */
   advance(deltaMs: number): SessionEvent[] {
     if (!Number.isFinite(deltaMs) || deltaMs < 0) throw new Error('Delta de tempo inválido.');
@@ -140,47 +143,24 @@ export class GameSession {
       const events: SessionEvent[] = [];
       const target = this.elapsedMs + deltaMs;
       while (this.elapsedMs < target && this.status === 'playing') {
-        const activeOrder = this.orders.find(order => order.completedSteps < order.riskIds.length);
-        const deadline = activeOrder?.expiresAtMs ?? Infinity;
         const arrival = this.orders.length === 0 && this.issuedOrders < this.config.orders.length
           ? Math.max(this.elapsedMs, this.nextArrival()) : Infinity;
-        const phaseBoundary = this.elapsedMs < this.config.phaseDurationMs ? this.config.phaseDurationMs : Infinity;
-        const next = Math.min(target, deadline, arrival, phaseBoundary);
+        const next = Math.min(target, arrival);
         this.elapsedMs = next;
-        this.expireOrders(events, false);
-        if (this.config.maxExpiredOrders && this.expiredOrders >= this.config.maxExpiredOrders) {
-          this.status = 'finished';
-          events.push({ type: 'status', status: this.status });
-          break;
-        }
         if (this.orders.length === 0 && this.issuedOrders < this.config.orders.length
           && this.nextArrival() <= this.elapsedMs) this.issueOrder(events);
-        if (this.elapsedMs >= this.config.phaseDurationMs
-          && this.orders.length === 0 && this.issuedOrders === this.config.orders.length) {
-          this.status = 'finished';
-          events.push({ type: 'status', status: this.status });
-          break;
-        }
         if (this.elapsedMs === target) break;
       }
       return events;
     }
-    const target = Math.min(this.config.phaseDurationMs, this.elapsedMs + deltaMs);
+    const target = this.elapsedMs + deltaMs;
     const events: SessionEvent[] = [];
-    while (this.elapsedMs < target) {
+    while (this.elapsedMs < target && this.status === 'playing') {
       const nextArrival = this.nextArrival();
-      let nextDeadline = Infinity;
-      for (const order of this.orders) nextDeadline = Math.min(nextDeadline, order.expiresAtMs);
-      this.elapsedMs = Math.min(target, nextArrival, nextDeadline);
-      this.expireOrders(events, false);
-      if (this.elapsedMs === this.config.phaseDurationMs) {
-        // Pendências também expiram ao encerrar, uma única vez por pedido.
-        this.expireOrders(events, true);
-        this.status = 'finished';
-        events.push({ type: 'status', status: this.status });
-        break;
-      }
+      const stepTarget = nextArrival > this.elapsedMs ? Math.min(target, nextArrival) : target;
+      this.elapsedMs = stepTarget;
       if (this.elapsedMs === nextArrival) this.issueOrder(events);
+      if (this.elapsedMs === target) break;
     }
     return events;
   }
@@ -198,10 +178,11 @@ export class GameSession {
     order.completedSteps++;
     const events: SessionEvent[] = [{ type: 'risk-resolved', orderId, riskId }];
     if (order.completedSteps === order.riskIds.length) {
-      const remaining = order.expiresAtMs - this.elapsedMs;
-      const speedBonus = Math.max(0, Math.floor(order.maxSpeedBonus * (remaining / order.timeLimitMs)));
-      const points = order.basePoints + speedBonus;
-      this.score += points;
+      const elapsedOnOrder = Math.max(0, this.elapsedMs - order.createdAtMs);
+      const remainingBonusMs = Math.max(0, order.timeLimitMs - elapsedOnOrder);
+      const speedBonus = Math.max(0, Math.floor(order.maxSpeedBonus * (remainingBonusMs / order.timeLimitMs)));
+      const points = Math.max(0, order.basePoints + speedBonus);
+      this.score = Math.max(0, this.score + points);
       this.completedOrders++;
       if (this.config.sequential) this.completedAtMs.set(order.id, this.elapsedMs);
       if (!this.config.sequential) this.orders.splice(this.orders.indexOf(order), 1);
@@ -217,10 +198,10 @@ export class GameSession {
     return events;
   }
 
-  penalizeXP(amount: number, reason: string): SessionEvent[] {
-    if (this.status !== 'playing' || !Number.isSafeInteger(amount) || amount < 0 || !reason.trim()) return [];
-    this.score -= amount;
-    return [{ type: 'xp-penalty', amount, reason }];
+  /** Emite apenas um aviso instrutivo sem subtrair pontos: a pontuação nunca fica negativa. */
+  warnScore(message: string): SessionEvent[] {
+    if (this.status !== 'playing' || !message.trim()) return [];
+    return [{ type: 'score-warning', message }];
   }
 
   /** Arquiva um chamado e libera o próximo; a última missão encerra a fase ao ser concluída. */
@@ -247,34 +228,15 @@ export class GameSession {
 
   private issueOrder(events: SessionEvent[]): void {
     const definition = this.config.orders[this.issuedOrders % this.config.orders.length];
-    const { id: definitionId, ...data } = definition;
+    const { id: definitionId, expirationPenalty = 0, ...data } = definition;
     const order: ActiveOrder = {
-      ...data, riskIds: [...data.riskIds], definitionId, id: this.nextOrderId++,
+      ...data, expirationPenalty, riskIds: [...data.riskIds], definitionId, id: this.nextOrderId++,
       completedSteps: 0, createdAtMs: this.elapsedMs,
       expiresAtMs: this.elapsedMs + definition.timeLimitMs,
     };
     this.issuedOrders++;
     this.orders.push(order);
     events.push({ type: 'order-arrived', order: structuredClone(order) });
-  }
-
-  private expireOrders(events: SessionEvent[], phaseEnded: boolean): void {
-    this.orders = this.orders.filter(order => {
-      const completed = order.completedSteps === order.riskIds.length;
-      if (completed) {
-        // A resolved call may wait in the tablet until the player archives it.
-        // It must never turn into a failed mission while waiting for that action.
-        if (phaseEnded) this.completedAtMs.delete(order.id);
-        return !phaseEnded;
-      }
-      const deadlineReached = order.expiresAtMs <= this.elapsedMs;
-      if (!deadlineReached && !phaseEnded) return true;
-      this.score -= order.expirationPenalty;
-      this.expiredOrders++;
-      events.push({ type: 'order-expired', orderId: order.id, penalty: order.expirationPenalty,
-        reason: deadlineReached ? 'deadline' : 'phase-ended' });
-      return false;
-    });
   }
 
   private reset(): void {
@@ -289,23 +251,25 @@ export class GameSession {
 
   private validate(config: SessionConfig): void {
     const integer = (value: number, minimum: number) => Number.isSafeInteger(value) && value >= minimum;
+    const phaseDurationMs = config.phaseDurationMs ?? DEFAULT_PHASE_DURATION_MS;
     if (config.scheduledAtMs && (config.scheduledAtMs.length !== config.orders.length
       || config.scheduledAtMs.some((at, index, all) => !integer(at, 0)
-        || at >= config.phaseDurationMs || (index > 0 && at <= all[index - 1])))) {
+        || at >= phaseDurationMs || (index > 0 && at <= all[index - 1])))) {
       throw new Error('Agenda de eventos inválida.');
     }
-    if (!integer(config.phaseDurationMs, 1) || !integer(config.orderIntervalMs, 1)
-      || !integer(config.firstOrderDelayMs, 0) || config.firstOrderDelayMs >= config.phaseDurationMs
+    if (!integer(phaseDurationMs, 1) || !integer(config.orderIntervalMs, 1)
+      || !integer(config.firstOrderDelayMs, 0) || config.firstOrderDelayMs >= phaseDurationMs
       || !config.orders.length) throw new Error('Configuração de partida inválida.');
     const ids = new Set<string>();
     for (const order of config.orders) {
+      const penalty = order.expirationPenalty ?? 0;
       if (!order.id.trim() || ids.has(order.id) || !order.title.trim()
         || !order.riskIds.length || new Set(order.riskIds).size !== order.riskIds.length
         || order.riskIds.some(id => !integer(id, 1))
         || !integer(order.timeLimitMs, 1)
         || !integer(order.basePoints, 0) || !integer(order.maxSpeedBonus, 0)
-        || !integer(order.expirationPenalty, 0)
-        || !Number.isSafeInteger(config.phaseDurationMs + order.timeLimitMs)
+        || !integer(penalty, 0)
+        || !Number.isSafeInteger(phaseDurationMs + order.timeLimitMs)
         || !Number.isSafeInteger(order.basePoints + order.maxSpeedBonus)) {
         throw new Error('Definição de pedido inválida.');
       }
@@ -313,4 +277,3 @@ export class GameSession {
     }
   }
 }
-

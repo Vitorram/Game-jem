@@ -14,11 +14,10 @@ require.extensions['.ts'] = (module, filename) => {
 const { GameSession } = require('../src/game/session/GameSession.ts');
 const { ORLA_SESSION_CONFIG } = require('../src/game/session/sessionData.ts');
 const { ORLA_EVENTS } = require('../src/game/session/orlaEvents.ts');
-const { ORLA_RISKS } = require('../src/game/risks/riskData.ts');
-const { RiskWorkflow } = require('../src/game/risks/RiskWorkflow.ts');
+
 const definition = (overrides = {}) => ({
   id: 'test', title: 'Pedido de teste', riskIds: [1, 2], timeLimitMs: 10_000,
-  basePoints: 100, maxSpeedBonus: 50, expirationPenalty: 30, ...overrides,
+  basePoints: 100, maxSpeedBonus: 50, ...overrides,
 });
 const config = (overrides = {}) => ({
   phaseDurationMs: 60_000, orderIntervalMs: 15_000, firstOrderDelayMs: 0,
@@ -53,11 +52,11 @@ test('menu, pausa e fim bloqueiam tempo e resoluções; transições são idempo
   game.advance(1_000);
   assert.equal(game.snapshot().elapsedMs, 3_000);
   assert.equal(head(game).remainingMs, 7_000);
-  game.advance(100_000);
+  game.resolveRisk(id, 1);
+  game.resolveRisk(id, 2);
+  assert.deepEqual(game.finish(), [{ type: 'status', status: 'finished' }]);
   const finished = game.snapshot();
   assert.equal(finished.status, 'finished');
-  assert.equal(finished.remainingMs, 0);
-  assert.equal(finished.elapsedMs, 60_000);
   assert.deepEqual(game.resolveRisk(id, 2), []);
   assert.deepEqual(game.advance(100_000), []);
   assert.deepEqual(game.pause(), []);
@@ -99,35 +98,38 @@ test('FIFO e ordem de riscos: ação errada ou repetida não rende progresso nem
   assert.equal(head(game).completedSteps, 0);
 });
 
-test('bônus proporcional ao tempo restante, arredondado para baixo', () => {
-  for (const [elapsed, bonus] of [[0, 50], [2_500, 37], [9_999, 0]]) {
-    const game = playing();
+test('bônus decresce conforme o tempo gasto, mantendo os pontos base mesmo após longo tempo', () => {
+  for (const [elapsed, bonus] of [[0, 50], [2_500, 37], [9_999, 0], [10_000, 0], [120_000, 0]]) {
+    const game = playing({ orderIntervalMs: 500_000 });
     const id = head(game).id;
     game.advance(elapsed);
     game.resolveRisk(id, 1);
     const completion = game.resolveRisk(id, 2)[1];
     assert.equal(completion.speedBonus, bonus);
+    assert.equal(completion.points, 100 + bonus);
     assert.equal(game.snapshot().score, 100 + bonus);
-    assert.deepEqual(game.advance(10_000 - elapsed), [], 'concluído não expira depois');
+    assert.ok(game.snapshot().score >= 0, 'pontuação nunca fica negativa');
     assert.equal(game.snapshot().expiredOrders, 0);
   }
 });
 
-test('expira no instante exato, desconta uma vez e descarta progresso parcial', () => {
-  const game = playing();
+test('chamados nunca expiram por tempo e nunca descontam pontos do jogador', () => {
+  const game = playing({ orderIntervalMs: 500_000 });
   const id = head(game).id;
   game.resolveRisk(id, 1);
-  game.advance(9_999);
-  assert.equal(head(game).remainingMs, 1);
-  assert.deepEqual(game.advance(1), [{ type: 'order-expired', orderId: id, penalty: 30, reason: 'deadline' }]);
-  assert.deepEqual(game.resolveRisk(id, 2), []);
-  assert.deepEqual(game.advance(1), []);
-  assert.equal(game.snapshot().score, -30);
-  assert.equal(game.snapshot().expiredOrders, 1);
-  assert.equal(game.snapshot().completedOrders, 0);
+  assert.deepEqual(game.advance(10_000), []);
+  assert.equal(head(game).id, id, 'chamado continua ativo após o tempo de referência do bônus');
+  assert.equal(head(game).completedSteps, 1, 'progresso parcial é preservado');
+  assert.equal(game.snapshot().score, 0, 'nenhum ponto é descontado');
+  assert.equal(game.snapshot().expiredOrders, 0);
+  const events = game.resolveRisk(id, 2);
+  assert.equal(events[1].type, 'order-completed');
+  assert.equal(events[1].points, 100);
+  assert.equal(game.snapshot().score, 100);
+  assert.equal(game.snapshot().completedOrders, 1);
 });
 
-test('pedido esperando na fila também expira, mesmo antes do primeiro', () => {
+test('pedidos esperando na fila não expiram e mantêm a pontuação intacta', () => {
   const game = playing({ orderIntervalMs: 5_000, orders: [
     definition({ id: 'long', timeLimitMs: 30_000 }),
     definition({ id: 'short', timeLimitMs: 2_000 }),
@@ -135,45 +137,25 @@ test('pedido esperando na fila também expira, mesmo antes do primeiro', () => {
   const first = head(game).id;
   game.advance(5_000);
   const second = game.snapshot().orders[1].id;
-  assert.equal(game.advance(2_000)[0].orderId, second);
+  game.advance(2_000);
   assert.equal(head(game).id, first);
-  assert.equal(game.snapshot().orders.length, 1);
-  assert.equal(game.snapshot().score, -30);
+  assert.equal(game.snapshot().orders[1].id, second);
+  assert.equal(game.snapshot().orders.length, 2);
+  assert.equal(game.snapshot().score, 0);
+  assert.equal(game.snapshot().expiredOrders, 0);
 });
 
-test('expiração e chegada simultâneas processam a expiração primeiro', () => {
-  const game = playing({ orderIntervalMs: 10_000 });
-  const events = game.advance(10_000);
-  assert.deepEqual(events.map(e => e.type), ['order-expired', 'order-arrived']);
-  assert.equal(head(game).remainingMs, 10_000);
-  assert.equal(head(game).completedSteps, 0);
-});
-
-test('fim da fase expira pendências uma vez e não cria pedido no instante final', () => {
-  const game = playing({ phaseDurationMs: 10_000, orderIntervalMs: 5_000,
-    orders: [definition(), definition({ id: 'long', timeLimitMs: 20_000, expirationPenalty: 40 })] });
-  game.advance(5_000);
-  const events = game.advance(50_000);
-  assert.deepEqual(events.map(e => e.type), ['order-expired', 'order-expired', 'status']);
-  assert.deepEqual(events.slice(0, 2).map(e => e.reason), ['deadline', 'phase-ended']);
-  assert.equal(game.snapshot().score, -70);
-  assert.equal(game.snapshot().expiredOrders, 2);
-  assert.equal(game.snapshot().orders.length, 0);
-  game.advance(1);
-  assert.equal(game.snapshot().score, -70);
-});
-
-test('avanço grande equivale a vários avanços pequenos, inclusive no encerramento', () => {
+test('avanço grande equivale a vários avanços pequenos', () => {
   const settings = { firstOrderDelayMs: 1_300, orderIntervalMs: 2_700, phaseDurationMs: 25_000,
     orders: [definition({ id: 'a', timeLimitMs: 4_900 }), definition({ id: 'b', timeLimitMs: 9_100 })] };
   const whole = playing(settings), split = playing(settings);
-  const events = whole.advance(100_000), splitEvents = [];
+  const events = whole.advance(25_000), splitEvents = [];
   for (let i = 0; i < 250; i++) splitEvents.push(...split.advance(100));
   assert.deepEqual(whole.snapshot(), split.snapshot());
   assert.deepEqual(events, splitEvents);
 });
 
-test('pontuação combina conclusão e expiração sem dar pontos por etapas isoladas', () => {
+test('pontuação só aumenta ao concluir todas as etapas e nunca diminui com o passar do tempo', () => {
   const game = playing({ orderIntervalMs: 5_000 });
   const id = head(game).id;
   game.advance(5_000);
@@ -181,16 +163,20 @@ test('pontuação combina conclusão e expiração sem dar pontos por etapas iso
   assert.equal(game.snapshot().score, 0);
   game.resolveRisk(id, 2);
   assert.equal(game.snapshot().score, 125);
-  game.advance(10_000);
-  assert.equal(game.snapshot().score, 95);
+  game.advance(60_000);
+  assert.equal(game.snapshot().score, 125, 'passar o tempo jamais subtrai pontos já conquistados');
   assert.equal(game.snapshot().completedOrders, 1);
-  assert.equal(game.snapshot().expiredOrders, 1);
+  assert.equal(game.snapshot().expiredOrders, 0);
 });
 
 test('reiniciar e voltar ao menu limpam a sessão sem reutilizar IDs de pedidos antigos', () => {
-  const game = playing({ phaseDurationMs: 10_000 });
+  const game = playing({ orderIntervalMs: 50_000 });
   const oldId = head(game).id;
   game.advance(10_000);
+  game.resolveRisk(oldId, 1);
+  game.resolveRisk(oldId, 2);
+  game.finish();
+  assert.equal(game.snapshot().status, 'finished');
   game.start();
   assert.equal(game.snapshot().elapsedMs, 0);
   assert.equal(game.snapshot().score, 0);
@@ -272,38 +258,20 @@ test('Orla libera os eventos em série nos horários programados e encerra ao co
   assert.equal(game.snapshot().status, 'finished');
 });
 
-test('Orla tolera até 3 chamados expirados; o 4º encerra a fase', () => {
-  assert.equal(ORLA_SESSION_CONFIG.maxExpiredOrders, 4);
-});
-
-test('Orla expira um chamado por vez em série e encerra a fase após o limite de expirações', () => {
+test('Orla não expira chamados nem encerra a partida por tempo limite', () => {
   const game = new GameSession(ORLA_SESSION_CONFIG);
-  const { maxExpiredOrders } = ORLA_SESSION_CONFIG;
   game.start();
   game.advance(ORLA_EVENTS[0].atMs);
   assert.equal(game.snapshot().orders.length, 1);
-  assert.equal(head(game).definitionId, ORLA_EVENTS[0].id);
-  game.pause();
-  const paused = game.snapshot();
-  game.advance(100_000);
-  assert.deepEqual(game.snapshot(), paused);
-  game.resume();
-  // Em série só há um chamado ativo: cada prazo vencido libera imediatamente o seguinte.
-  for (let expired = 1; expired <= maxExpiredOrders; expired++) {
-    const active = head(game);
-    const events = game.advance(active.expiresAtMs - game.snapshot().elapsedMs);
-    assert.equal(events.filter(item => item.type === 'order-expired').length, 1);
-    assert.equal(game.snapshot().expiredOrders, expired);
-    if (expired < maxExpiredOrders) {
-      assert.equal(game.snapshot().status, 'playing');
-      assert.equal(game.snapshot().orders.length, 1);
-      assert.equal(head(game).definitionId, ORLA_EVENTS[expired].id);
-    }
-  }
-  assert.equal(game.snapshot().status, 'finished');
-  assert.equal(game.snapshot().completedOrders, 0);
-  assert.deepEqual(game.finish(), []);
-  game.start();
-  assert.equal(game.snapshot().elapsedMs, 0);
-  assert.equal(game.snapshot().orders.length, 0);
+  const firstOrder = head(game);
+  assert.equal(firstOrder.definitionId, ORLA_EVENTS[0].id);
+  // Mesmo demorando 10 minutos, o chamado continua ativo e a pontuação não fica negativa.
+  game.advance(600_000);
+  assert.equal(game.snapshot().status, 'playing');
+  assert.equal(game.snapshot().expiredOrders, 0);
+  assert.equal(game.snapshot().score, 0);
+  assert.equal(head(game).id, firstOrder.id);
+  for (const step of firstOrder.riskIds) game.resolveRisk(firstOrder.id, step);
+  assert.equal(game.snapshot().score, firstOrder.basePoints);
+  assert.ok(game.snapshot().score > 0);
 });
