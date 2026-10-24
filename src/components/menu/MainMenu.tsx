@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
@@ -9,6 +10,17 @@ import AudioControls from '../audio/AudioControls';
 import { useGameAudio } from '@/game/audio/useGameAudio';
 
 type MenuPanel = 'settings' | 'credits' | null;
+
+const menuIconPaths = {
+  play: <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />,
+  coop: <><circle cx="9" cy="8" r="3.2" /><path d="M3.5 19c.6-3.4 2.7-5.2 5.5-5.2s4.9 1.8 5.5 5.2" /><circle cx="16.5" cy="9" r="2.6" /><path d="M15.8 13.9c2.4.1 4.1 1.7 4.7 4.6" /></>,
+  settings: <><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2.3" /><circle cx="9" cy="17" r="2.3" /></>,
+  credits: <><path d="M12 6.5C10 5 7.2 4.6 4 5v13c3.2-.4 6 0 8 1.5 2-1.5 4.8-1.9 8-1.5V5c-3.2-.4-6 0-8 1.5z" /><path d="M12 6.5v13" /></>,
+};
+
+function MenuIcon({ name }: { name: keyof typeof menuIconPaths }) {
+  return <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">{menuIconPaths[name]}</svg>;
+}
 
 export default function MainMenu() {
   useGameAudio({ screen: 'menu', status: 'ready', preparing: false });
@@ -65,25 +77,36 @@ export default function MainMenu() {
       <AnimatedMenuScene animated={effectsEnabled && !reducedMotion} />
       <div className="menu-shade" aria-hidden="true" />
 
-      <header className="menu-heading">
-        <h1 className="menu-brand">SUBURBAN</h1>
-      </header>
+      <div className="menu-layout">
+        <header className="menu-heading">
+          <h1 className="menu-brand">
+            {/* O adesivo gira por `rotate` para não brigar com o `transform` que o GSAP anima no h1. */}
+            <span className="menu-logo-sticker">
+              <Image className="menu-logo" src="/assets/ui/logo.png" alt="SUBURBAN" width={1376} height={768} loading="eager" fetchPriority="high" />
+            </span>
+          </h1>
+          <p className="menu-brand menu-tagline">Planejamento urbano e tecnologia por uma cidade mais segura.</p>
+        </header>
 
-      <div ref={menu} className="menu-controls">
-        <div className="menu-actions">
-          <Link className="menu-action menu-action-primary" href="/jogo">
-            <span className="menu-icon" aria-hidden="true">▶</span><span>Iniciar</span><span className="menu-arrow" aria-hidden="true">↗</span>
-          </Link>
-          <Link className="menu-action" href="/coop">
-            <span className="menu-icon" aria-hidden="true">3</span><span>Jogar em coop</span><span className="menu-arrow" aria-hidden="true">→</span>
-          </Link>
-          <button className="menu-action" type="button" onClick={() => setActivePanel('settings')}>
-            <span className="menu-icon" aria-hidden="true">⚙</span><span>Configurações</span><span className="menu-arrow" aria-hidden="true">＋</span>
-          </button>
-          <button className="menu-action" type="button" onClick={() => setActivePanel('credits')}>
-            <span className="menu-icon menu-book" aria-hidden="true">▤</span><span>Créditos</span><span className="menu-arrow" aria-hidden="true">＋</span>
-          </button>
-        </div>
+        <nav ref={menu} className="menu-controls" aria-labelledby="menu-controls-title">
+          <h2 id="menu-controls-title" className="menu-kicker">Menu principal</h2>
+          <div className="menu-actions">
+            <Link className="menu-action menu-action-primary" href="/jogo">
+              <span className="menu-icon" aria-hidden="true"><MenuIcon name="play" /></span><span>Iniciar</span><span className="menu-arrow" aria-hidden="true">→</span>
+            </Link>
+            <Link className="menu-action" href="/coop">
+              <span className="menu-icon" aria-hidden="true"><MenuIcon name="coop" /></span><span>Jogar em coop</span><span className="menu-arrow" aria-hidden="true">→</span>
+            </Link>
+            <button className="menu-action" type="button" onClick={() => setActivePanel('settings')}>
+              <span className="menu-icon" aria-hidden="true"><MenuIcon name="settings" /></span><span>Configurações</span><span className="menu-arrow" aria-hidden="true">＋</span>
+            </button>
+            <button className="menu-action" type="button" onClick={() => setActivePanel('credits')}>
+              <span className="menu-icon" aria-hidden="true"><MenuIcon name="credits" /></span><span>Créditos</span><span className="menu-arrow" aria-hidden="true">＋</span>
+            </button>
+          </div>
+          {/* Faixa de pedra portuguesa: o calçadão da Orla como acabamento do cartão. */}
+          <div className="menu-mosaic" aria-hidden="true" />
+        </nav>
       </div>
 
 
