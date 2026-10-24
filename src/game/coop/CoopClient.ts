@@ -165,7 +165,7 @@ export class CoopClient {
         if (message.type === 'joined') this.identity = { id: message.id, code: message.code, role: message.role };
         if (message.type === 'room') this.room = message;
         if (message.type === 'left' || message.type === 'session-ended') { this.identity = null; this.room = null; }
-        if (message.type === 'pause' && this.room) this.room = { ...this.room, paused: message.paused };
+        if (message.type === 'pause') return; // Legacy server: menus are local.
         if (message.type === 'ack' || message.type === 'error' && message.requestId) {
           const pending = this.pending.get(message.requestId!);
           if (pending) {
@@ -214,14 +214,13 @@ export class CoopClient {
   tutorialReady(ready: boolean): Promise<void> { return this.request({ type: 'tutorial-ready', ready }); }
   private gameplay(message: Record<string, unknown>): void {
     if (this.socket?.readyState !== WebSocket.OPEN || this.room?.phase !== 'playing') return;
-    // Ações discretas já foram aplicadas aqui: seguem mesmo em pausa para a parceira não divergir.
-    if (this.room.paused && message.type === 'move') return;
+    // Menus locais não bloqueiam o transporte de ações ou posições.
     try { this.socket.send(JSON.stringify(message)); }
     catch { this.disconnect('Conexão perdida ao enviar uma ação.'); }
   }
   move(_role: CoopRole, x: number, z: number, yaw: number): void { this.gameplay({ type: 'move', x, z, yaw }); }
   action(action: CoopAction): void { this.gameplay({ type: 'action', action }); }
-  pause(paused: boolean): void { this.gameplay({ type: 'pause', paused }); }
+  pause(_paused: boolean): void { /* Compatibility: local overlay only. */ }
   disconnect(message?: string): void {
     const socket = this.socket;
     this.socket = null;
@@ -247,3 +246,4 @@ export const coopRoleToPlayerId = (role: CoopRole): 1 | 2 | 3 => role === 'infra
 export const COOP_ANALYST_ACTIONS: ReadonlySet<CoopAction['type']> = new Set(['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select']);
 export const coopHasAnalystAccess = (role: CoopRole, sharedAnalyst: boolean): boolean =>
   role === 'analista' || (sharedAnalyst && COOP_DUO_ROLES.includes(role));
+

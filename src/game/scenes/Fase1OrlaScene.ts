@@ -133,7 +133,10 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   advancePhase(elapsedMs: number): void { this.phase?.advance(elapsedMs); }
-  expirePhaseOrder(id: string, continuePhase = true): void { this.phase?.expireOrder(id, continuePhase); }
+  expirePhaseOrder(id: string, continuePhase = true): void {
+    this.clearCollisionRecovery();
+    this.phase?.expireOrder(id, continuePhase);
+  }
   phaseIsCinematic(): boolean { return this.phase?.isCinematicActive() ?? false; }
   phaseEventStatus(id: string): 'past' | 'current' | 'future' | 'unknown' { return this.phase?.eventStatus(id) ?? 'future'; }
   resolvePhaseOrderFromPeer(id: string): boolean {
@@ -544,7 +547,7 @@ export class Fase1OrlaScene implements GameScene {
 
   setTutorialCollisionProtection(active: boolean): void {
     this.tutorialCollisionProtected = active;
-    if (active) this.collisionRecovery = null;
+    if (active) this.clearCollisionRecovery();
   }
 
   update(dt: number): void {
@@ -631,6 +634,18 @@ export class Fase1OrlaScene implements GameScene {
     };
   }
 
+  private clearCollisionRecovery(): void {
+    const player = this.collisionRecovery?.player;
+    if (player) {
+      player.mesh.visible = true;
+      player.mesh.position.y = 0;
+      player.mesh.rotation.x = 0;
+      player.mesh.rotation.z = 0;
+      player.stopMovement();
+    }
+    this.collisionRecovery = null;
+  }
+
   private updateCollisionRecovery(dt: number): void {
     this.collisionInvulnerability = Math.max(0, this.collisionInvulnerability - dt);
     const recovery = this.collisionRecovery;
@@ -648,6 +663,7 @@ export class Fase1OrlaScene implements GameScene {
     }
     if (!recovery.respawned) {
       player.setPosition(recovery.spawn.x, recovery.spawn.z);
+      player.mesh.rotation.z = 0;
       recovery.respawned = true;
       this.collisionInvulnerability = 1.45;
     }
@@ -656,7 +672,7 @@ export class Fase1OrlaScene implements GameScene {
     if (blinkTime >= 1.45) {
       player.mesh.visible = true;
       player.mesh.rotation.z = 0;
-      this.collisionRecovery = null;
+      this.clearCollisionRecovery();
     }
   }
 
@@ -739,6 +755,7 @@ export class Fase1OrlaScene implements GameScene {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.clearCollisionRecovery();
     this.phase?.dispose();
     this.itemVisuals.dispose();
     this.activeMobility.dispose();
@@ -754,4 +771,5 @@ export class Fase1OrlaScene implements GameScene {
     this.trafficSignals.dispose();
   }
 }
+
 

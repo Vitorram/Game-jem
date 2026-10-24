@@ -40,8 +40,6 @@ export default function GameCanvas() {
   const panel = useRef<HTMLDivElement>(null);
   const game = useRef<Game | null>(null);
   const coopClient = useRef<ReturnType<typeof getCoopClient> | null>(null);
-  const coopRef = useRef<CoopSession | null>(null);
-  const suppressRemotePause = useRef(false);
   const statusRef = useRef<GameStatus>('ready');
   const [coopSession, setCoopSession] = useState<CoopSession | null>(null);
   const [coopRoster, setCoopRoster] = useState<CoopPlayer[]>([]);
@@ -75,12 +73,9 @@ export default function GameCanvas() {
   const [pauseSettingsOpen, setPauseSettingsOpen] = useState(false);
   const [abilities, setAbilities] = useState(() => new AbilityLab().snapshot());
   const [objectiveDistance, setObjectiveDistance] = useState<number | null>(null);
-  coopRef.current = coopSession;
   const failCoop = (message: string) => {
     setCoopFailure(true);
-    suppressRemotePause.current = true;
-    if (statusRef.current === 'playing') game.current?.togglePause();
-    suppressRemotePause.current = false;
+    game.current?.dispose();
     setError(message);
   };
 
@@ -128,12 +123,7 @@ export default function GameCanvas() {
           game.current?.finishCoopTutorial();
           setCoopTutorialWaiting(false);
           setCoopTutorialReady(false);
-          if (statusRef.current === 'paused') client.pause(true);
         }, message.startDelayMs);
-      } else if (message.type === 'pause' && game.current) {
-        suppressRemotePause.current = true;
-        if ((message.paused && statusRef.current === 'playing') || (!message.paused && statusRef.current === 'paused')) game.current.togglePause();
-        suppressRemotePause.current = false;
       } else if (message.type === 'error') client.disconnect(message.message);
       else if (message.type === 'session-ended' || message.type === 'connection' && message.state === 'disconnected') {
         clearTimeout(tutorialTimer);
@@ -155,7 +145,6 @@ export default function GameCanvas() {
         statusRef.current = value;
         setStatus(value);
         if (value === 'playing') setCloseView(game.current?.isCloseView ?? false);
-        if (coopRef.current && !suppressRemotePause.current && (value === 'paused' || value === 'playing')) coopClient.current?.pause(value === 'paused');
       }, setAbilities, setSelectedPlayer, setRisks, setInteractionPrompt, (open, type) => { setRepairPuzzleOpen(open); if (type) setRepairPuzzleType(type); }, setObjectiveDistance, action => coopClient.current?.action(action), setAnalystTabletOpen);
       game.current = instance;
       setInitialized(true);
@@ -268,7 +257,7 @@ export default function GameCanvas() {
   useGameAudio({ screen: 'game', status, preparing: !initialized || storyOpen || tutorialOpen || sceneId !== 'fase1-orla', error: !!error });
 
   useEffect(() => {
-    if (!coopSession || !coopClient.current || status !== 'playing' || coopTutorialWaiting) return;
+    if (!coopSession || !coopClient.current || (status !== 'playing' && status !== 'paused') || coopTutorialWaiting) return;
     const timer = window.setInterval(() => {
       const pose = game.current?.getCoopPose();
       if (pose) coopClient.current?.move(coopSession.role, pose.x, pose.z, pose.yaw);
@@ -382,7 +371,7 @@ export default function GameCanvas() {
         {coopRoster.map(member => <span key={member.id} className={member.id === coopSession.playerId ? 'is-you' : ''}>{member.name} · {member.role ? roleTitle(member.role) : 'Sem personagem'}</span>)}
         {sharedAnalyst && <span className="is-shared">Analista · tablet compartilhado</span>}
       </aside>}
-      {isOriginalOrla && !coopTutorialWaiting && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} onContinue={() => game.current?.togglePause()} onRestart={coopSession ? returnToMenu : undefined} />}
+      {isOriginalOrla && !coopTutorialWaiting && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={!coopSession && status !== 'playing'} onMenu={returnToMenu} onContinue={() => game.current?.togglePause()} onRestart={coopSession ? returnToMenu : undefined} />}
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
       {isLaboratory && testPuzzleType && <RepairPuzzle key={testPuzzleType} type={testPuzzleType} onComplete={() => setTestPuzzleType(null)} onCancel={() => setTestPuzzleType(null)} />}
       {status === 'playing' && !error && <>
@@ -486,6 +475,7 @@ export default function GameCanvas() {
     </section>
   );
 }
+
 
 
 

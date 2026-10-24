@@ -126,12 +126,12 @@ test('Client: movimentos e ações só saem durante partida válida e nunca fals
   session(ws, 'playing'); client.move('infraestrutura', 1, 2, 0);
   assert.deepEqual(ws.sent.at(-1), { type: 'move', x: 1, z: 2, yaw: 0 });
   ws.message({ type: 'pause', paused: true, by: 'Bia' });
-  client.move('infraestrutura', 3, 3, 0); assert.equal(ws.sent.length, 1, 'movimento não sai na pausa');
+  client.move('infraestrutura', 3, 3, 0); assert.equal(ws.sent.length, 2, 'pausa remota antiga não bloqueia movimento');
   client.action({ type: 'repair-complete' });
   assert.deepEqual(ws.sent.at(-1), { type: 'action', action: { type: 'repair-complete' } }, 'ação já aplicada localmente segue mesmo na pausa');
   ws.message({ type: 'session-ended', code: 'PLAYER_LEFT', message: 'A equipe saiu.' });
   assert.equal(client.hasSession('id1', 'ABCD1234'), false);
-  client.move('analista', 2, 3, 0); assert.equal(ws.sent.length, 2); client.disconnect();
+  client.move('analista', 2, 3, 0); assert.equal(ws.sent.length, 3); client.disconnect();
 });
 test('Client: composição da equipe espelha o servidor e permissões da central compartilhada', () => {
   const { coopTeamMode, coopHasAnalystAccess, COOP_MIN_PLAYERS, COOP_MAX_PLAYERS } = CoopClientModule;
@@ -227,3 +227,4 @@ test('Client e servidor reais: criação, listagem, papel ocupado e confirmaçã
   await b.join(code, 'Bia', 'mobilidade');
   assert.equal(b.currentRoom.players.length, 2);
 });
+
