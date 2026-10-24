@@ -504,3 +504,26 @@
 @media (max-height: 600px) and (min-width: 601px) {
   .toast { left: auto; right: 16px; bottom: 140px; max-width: min(420px, calc(100vw - 300px)); }
 }
+
+/* A short reward stamp; the toast still owns its existing lifetime and cleanup. */
+.toast[data-tone='good'] {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-color: #f0c260;
+  background: linear-gradient(135deg, #205e53, #173c42);
+  color: #fff5da;
+  box-shadow: 0 5px 0 #12332d, 0 10px 24px #0e2e2733;
+}
+.toast[data-tone='good']::before {
+  content: '✓';
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border: 2px solid #fff2bf;
+  border-radius: 50%;
+  background: #efbd5b;
+  color: #173c42;
+  font-size: 20px;
+}

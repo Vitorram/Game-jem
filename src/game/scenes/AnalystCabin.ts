@@ -1,11 +1,14 @@
-import { BoxGeometry, Group, Mesh, MeshStandardMaterial } from 'three';
+import { Group, Mesh, MeshStandardMaterial } from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { WorldSign } from './WorldSign';
 
 /** Pequeno posto de observação aberto para a câmera, junto à estação existente. */
 export class AnalystCabin {
   readonly group = new Group();
-  private readonly geometry = new BoxGeometry(1, 1, 1);
+  private readonly geometry = new RoundedBoxGeometry(1, 1, 1, 2, .035);
   private readonly materials = new Map<string, MeshStandardMaterial>();
   private disposed = false;
+  private readonly sign = new WorldSign('SUBURBAN', 'CENTRAL DA ORLA', 2.16, .60);
 
   constructor(x: number, z: number) {
     this.group.name = 'analyst-observation-cabin';
@@ -18,6 +21,9 @@ export class AnalystCabin {
     this.box('left-window', '#a9d8d1', [0.035, 0.78, 1.55], [-1.025, 1.0, -0.02]);
     this.box('right-window', '#a9d8d1', [0.035, 0.78, 1.55], [1.025, 1.0, -0.02]);
     this.box('roof-sign', '#e7b75c', [2.45, 0.13, 0.2], [0, 1.68, -0.87]);
+    this.sign.mesh.position.set(0,1.9,-.79);
+    this.group.add(this.sign.mesh);
+    this.box('sign-support', '#173c42', [2.3,.68,.08], [0,1.9,-.85]);
     // Cadeira e estação de trabalho ficam voltadas para a abertura frontal.
     this.box('chair-seat', '#34465b', [0.6, 0.13, 0.55], [0, 0.36, -0.48]);
     this.box('chair-back', '#34465b', [0.6, 0.52, 0.13], [0, 0.65, -0.73]);
@@ -49,9 +55,11 @@ export class AnalystCabin {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
+    this.sign.dispose();
     this.geometry.dispose();
     this.materials.forEach(material => material.dispose());
     this.materials.clear();
     this.group.clear();
   }
 }
+

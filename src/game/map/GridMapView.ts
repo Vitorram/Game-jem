@@ -1,5 +1,6 @@
 import {
   BoxGeometry,
+  Float32BufferAttribute,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -22,6 +23,7 @@ import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 import { ROAD_LAYOUT } from './roadLayout';
 import { TextureLibrary, type TextureKey } from './proceduralTextures';
 import { BeachSurface } from './BeachSurface';
+import { Seabirds } from './Seabirds';
 import { StaticSceneryBatches } from './StaticSceneryBatches';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
@@ -239,9 +241,9 @@ export class GridMapView {
   };
 
   /** Criados uma vez só; sem isto cada guarda-sol vazaria um material. */
-  private readonly umbrellaMaterials = UMBRELLA_COLORS.map(
-    color => new MeshStandardMaterial({ color, roughness: 0.72 }),
-  );
+  private readonly umbrellaMaterials = UMBRELLA_COLORS.map(color => new MeshStandardMaterial({ color, roughness: .72 }));
+  private readonly canopyMaterial = new MeshStandardMaterial({ color: '#ffffff', vertexColors: true, roughness: .82 });
+  private readonly canopies = new Map<number, ConeGeometry>();
 
   /** Todo material de mar (mapa e apron) entra aqui para receber a mesma animação. */
   private readonly seaMaterials: { material: MeshStandardMaterial; inverse: boolean }[] = [];
@@ -262,6 +264,7 @@ export class GridMapView {
   }[] = [];
 
   private time = 0;
+  private seabirds: Seabirds | null = null;
   private beachSurface: BeachSurface | null = null;
   private staticBatches: StaticSceneryBatches | null = null;
   private disposed = false;
@@ -369,8 +372,11 @@ export class GridMapView {
       });
       this.foam.length = 0;
       this.group.add(this.beachSurface.mesh);
+      this.seabirds = new Seabirds(map.width + ORLA_SCENERY_MARGIN * 2, shore);
+      this.group.add(this.seabirds.group);
     }
     const animated = new Set<object>([...this.floatingDecorations.map(item => item.mesh), ...this.foam.map(item => item.mesh)]);
+    if (this.seabirds) animated.add(this.seabirds.group);
     if (this.beachSurface) animated.add(this.beachSurface.mesh);
     this.staticBatches = new StaticSceneryBatches(this.group, animated);
   }
@@ -381,6 +387,7 @@ export class GridMapView {
 
     this.time += dt;
     this.beachSurface?.update(dt);
+    this.seabirds?.update(dt);
 
     const wave = (Math.sin(this.time * 1.2) + 1) / 2;
     const offsetX = (this.time * 0.016) % 1;
@@ -418,6 +425,7 @@ export class GridMapView {
     this.disposed = true;
     this.staticBatches?.dispose();
     this.beachSurface?.dispose();
+    this.seabirds?.dispose();
 
     this.flat.dispose();
     this.pebble.dispose();
@@ -449,6 +457,9 @@ export class GridMapView {
 
     Object.values(this.ambienceMaterials).forEach(material => material.dispose());
     this.umbrellaMaterials.forEach(material => material.dispose());
+    this.canopies.forEach(geometry => geometry.dispose());
+    this.canopies.clear();
+    this.canopyMaterial.dispose();
 
     this.roundedBoxes.forEach(geometry => geometry.dispose());
     this.roundedBoxes.clear();
@@ -919,6 +930,25 @@ export class GridMapView {
     this.group.add(palm);
   }
 
+  private canopy(index: number): ConeGeometry {
+    const cached = this.canopies.get(index);
+    if (cached) return cached;
+    const geometry = this.umbrellaTop.toNonIndexed() as ConeGeometry;
+    const positions = geometry.getAttribute('position');
+    const colors = new Float32Array(positions.count * 3);
+    const colored = new Color(UMBRELLA_COLORS[index % UMBRELLA_COLORS.length]);
+    const cream = new Color('#fff1d0');
+    for (let vertex = 0; vertex < positions.count; vertex += 3) {
+      const x = positions.getX(vertex)+positions.getX(vertex+1)+positions.getX(vertex+2);
+      const z = positions.getZ(vertex)+positions.getZ(vertex+1)+positions.getZ(vertex+2);
+      const sector = Math.floor((Math.atan2(z,x)+Math.PI) / (Math.PI*2/12));
+      const color = sector % 2 === 0 ? colored : cream;
+      for(let point=0;point<3;point++)color.toArray(colors,(vertex+point)*3);
+    }
+    geometry.setAttribute('color',new Float32BufferAttribute(colors,3));
+    this.canopies.set(index,geometry);return geometry;
+  }
+
   private addUmbrella(x: number, z: number, colorIndex: number, rotation: number): void {
     const umbrella = new Group();
     umbrella.name = 'beach-umbrella';
@@ -930,7 +960,7 @@ export class GridMapView {
     pole.position.y = 0.5;
     pole.castShadow = true;
 
-    const top = new Mesh(this.umbrellaTop, this.umbrellaMaterials[colorIndex]);
+    const top = new Mesh(this.canopy(colorIndex), this.canopyMaterial);
     top.position.y = 1.05;
     top.rotation.y = Math.PI / 12;
     top.castShadow = true;
@@ -945,6 +975,15 @@ export class GridMapView {
     chairB.rotation.set(-0.3, -0.25, 0);
     chairB.castShadow = true;
 
+    // Flat textiles live inside the existing umbrella area and add no obstacles.
+    for (const side of [-1, 1]) {
+      const towel = new Mesh(this.flat, this.material(`towel:${colorIndex}`, UMBRELLA_COLORS[colorIndex]));
+      towel.name = 'beach-towel'; towel.scale.set(.48,.012,.9);
+      towel.position.set(side*.4,.015,.35); towel.receiveShadow = true;
+      const trim = new Mesh(this.flat,this.ambienceMaterials.lifeguardLight);
+      trim.scale.set(.48,.005,.08);trim.position.set(side*.4,.024,.68);
+      umbrella.add(towel,trim);
+    }
     umbrella.add(pole, top, chairA, chairB);
     this.group.add(umbrella);
   }
