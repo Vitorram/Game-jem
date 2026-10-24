@@ -1,6 +1,6 @@
 'use client';
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { AnalystTutorialStep } from './OrlaTablet';
 
 type Props = {
@@ -11,7 +11,41 @@ type Props = {
 };
 
 type TargetRect = { top: number; right: number; bottom: number; left: number; width: number; height: number };
-type GuideLayout = { width: number; height: number; card: { left: number; top: number; width: number; height: number }; target: TargetRect | null };
+type Placement = 'above' | 'below' | 'left' | 'right' | 'floating';
+type GuideLayout = { width: number; height: number; card: { left: number; top: number }; target: TargetRect | null; placement: Placement; arrow: number };
+
+const SPOTLIGHT_PADDING = 7;
+const CARD_GAP = 18;
+const EDGE = 12;
+
+/** Retângulo que cobre todos os elementos, já com folga e recortado à janela. */
+function unionRect(elements: HTMLElement[]): TargetRect | null {
+  const boxes = elements.map(element => element.getBoundingClientRect()).filter(box => box.width > 0 && box.height > 0);
+  if (!boxes.length) return null;
+  const top = Math.max(0, Math.min(...boxes.map(box => box.top)) - SPOTLIGHT_PADDING);
+  const left = Math.max(0, Math.min(...boxes.map(box => box.left)) - SPOTLIGHT_PADDING);
+  const bottom = Math.min(window.innerHeight, Math.max(...boxes.map(box => box.bottom)) + SPOTLIGHT_PADDING);
+  const right = Math.min(window.innerWidth, Math.max(...boxes.map(box => box.right)) + SPOTLIGHT_PADDING);
+  return { top, right, bottom, left, width: right - left, height: bottom - top };
+}
+
+/** Cartão ao lado do recorte quando cabe; senão acima ou abaixo; em último caso, flutuando. */
+function placeCard(spotlight: TargetRect, focus: TargetRect, cardWidth: number, cardHeight: number, width: number, height: number) {
+  const sides: Placement[] = spotlight.left + spotlight.width / 2 > width / 2 ? ['left', 'right'] : ['right', 'left'];
+  const focusX = focus.left + focus.width / 2;
+  const focusY = focus.top + focus.height / 2;
+  for (const side of sides) {
+    const left = side === 'left' ? spotlight.left - cardWidth - CARD_GAP : spotlight.right + CARD_GAP;
+    if (left < EDGE || left + cardWidth > width - EDGE) continue;
+    const top = clamp(focusY - cardHeight / 2, EDGE, height - cardHeight - EDGE);
+    return { placement: side, left, top, arrow: clamp(focusY - top, 26, cardHeight - 26) };
+  }
+  const left = clamp(focusX - cardWidth / 2, EDGE, width - cardWidth - EDGE);
+  const arrow = clamp(focusX - left, 26, cardWidth - 26);
+  if (spotlight.top - cardHeight - CARD_GAP >= EDGE) return { placement: 'above' as const, left, top: spotlight.top - cardHeight - CARD_GAP, arrow };
+  if (spotlight.bottom + cardHeight + CARD_GAP <= height - EDGE) return { placement: 'below' as const, left, top: spotlight.bottom + CARD_GAP, arrow };
+  return null;
+}
 
 const lessons = [
   { title: 'Esta é a central da Analista', body: 'No mapa ela localiza problemas. No relatório avalia cada ocorrência. No plano de resposta, escolhe e aciona as equipes.' },
@@ -33,40 +67,38 @@ export default function AnalystTutorialGuide({ step, onBegin, onComplete, onSkip
   const lesson = lessons[step];
 
   useLayoutEffect(() => {
+    let previous = '';
     const measure = () => {
       const card = cardRef.current;
       if (!card) return;
       const cardBox = card.getBoundingClientRect();
-      const targetElement = isInteractiveStep
-        ? document.querySelector<HTMLElement>('[data-tutorial-target="true"]')
-        : null;
-      const targetBox = targetElement?.getBoundingClientRect();
-      const target = targetBox ? {
-        top: Math.max(0, targetBox.top - 7),
-        right: Math.min(window.innerWidth, targetBox.right + 7),
-        bottom: Math.min(window.innerHeight, targetBox.bottom + 7),
-        left: Math.max(0, targetBox.left - 7),
-        width: Math.min(window.innerWidth, targetBox.right + 7) - Math.max(0, targetBox.left - 7),
-        height: Math.min(window.innerHeight, targetBox.bottom + 7) - Math.max(0, targetBox.top - 7),
-      } : null;
-
       const width = window.innerWidth;
       const height = window.innerHeight;
-      const cardWidth = cardBox.width;
-      const cardHeight = cardBox.height;
-      let left = (width - cardWidth) / 2;
-      let top = (height - cardHeight) / 2;
-      if (target) {
-        left = clamp(target.left + target.width / 2 - cardWidth / 2, 12, width - cardWidth - 12);
-        top = target.top > height * 0.54
-          ? target.top - cardHeight - 18
-          : target.bottom + 18;
-        top = clamp(top, 12, height - cardHeight - 12);
+      // O item clicável recebe a seta; o contexto (relatório, mapa) fica iluminado junto para ser lido.
+      const focusElements = isInteractiveStep ? [...document.querySelectorAll<HTMLElement>('[data-tutorial-target="true"]')] : [];
+      const contextElements = isInteractiveStep ? [...document.querySelectorAll<HTMLElement>('[data-tutorial-context="true"]')] : [];
+      const focus = unionRect(focusElements);
+      let next: GuideLayout = { width, height, card: { left: (width - cardBox.width) / 2, top: (height - cardBox.height) / 2 }, target: null, placement: 'floating', arrow: 0 };
+      if (focus) {
+        const withContext = unionRect([...focusElements, ...contextElements]) ?? focus;
+        const placed = placeCard(withContext, focus, cardBox.width, cardBox.height, width, height);
+        const fallback = placed ? null : placeCard(focus, focus, cardBox.width, cardBox.height, width, height);
+        const target = placed ? withContext : focus;
+        const spot = placed ?? fallback;
+        next = spot
+          ? { width, height, card: { left: spot.left, top: spot.top }, target, placement: spot.placement, arrow: spot.arrow }
+          : { width, height, card: { left: clamp((width - cardBox.width) / 2, EDGE, width), top: focus.top > height / 2 ? EDGE : height - cardBox.height - EDGE }, target: focus, placement: 'floating', arrow: 0 };
       }
-      setLayout({ width, height, card: { left, top, width: cardWidth, height: cardHeight }, target });
+      const key = JSON.stringify(next);
+      if (key === previous) return;
+      previous = key;
+      setLayout(next);
     };
 
+    document.querySelector<HTMLElement>('[data-tutorial-target="true"]')?.scrollIntoView({ block: 'nearest' });
     measure();
+    // O tablet se atualiza a cada 250 ms e o relatório muda de altura ao selecionar: remede junto.
+    const timer = window.setInterval(measure, 200);
     const resize = new ResizeObserver(measure);
     if (cardRef.current) resize.observe(cardRef.current);
     const tablet = document.querySelector('.orla-tablet');
@@ -74,6 +106,7 @@ export default function AnalystTutorialGuide({ step, onBegin, onComplete, onSkip
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     return () => {
+      window.clearInterval(timer);
       resize.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
@@ -91,8 +124,8 @@ export default function AnalystTutorialGuide({ step, onBegin, onComplete, onSkip
     {panels.map((panel, index) => <div key={`${step}-${index}`} className="analyst-guide-scrim" style={panel} aria-hidden="true" />)}
     <aside
       ref={cardRef}
-      className={`analyst-guide-card${isInteractiveStep ? ' is-interactive' : ' is-intro'}${layout?.target && layout.card.top < layout.target.top ? ' is-above' : ''}`}
-      style={layout ? { left: layout.card.left, top: layout.card.top } : undefined}
+      className={`analyst-guide-card${isInteractiveStep ? ' is-interactive' : ' is-intro'} is-${layout?.placement ?? 'floating'}`}
+      style={layout ? { left: layout.card.left, top: layout.card.top, '--arrow-offset': `${layout.arrow}px` } as CSSProperties : undefined}
       aria-live="polite"
       aria-label="Tutorial obrigatório da Analista"
     >
