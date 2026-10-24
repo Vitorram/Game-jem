@@ -17,7 +17,8 @@ import MobilityTutorialGuide, { type MobilityTutorialStep } from './MobilityTuto
 import InfrastructureTutorialGuide, { type InfrastructureTutorialStep } from './InfrastructureTutorialGuide';
 import type { RepairPuzzleType } from '@/game/session/repairPuzzleTypes';
 import { suburbanGameState } from '@/game/core/GameState';
-import { gameMusic } from '@/game/audio/musicManager';
+import { useGameAudio } from '@/game/audio/useGameAudio';
+import AudioControls from '../audio/AudioControls';
 
 const playerIds: PlayerId[] = [1, 2, 3];
 
@@ -104,7 +105,6 @@ export default function GameCanvas() {
   };
 
   const startAnalystTutorial = () => {
-    void gameMusic.play('loading').catch(() => {});
     setStoryOpen(false);
     game.current?.startOrlaWithAnalystTutorial();
     setSceneId('fase1-orla');
@@ -158,18 +158,7 @@ export default function GameCanvas() {
   }, [isOriginalOrla]);
 
   const tutorialOpen = analystTutorialStep !== null || mobilityTutorialStep !== null || infrastructureTutorialStep !== null;
-  // Keep the tense loading soundtrack through all three tutorials.
-  // Switch only when the final tutorial finishes (or the tutorial is skipped).
-  useEffect(() => {
-    if (error || sceneId !== 'fase1-orla') return;
-    if (storyOpen || tutorialOpen) {
-      void gameMusic.play('loading').catch(() => {});
-    } else if (status === 'playing') {
-      void gameMusic.play('gameplay').catch(() => {});
-    }
-  }, [sceneId, storyOpen, tutorialOpen, status, error]);
-
-  useEffect(() => () => { gameMusic.stop(); }, []);
+  useGameAudio({ screen: 'game', status, preparing: !initialized || storyOpen || tutorialOpen || sceneId !== 'fase1-orla', error: !!error });
 
   useEffect(() => {
     if (!tutorialOpen) return;
@@ -248,6 +237,7 @@ export default function GameCanvas() {
               <button className="pause-secondary" onClick={returnToMenu}>Sair</button>
               <button className="pause-secondary" onClick={() => setPauseSettingsOpen(value => !value)}>{pauseSettingsOpen ? 'Fechar configurações' : 'Configurações'}</button>
             </div>}
+            {!error && status === 'paused' && pauseSettingsOpen && <AudioControls />}
             {status !== 'paused' && <div className="stack">ANALISAR <i /> ORGANIZAR <i /> REPARAR</div>}
           </div>
         </div>
@@ -348,5 +338,6 @@ export default function GameCanvas() {
     </section>
   );
 }
+
 
 

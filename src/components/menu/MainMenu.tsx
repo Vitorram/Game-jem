@@ -5,9 +5,13 @@ import { useEffect, useRef, useState } from 'react';
 import { gsap } from 'gsap';
 import AnimatedMenuScene from './AnimatedMenuScene';
 
+import AudioControls from '../audio/AudioControls';
+import { useGameAudio } from '@/game/audio/useGameAudio';
+
 type MenuPanel = 'settings' | 'credits' | null;
 
 export default function MainMenu() {
+  useGameAudio({ screen: 'menu', status: 'ready', preparing: false });
   const scene = useRef<HTMLElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLDivElement>(null);
@@ -92,6 +96,7 @@ export default function MainMenu() {
                 <div><b>Animações do cenário</b><small>Folhas, cabelos, luzes e letreiro</small></div>
                 <button type="button" className="effects-toggle" aria-pressed={effectsEnabled} onClick={toggleEffects}>{effectsEnabled ? 'Ativadas' : 'Pausadas'}</button>
               </div>
+              <AudioControls />
               <p className="settings-note">{reducedMotion ? 'Seu dispositivo prefere movimento reduzido. As animações ficam pausadas automaticamente.' : 'Sua preferência fica salva neste navegador.'}</p>
             </> : <>
               <span className="dialog-eyebrow">QUEM FAZ A CIDADE</span>
@@ -107,3 +112,4 @@ export default function MainMenu() {
     </main>
   );
 }
+

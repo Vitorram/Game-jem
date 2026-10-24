@@ -1,34 +1,40 @@
-# Trilha sonora do SUBURBAN — integração independente
+# Áudio do SUBURBAN
 
-Este módulo **não está ligado às telas ou cenas** para evitar conflitos com os trabalhos em outras branches.
+As faixas já estão em `public/assets/audio/` e tocam em loop:
 
-## Arquivos de áudio esperados
+| Tela / estado | Faixa |
+| --- | --- |
+| Menu inicial, incluindo configurações e créditos | Intro.mp3 |
+| Preparação, história e os três tutoriais | Carregamento.mp3 |
+| Partida após concluir ou pular o tutorial | Gameplay Default.mp3 |
+| Pausa ou aba oculta | Suspende; retoma do mesmo ponto |
+| Resultado / erro / saída | Para a faixa |
 
-Copiar os quatro MP3 originais para `public/assets/audio/` mantendo estes nomes:
+`Gameplay Speed.mp3` continua disponível no controlador, mas não é acionada automaticamente: a música 3 permanece durante toda a gameplay.
 
-- `Intro.mp3` — menu/tela inicial
-- `Carregamento.mp3` — carregamento
-- `Gameplay Default.mp3` — jogo normal
-- `Gameplay Speed.mp3` — jogo caótico/pressão
+O navegador pode exigir um clique ou tecla antes de liberar o som. A integração tenta novamente na interação seguinte. Trocar de faixa encerra a anterior e faz uma entrada suave de 500 ms, sem sobreposição entre telas.
 
-**Atenção:** os MP3 ainda precisam ser adicionados à branch. O gerenciador de áudio está pronto, mas as faixas não foram enviadas por limitação de upload binário da integração utilizada.
+## Controles e efeitos
 
-## Uso após adicionar os MP3
+Configurações do menu e da pausa têm volume separado de música e efeitos, além de “Silenciar tudo”. As preferências ficam salvas neste navegador. Silenciar funciona também durante a entrada suave.
 
-```ts
-import { gameMusic } from "@/game/audio/musicManager";
+Os efeitos são sintetizados com Web Audio, sem arquivos ou dependências adicionais:
 
-await gameMusic.play("intro"); // após interação do usuário
-await gameMusic.play("loading");
-await gameMusic.play("gameplay");
-await gameMusic.play("gameplaySpeed", 900);
-gameMusic.setVolume(0.35);
-gameMusic.setMuted(true);
-gameMusic.stop();
-```
+- Moedas: evento `order-completed`, ao concluir um chamado.
+- Notificação: `order-arrived`.
+- Aviso: pedido expirado, penalidade ou aviso de XP.
+- Buzina: durante a partida, se uma via tiver pelo menos três veículos e congestionamento >= 70%, no máximo uma vez a cada oito segundos.
 
-Cada arquivo é reproduzido em loop. A duração da fase **não** precisa corresponder à duração da faixa. O jogo é responsável por escolher o momento de trocar de faixa — por exemplo, ao iniciar uma fase, restarem 30 segundos ou aumentar o nível de caos.
+Efeitos não são reproduzidos durante tutorial, pausa ou com a aba oculta. Avisos antigos não se repetem ao retomar. O feedback usa o evento prioritário já publicado pelo `sessionStore`.
 
-Navegadores bloqueiam reprodução automática até uma interação do usuário; trate erros de `play` e inicie a trilha em um clique de entrada no jogo.
+## Integração com a Pessoa 1
 
-**Checklist para revisar antes do merge:** enviar os quatro MP3; testar caminhos e loops; disparar cues de acordo com o estado real das fases; validar transições, pausa e controles de volume. Não realizar merge antes disso.
+`useGameAudio` observa os estados existentes; não altera relógio, pontuação, vitória, derrota ou tutorial. `musicForState` centraliza a escolha da faixa. Quando a Pessoa 1 atualizar o encerramento, deve manter/publicar `finished` no Game ou na sessão. Se criar outros estados, atualizar esse mapeamento e seus testes. Não há fanfarra de vitória/derrota enquanto essas regras não estiverem definidas.
+
+## Validação
+
+- `node --test tests/audio.cjs`: transições, loop, trocas rápidas, mute no fade, pausa/retomada, autoplay, efeitos e limite de buzinas.
+- `npm run typecheck` e `npm run build`.
+- Conferência manual antes da demonstração: abrir menu e interagir para liberar som; iniciar; percorrer os três tutoriais; concluir ou pular; pausar e ajustar volumes; trocar de aba; concluir chamado; encerrar e voltar ao menu.
+
+Os testes de áudio usam dublês de HTMLAudioElement e Web Audio; não substituem a escuta em navegador/dispositivo real.
