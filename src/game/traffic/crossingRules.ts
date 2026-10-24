@@ -1,7 +1,8 @@
 /** Distâncias em unidades do mapa; cada faixa tem sua própria área de conflito. */
 export const CROSSING_RULES = {
   roadGroupSize: 3,
-  roadStopDistance: 2.45,
+  // Centro do carro para uma parada antes da zebra, com folga além do conflito.
+  roadStopDistance: 3.15,
   roadConflictHalfWidth: 2.05, // Meia faixa + meio ônibus + margem.
   roadApproachDistance: 7,
   roadFlowSeconds: 3,

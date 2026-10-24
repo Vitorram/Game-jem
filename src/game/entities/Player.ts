@@ -77,6 +77,7 @@ export class Player {
     this.head.position.y = 0.51;
     this.bag.position.set(0, 0.04, -0.24);
     this.build(appearance);
+    this.bag.scale.setScalar(0.78);
     this.mesh.scale.setScalar(PLAYER_VISUAL_SCALE);
     this.animate(0, 0, 0);
   }
@@ -95,8 +96,11 @@ export class Player {
     const mesh = new Mesh(geometry, this.material(color));
     mesh.position.set(...position);
     mesh.scale.set(...scale);
+    // Peças articuladas se sobrepõem muito; se cada uma recebe sombra das
+    // outras, o tronco vira uma mancha escura vista da câmera alta do jogo.
+    // Elas continuam projetando sombra no cenário, mas não umas nas outras.
     mesh.castShadow = true;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     parent.add(mesh);
     return mesh;
   }

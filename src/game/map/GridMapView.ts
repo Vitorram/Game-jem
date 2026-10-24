@@ -1617,10 +1617,14 @@ export class GridMapView {
     const southRow = rows - 1;
     if (this.map.tileAt(0, southRow) !== 'road') return;
 
-    const southEdgeZ = depth / 2;
     const sidewalkDepth = 0.8;
-    const sidewalkCenterZ = southEdgeZ - sidewalkDepth / 2;
-    const curbZ = southEdgeZ - sidewalkDepth + 0.06;
+    // A avenida ocupa ROAD_LAYOUT.bottomEdge a partir do seu bordo norte.
+    // Começávamos o passeio 24 cm antes desse limite, cobrindo a faixa externa
+    // e deixando parte dos carros por cima da calçada.
+    const roadNorthZ = depth / 2 - tileSize * 3;
+    const roadSouthEdgeZ = roadNorthZ + ROAD_LAYOUT.bottomEdge;
+    const sidewalkCenterZ = roadSouthEdgeZ + sidewalkDepth / 2;
+    const curbZ = roadSouthEdgeZ + 0.06;
     const curbMat = this.material('curb', '#e8e4da', { texture: 'grain', coloredTexture: false });
     const sidewalkMat = this.floorMaterial('promenade', 0, southRow);
 
@@ -1670,15 +1674,15 @@ export class GridMapView {
     // Mobiliário urbano da calçada inferior (bancos voltados à via, postes de pedestre e lixeiras)
     for (const column of [3, 9, 15, 20]) {
       const center = this.map.cellCenter(column, southRow);
-      this.addLamp(center.x, southEdgeZ - 0.3);
+      this.addLamp(center.x, roadSouthEdgeZ + 0.3);
     }
     for (const column of [5, 13, 18]) {
       const center = this.map.cellCenter(column, southRow);
-      this.addBench(center.x, southEdgeZ - 0.26, false);
+      this.addBench(center.x, roadSouthEdgeZ + 0.26, false);
     }
     for (const column of [7, 16]) {
       const center = this.map.cellCenter(column, southRow);
-      this.addBin(center.x, southEdgeZ - 0.34);
+      this.addBin(center.x, roadSouthEdgeZ + 0.34);
     }
   }
 
