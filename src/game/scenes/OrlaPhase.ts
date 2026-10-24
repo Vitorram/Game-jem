@@ -1,4 +1,4 @@
-import { BoxGeometry, CanvasTexture, ConeGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, RingGeometry, SphereGeometry, Sprite, SpriteMaterial } from 'three';
+import { BoxGeometry, CanvasTexture, ConeGeometry, CylinderGeometry, Group, Mesh, MeshStandardMaterial, RingGeometry, SphereGeometry, Sprite, SpriteMaterial, SRGBColorSpace } from 'three';
 import { suburbanGameState, type UrbanProblem } from '../core/GameState';
 import type { Player } from '../entities/Player';
 import type { GridMap } from '../map/GridMap';
@@ -122,9 +122,9 @@ export class OrlaPhase {
     secondCar.group.position.set(.92, 0, .3); secondCar.group.rotation.y = Math.PI / 2 - .2;
     this.crash.add(secondCar.group);
     this.crashBubble = this.createBubble('BATIDA LEVE');
-    if (this.crashBubble) { this.crashBubble.position.set(0, 2.8, 0); this.crashBubble.scale.set(3.3, .95, 1); this.crash.add(this.crashBubble); }
-    this.rescueBubble = this.createBubble('ENTREGADOR RESGATADO!');
-    if (this.rescueBubble) { this.rescueBubble.visible = false; this.rescueBubble.scale.set(3.6, 1.02, 1); this.group.add(this.rescueBubble); }
+    if (this.crashBubble) { this.crashBubble.position.set(0, 2.8, 0); this.crashBubble.scale.set(2.45, .68, 1); this.crash.add(this.crashBubble); }
+    this.rescueBubble = this.createBubble('RESGATE CONCLUÍDO', true);
+    if (this.rescueBubble) { this.rescueBubble.visible = false; this.rescueBubble.scale.set(2.65, .74, 1); this.group.add(this.rescueBubble); }
     for (let i = 0; i < 4; i++) {
       const puff = new Mesh(this.smokeGeometry, this.smokeMaterial);
       puff.position.set(i % 2 ? .72 : -.52, 1.1 + (i % 2) * .24, i < 2 ? -.12 : .43);
@@ -849,22 +849,24 @@ export class OrlaPhase {
     });
   }
 
-  private createSignalBubble(): Sprite | null { return this.createBubble('PROBLEMA NO SEMÁFORO!'); }
+  private createSignalBubble(): Sprite | null { return this.createBubble('SEMÁFORO EM FALHA'); }
 
-  private createBubble(message: string): Sprite | null {
+  private createBubble(message: string, success = false): Sprite | null {
     if (typeof document === 'undefined') return null;
     const canvas = document.createElement('canvas');
-    canvas.width = 440; canvas.height = 128;
+    canvas.width = 440; canvas.height = 124;
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
-    ctx.fillStyle = '#fff8e8'; ctx.strokeStyle = '#6b3024'; ctx.lineWidth = 7;
-    ctx.beginPath(); ctx.roundRect(7, 7, 426, 105, 28); ctx.fill(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(205, 108); ctx.lineTo(220, 125); ctx.lineTo(238, 108); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#8f3327'; ctx.font = 'bold 29px Arial'; ctx.textAlign = 'center';
-    ctx.fillText(message, 220, 70);
-    const texture = new CanvasTexture(canvas);
-    const material = new SpriteMaterial({ map: texture, transparent: true, depthTest: false });
-    const sprite = new Sprite(material); sprite.scale.set(4.5, 1.3, 1); sprite.renderOrder = 5;
+    ctx.fillStyle = '#173c42'; ctx.strokeStyle = success ? '#82d7b0' : '#efbd5b'; ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.roundRect(5, 5, 430, 98, 20); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(205, 104); ctx.lineTo(220, 120); ctx.lineTo(235, 104); ctx.fill();
+    ctx.fillStyle = success ? '#82d7b0' : '#efbd5b';
+    ctx.beginPath();ctx.arc(38,52,13,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle = '#fff5da'; ctx.font = 'bold 27px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(message, 240, 62);
+    const texture = new CanvasTexture(canvas); texture.colorSpace = SRGBColorSpace;
+    const material = new SpriteMaterial({ map: texture, transparent: true, depthTest: false, toneMapped: false });
+    const sprite = new Sprite(material); sprite.scale.set(2.8, .79, 1); sprite.renderOrder = 5;
     return sprite;
   }
 
