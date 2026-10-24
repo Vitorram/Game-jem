@@ -1489,3 +1489,56 @@ test('prazo encerra ações, relógio ignora pausa e menu desmonta a sessão', t
   assert.equal(statuses.at(-1), 'ready');
   game.dispose();
 });
+
+
+test('coop: menu e blur mantêm relógio e cena ativos, input local é limpo', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  t.after(() => game.dispose());
+  game.startCoopOrlaTutorial(2);
+  game.finishCoopTutorial();
+  const renderer = created[0];
+  const scene = game.scenes.current;
+  scene.setTutorialCollisionProtection(true);
+  const update = t.mock.method(scene, 'update');
+  renderer.loop(100);
+  const before = game.session.snapshot().elapsedMs;
+  game.input.setTouch(1, 'KeyD');
+  window.dispatchEvent(new Event('blur'));
+  assert.equal(game.status, 'playing');
+  assert.deepEqual(game.input.getAxis(), { x: 0, z: 0 });
+  game.togglePause();
+  renderer.loop(200);
+  renderer.loop(300);
+  assert.equal(game.status, 'paused', 'apenas o overlay está aberto');
+  assert.equal(game.session.snapshot().status, 'playing');
+  assert.equal(Math.round(game.session.snapshot().elapsedMs), before + 200);
+  assert.ok(update.mock.callCount() >= 3);
+  document.hidden = true;
+  renderer.loop(400);
+  assert.equal(Math.round(game.session.snapshot().elapsedMs), before + 300);
+  document.hidden = false;
+  game.togglePause();
+  renderer.loop(500);
+  assert.equal(Math.round(game.session.snapshot().elapsedMs), before + 400, 'fechar menu não perde delta');
+});
+
+test('recuperação interrompida por task ou proteção restaura personagem sem órfãos', () => {
+  const scene = new Fase1OrlaScene();
+  try {
+    for (const cleanup of [() => scene.expirePhaseOrder('unknown'), () => scene.setTutorialCollisionProtection(true)]) {
+      const player = scene.player;
+      player.mesh.visible = false;
+      player.mesh.position.y = .2;
+      player.mesh.rotation.z = .4;
+      scene.collisionRecovery = { player, elapsed: .3, respawned: true };
+      const children = scene.scene.children.length;
+      cleanup();
+      assert.equal(scene.collisionRecovery, null);
+      assert.equal(player.mesh.visible, true);
+      assert.equal(player.mesh.position.y, 0);
+      assert.equal(player.mesh.rotation.z, 0);
+      assert.equal(scene.scene.children.length, children);
+    }
+  } finally { scene.dispose(); }
+});

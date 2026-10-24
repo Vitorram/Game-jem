@@ -1,4 +1,4 @@
-﻿import {
+import {
   WebGLRenderer,
   PerspectiveCamera,
   PCFShadowMap,
@@ -70,6 +70,11 @@ export class Game {
   private applyingCoopAction = false;
   private readonly deferredCoopActions: { role: CoopRole; action: CoopAction; queuedAt: number; expiresAt: number }[] = [];
   private previousTime: number | null = null;
+  private coopAccumulatorMs = 0;
+  private backgroundTimer: ReturnType<typeof setInterval> | null = null;
+  private get simulating(): boolean {
+    return this.status === 'playing' || (this.coopPlayerId !== null && this.status === 'paused');
+  }
   private session?: GameSession;
   private disposed = false;
   private idleRendered = false;
@@ -138,6 +143,10 @@ export class Game {
 
     // Inicia o ciclo de renderização.
     this.renderer.setAnimationLoop(this.tick);
+    // RAF is suspended in hidden tabs. This fallback never renders or reads input.
+    this.backgroundTimer = setInterval(() => {
+      if (document.hidden && this.coopPlayerId !== null) this.tick(performance.now());
+    }, 50);
   }
 
   private resize = () => {
@@ -259,7 +268,9 @@ export class Game {
     current.startPhase((id, step) => sessionStore.resolveEvent(id, step));
     current.setTutorialMovementEnabled(true);
     this.coopTutorialActive = false;
-    sessionStore.setPaused(this.status === 'paused');
+    this.coopAccumulatorMs = 0;
+    this.previousTime = null;
+    sessionStore.setPaused(this.status === 'paused' && this.coopPlayerId === null);
     suburbanGameState.setActiveCharacter(this.coopPlayerId);
   }
 
@@ -444,7 +455,7 @@ export class Game {
       current.setTutorialMovementEnabled(true);
       current.startPhase((id, step) => sessionStore.resolveEvent(id, step));
     }
-    sessionStore.setPaused(this.status === 'paused');
+    sessionStore.setPaused(this.status === 'paused' && this.coopPlayerId === null);
   }
 
   getMobilityTutorialSnapshot() {
@@ -758,10 +769,10 @@ export class Game {
     this.idleRendered = false;
     this.status = status;
     this.input.clear();
-    this.previousTime = null;
+    if (this.coopPlayerId === null) this.previousTime = null;
     const scene = this.scenes.current;
     if (scene instanceof Fase1OrlaScene) scene.stopMovement();
-    if (this.session) sessionStore.setPaused(status === 'paused' || this.mandatoryTutorialActive || this.coopTutorialActive);
+    if (this.session) sessionStore.setPaused((status === 'paused' && this.coopPlayerId === null) || this.mandatoryTutorialActive || this.coopTutorialActive);
 
     if (status === 'paused') {
       this.intro?.pause();
@@ -781,6 +792,12 @@ export class Game {
   };
 
   private onBlur = () => {
+    this.input.clear();
+    if (this.coopPlayerId !== null) {
+      const scene = this.scenes.current;
+      if (scene instanceof Fase1OrlaScene) scene.stopMovement();
+      return;
+    }
     if (this.status === 'playing') {
       this.changeStatus('paused');
     }
@@ -891,17 +908,29 @@ export class Game {
 
     this.previousTime = time;
 
-    if (document.hidden) return;
+    if (document.hidden && this.coopPlayerId === null) return;
 
-    if (this.status === 'playing' && this.session && !this.mandatoryTutorialActive) {
-      sessionStore.tick(elapsedMs);
-      const scene = this.scenes.current;
-      if (scene instanceof Fase1OrlaScene) scene.advancePhase(this.session.snapshot().elapsedMs);
-      this.flushDeferredCoopActions();
-      this.checkSessionEnd();
-    }
-    if (this.status === 'playing') {
-      this.scenes.update(delta);
+    if (this.simulating) {
+      if (this.status === 'paused' || document.hidden) this.input.clear();
+      const advance = (worldDelta: number, clockDelta: number) => {
+        if (this.session && !this.mandatoryTutorialActive) {
+          sessionStore.tick(clockDelta);
+          const scene = this.scenes.current;
+          if (scene instanceof Fase1OrlaScene) scene.advancePhase(this.session.snapshot().elapsedMs);
+          this.flushDeferredCoopActions();
+          this.checkSessionEnd();
+        }
+        if (this.simulating) this.scenes.update(worldDelta);
+      };
+      if (this.coopPlayerId !== null && !this.coopTutorialActive) {
+        this.coopAccumulatorMs += elapsedMs;
+        const stepMs = 1000 / 60;
+        // Bounded catch-up. Keep the remainder rather than dropping world time.
+        for (let steps = 0; steps < 120 && this.coopAccumulatorMs + 1e-7 >= stepMs && this.simulating; steps++) {
+          this.coopAccumulatorMs = Math.max(0, this.coopAccumulatorMs - stepMs);
+          advance(stepMs / 1000, stepMs);
+        }
+      } else advance(delta, elapsedMs);
       this.updateCamera(delta);
     }
 
@@ -930,7 +959,7 @@ export class Game {
     }
 
     const current = this.scenes.current;
-    if (current && (this.status === 'playing' || !this.idleRendered)) {
+    if (!document.hidden && current && (this.simulating || !this.idleRendered)) {
       this.renderer.render(current.scene, this.camera);
       this.idleRendered = this.status !== 'playing';
     }
@@ -1005,6 +1034,9 @@ export class Game {
     this.disposed = true;
 
     this.renderer.setAnimationLoop(null);
+    if (this.backgroundTimer !== null) clearInterval(this.backgroundTimer);
+    this.backgroundTimer = null;
+    this.deferredCoopActions.length = 0;
 
     this.intro?.kill();
     this.orlaIntro?.kill();
@@ -1031,5 +1063,6 @@ export class Game {
     this.renderer.domElement.remove();
   }
 }
+
 
 

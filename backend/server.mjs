@@ -185,11 +185,7 @@ export function createCoopServer(options = {}) {
         peer.tutorialReady = message.ready; advanceTutorial(room); publishRoom(room); return;
       case 'pause':
         requirePhase(room, 'playing');
-        if (room.paused !== message.paused) {
-          room.paused = message.paused;
-          broadcast(room, { type: 'pause', paused: room.paused, by: peer.name });
-          publishRoom(room);
-        }
+        // Legacy clients may still send pause; never stop the shared world.
         return;
       case 'move':
       case 'action':
@@ -199,10 +195,6 @@ export function createCoopServer(options = {}) {
           if (message.type === 'action') reject('GAME_PAUSED', 'A partida ainda não está liberada para essa ação.');
           return;
         }
-        // Na pausa só o movimento é descartado. Uma ação que chega aqui já foi aplicada no
-        // cliente de origem (que ainda não sabia da pausa); rejeitá-la deixaria a outra
-        // pessoa sem ela e o erro derrubaria a sessão de quem a enviou.
-        if (room.paused && message.type === 'move') return;
         if (message.type === 'move') { broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer); return; }
         // Clientes aplicam a própria ação antes de enviar. Se duas pessoas analisam o mesmo
         // chamado ao mesmo tempo, a ordem do servidor decide e a cópia tardia é absorvida
@@ -341,3 +333,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     process.exitCode = 1;
   }
 }
+

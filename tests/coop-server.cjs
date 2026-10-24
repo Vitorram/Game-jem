@@ -191,13 +191,14 @@ test('Ações: papel vinculado ao socket, isolamento entre salas, pausa e dedupl
   await a.next('action');
   assert.equal((await i.request({ ...message, action: { type: 'interact', axis: { x: 0, z: 0 }, pose: { x: 0, z: 0, yaw: 0 } } })).code, 'REQUEST_CONFLICT');
   await a.request({ type: 'pause', paused: true });
-  await m.next('pause');
+  await m.request({ type: 'list-rooms' });
+  assert.equal(m.events.filter(event => event.type === 'pause').length, 0);
   // A ação já foi aplicada em quem a enviou: na pausa ela segue para as demais; só o movimento cai.
   assert.equal((await i.request({ type: 'action', action: { type: 'repair-complete' } })).type, 'ack');
   await i.request({ type: 'move', x: 5, z: 5, yaw: 0 });
   await a.request({ type: 'list-rooms' }); // Round-trip fence after all preceding messages.
   assert.equal(a.events.filter(event => event.type === 'action').length, 2);
-  assert.equal(a.events.filter(event => event.type === 'move').length, 1);
+  assert.equal(a.events.filter(event => event.type === 'move').length, 2);
   assert.equal(other.events.filter(event => ['move', 'action'].includes(event.type)).length, 0);
   await m.request({ type: 'pause', paused: false });
   await i.request({ type: 'move', x: 5, z: 5, yaw: 0 });
@@ -421,3 +422,4 @@ test('Escolha na sala: entra sem personagem, vê as vagas e disputa simultânea 
   assert.equal(start.mode, 'duo');
   assert.ok(start.players.every(player => player.role), 'a partida só começa com todas as personagens escolhidas');
 });
+

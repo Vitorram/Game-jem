@@ -164,6 +164,7 @@ class SessionStore {
   private publish(snapshot: SessionSnapshot, events: SessionEvent[]): void {
     let best: SessionEvent | null = null;
     for (const event of events) {
+      if (event.type === 'order-completed') this.definitionsByOrderId.delete(event.orderId);
       const priority = PRIORITY[event.type] ?? 0;
       if (priority > 0 && (!best || priority >= (PRIORITY[best.type] ?? 0))) best = event;
     }
@@ -181,6 +182,7 @@ class SessionStore {
       if (event.type === 'order-arrived') this.definitionsByOrderId.set(event.order.id, event.order.definitionId);
       else if (event.type === 'order-expired') {
         const definitionId = this.definitionsByOrderId.get(event.orderId);
+        this.definitionsByOrderId.delete(event.orderId);
         if (definitionId) this.onOrderExpired?.(definitionId, this.session?.snapshot().status === 'playing');
         if (this.session?.snapshot().status === 'playing') this.onPauseForPenalty?.();
       }
@@ -191,4 +193,5 @@ class SessionStore {
 }
 
 export const sessionStore = new SessionStore();
+
 
