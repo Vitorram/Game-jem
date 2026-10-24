@@ -33,7 +33,7 @@ export default function GameObjectiveHUD({ player, distance, tutorialTarget = fa
       <span className="mission-responsibility">PRÓXIMO PASSO · {brief.team}</span>
       <p>{brief.action}</p>
       {(problem.status === 'MAINTENANCE' || problem.id === 'rush-hour') && problem.instruction && <span className="mission-live">{problem.instruction}</span>}
-      <span className="mission-location">{brief.location}{distance === null ? '' : ` · ~${distance} m`}</span>
+      <span className="mission-location">{brief.location}{distance !== null && brief.team === playerTeamName(player) && player !== 3 ? ` · ~${distance} m` : ''}</span>
       {brief.team !== playerTeamName(player) && <span className="mission-handoff">Você: {playerTeamName(player)} · próxima ação: {brief.team}.</span>}
       {problem.instruction && problem.status !== 'RESOLVED' && <details>
         <summary>Ver orientação do chamado</summary><p>{problem.instruction}</p>

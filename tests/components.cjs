@@ -322,8 +322,8 @@ test('HUD da campanha permanece visível antes da análise e não desaparece em 
     suburbanGameState.reset();
     suburbanGameState.setPhase({elapsedMs:30000,recovery:false,waitingPedestrians:0,queuedVehicles:0});
     suburbanGameState.setProblems([{id,label:id,status:'ACTIVE',position:{x:0,z:0},dispatchedTeams:[],requiredTeams:[],analyzed:false}]);
-    const html=render('GameObjectiveHUD.tsx',{player:2,distance:null});
-    assert.match(html,/Objetivo da equipe/);assert.match(html,/PRÓXIMO PASSO/);assert.match(html,/Abra o tablet com Q/);
+    const html=render('GameObjectiveHUD.tsx',{player:2,distance:99});
+    assert.match(html,/Objetivo da equipe/);assert.match(html,/PRÓXIMO PASSO/);assert.match(html,/Abra o tablet com Q/);assert.doesNotMatch(html,/~99 m/);
   }
 });
 
