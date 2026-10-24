@@ -1,4 +1,4 @@
-﻿import {
+import {
   WebGLRenderer,
   PerspectiveCamera,
   PCFShadowMap,
@@ -53,6 +53,7 @@ export class Game {
   private previousTime: number | null = null;
   private session?: GameSession;
   private disposed = false;
+  private idleRendered = false;
   private readonly observedCallIds = new Set<string>();
   private pendingTabletOpen = false;
   /** Chamados resolvidos que já levaram o jogador ao tablet uma vez para arquivar. */
@@ -132,6 +133,7 @@ export class Game {
     );
 
     this.renderer.setSize(width, height);
+    this.idleRendered = false;
 
     this.camera.aspect = width / height;
     const current = this.scenes.current;
@@ -501,6 +503,7 @@ export class Game {
   }
 
   private changeStatus(status: GameStatus) {
+    this.idleRendered = false;
     this.status = status;
     this.input.clear();
     this.previousTime = null;
@@ -668,7 +671,10 @@ export class Game {
     }
 
     const current = this.scenes.current;
-    if (current) this.renderer.render(current.scene, this.camera);
+    if (current && (this.status === 'playing' || !this.idleRendered)) {
+      this.renderer.render(current.scene, this.camera);
+      this.idleRendered = this.status !== 'playing';
+    }
   };
 
   private openRepairPuzzle(type: RepairPuzzleType = 'pole'): void {

@@ -14,10 +14,25 @@
 .intro button { font: inherit; cursor: pointer; }
 .intro button:focus-visible { outline: 1px solid var(--gold); outline-offset: 4px; }
 
-.film { position: absolute; z-index: 0; inset: 0; opacity: 0; background: #000; transition: opacity 1.4s ease; }
-.cinema .film { opacity: 1; }
-.world { position: absolute; inset: 0; overflow: hidden; background: #18282a; }
-.world canvas { display: block; width: 100%; height: 100%; }
+.film { position: absolute; z-index: 0; inset: 0; opacity: 0; background: #000; transition: opacity .8s ease; }
+.cinema .film { opacity: 1; animation: film-in .8s ease both; }
+/* Letterbox: as faixas entram junto com o filme e dão a proporção de cinema sem cobrir o texto. */
+.film::before, .film::after { content: ''; position: absolute; z-index: 1; left: 0; right: 0; height: 7vh; background: #000; transform: scaleY(0); transition: transform 1.2s ease .3s; pointer-events: none; }
+.film::before { top: 0; transform-origin: top; }
+.film::after { bottom: 0; transform-origin: bottom; }
+.cinema .film::before, .cinema .film::after { transform: scaleY(1); }
+/* Fundo preto: o fade da câmera (opacidade do canvas) mergulha no escuro. */
+.world { position: absolute; inset: 0; overflow: hidden; background: #000; }
+.world canvas { display: block; width: 100%; height: 100%; transition: filter .3s ease; }
+/* Plano da câmera de monitoramento (beat 2): imagem fria, linhas de varredura e moldura de gravação. */
+.world[data-lens="cctv"] canvas { filter: saturate(.55) contrast(1.12) brightness(.96); }
+.world[data-lens="cctv"]::after {
+  content: 'CAM 07 · ORLA   ● REC';
+  position: absolute; inset: 9vh 4vw; padding: 10px 12px;
+  border: 1px solid #ffffff4d; pointer-events: none;
+  color: #e9f4ef; font: 600 11px/1 ui-monospace, Consolas, monospace; letter-spacing: .14em; white-space: pre;
+  background: repeating-linear-gradient(0deg, #0000 0 2px, #0000001f 2px 3px);
+}
 .vignette { position: absolute; z-index: 0; inset: 0; pointer-events: none; background: linear-gradient(180deg, #0009 0%, #0004 42%, #0009 100%); opacity: 0; transition: opacity 1s ease; }
 .cinema .vignette { opacity: 1; }
 .fallback { position: absolute; inset: 0; overflow: hidden; background: linear-gradient(#25393a 0 42%, #bdab82 43% 53%, #353b38 54%); }
@@ -66,6 +81,7 @@
 .exitCurtain { position: absolute; z-index: 5; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .6s ease; }
 .exiting .exitCurtain { opacity: 1; pointer-events: auto; }
 
+@keyframes film-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes narrative-in { from { opacity: 0; filter: blur(4px); } to { opacity: 1; filter: blur(0); } }
 @keyframes cursor-blink { 50% { opacity: 0; } }
 @keyframes title-in { from { opacity: 0; filter: blur(8px); transform: translateY(10px); } to { opacity: 1; filter: blur(0); transform: translateY(0); } }

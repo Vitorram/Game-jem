@@ -8,12 +8,12 @@ import { ORLA_CROSSING } from '../config';
 import { CROSSING_RULES, advanceWithRoom } from './crossingRules';
 import { VehicleModels, VEHICLE_VISUAL_SCALE, type VehicleKind } from './VehicleModels';
 
-const FLEET_SEQUENCE: readonly VehicleKind[] = [
+export const FLEET_SEQUENCE: readonly VehicleKind[] = [
   'sedan', 'motorcycle', 'bus', 'truck', 'hatch', 'suv', 'pickup', 'motorcycle',
   'sedan', 'truck', 'hatch', 'motorcycle', 'suv', 'bus', 'pickup', 'sedan',
   'motorcycle', 'hatch', 'pickup', 'suv',
 ];
-const FLEET_COLORS = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84', '#5c9c6b', '#d97a43'] as const;
+export const FLEET_COLORS = ['#e4a23b', '#48a9a2', '#d15e55', '#7f77bc', '#d8d5c8', '#4b6a84', '#5c9c6b', '#d97a43'] as const;
 
 type Lane = {
   id: string;
@@ -77,8 +77,16 @@ const PLAYER_COLLISION_SPEED = 0.05;
 /** Raio do corpo do jogador usado para o atropelamento; menor que o de colisão do mapa. */
 
 /** Fluxo viário da Orla: avenidas comuns e faixa verde exclusiva para elétricos. */
+/**
+ * `publishState: false` mantém o tráfego fora do suburbanGameState (o prólogo roda por cima
+ * do jogo); `reservedLanes` não recebem veículos, para quem cria a cena coreografar a faixa.
+ */
+export type TrafficSystemOptions = { publishState?: boolean; reservedLanes?: readonly string[] };
+
 export class TrafficSystem {
   readonly group = new Group();
+  private readonly publishState: boolean;
+  private readonly reservedLanes: ReadonlySet<string>;
   private readonly barrierGeometry = new BoxGeometry(0.15, 0.14, 0.84);
   private readonly coneGeometry = new ConeGeometry(0.22, 0.58, 8);
   private readonly barrierMaterial = new MeshStandardMaterial({ color: '#da584b', emissive: '#512018', roughness: 0.65 });
@@ -136,7 +144,9 @@ export class TrafficSystem {
   private disposed = false;
   private roadStatePublishElapsed = 0;
 
-  constructor(map: GridMap) {
+  constructor(map: GridMap, { publishState = true, reservedLanes = [] }: TrafficSystemOptions = {}) {
+    this.publishState = publishState;
+    this.reservedLanes = new Set(reservedLanes);
     this.group.name = 'traffic-flow';
     this.width = map.width;
     this.minX = -map.width / 2;
@@ -155,7 +165,7 @@ export class TrafficSystem {
     ];
     this.chargers = this.createChargers(greenRoadZ);
     this.lanes.forEach((lane, laneIndex) => {
-      if (lane.type === 'GREEN') return;
+      if (lane.type === 'GREEN' || this.reservedLanes.has(lane.id)) return;
       this.spawnTimers.set(lane.id, 1.4 + laneIndex * 0.65);
       for (let index = 0; index < INITIAL_VEHICLES_PER_LANE; index++) {
         const vehicleIndex = laneIndex * INITIAL_VEHICLES_PER_LANE + index;
@@ -658,7 +668,7 @@ export class TrafficSystem {
     // A 55-second demand wave moves from light traffic to a short rush and back.
     this.demandLevel = this.scheduledDemand ?? (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.demandClock * Math.PI * 2 / 55 - Math.PI / 6)));
     for (const lane of this.lanes) {
-      if (lane.type !== 'PRINCIPAL') continue;
+      if (lane.type !== 'PRINCIPAL' || this.reservedLanes.has(lane.id)) continue;
       const remaining = (this.spawnTimers.get(lane.id) ?? 2) - dt;
       this.spawnTimers.set(lane.id, remaining);
       if (remaining > 0 || !this.trySpawnVehicle(lane)) continue;
@@ -1043,7 +1053,7 @@ export class TrafficSystem {
   }
 
   private publishRoadState(force = false): void {
-    if (!force && this.roadStatePublishElapsed < 0.1) return;
+    if (!this.publishState || (!force && this.roadStatePublishElapsed < 0.1)) return;
     this.roadStatePublishElapsed = 0;
     suburbanGameState.setRoads(this.getRoadStates());
   }
@@ -1060,6 +1070,6 @@ export class TrafficSystem {
       .forEach(material => material.dispose());
     this.chargers.forEach(charger => charger.statusMaterial.dispose());
     this.group.clear();
-    suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
+    if (this.publishState) suburbanGameState.setRoads(this.getRoadStates().map(road => ({ ...road, vehicleCount: 0, congestion: 0, status: 'open' })));
   }
 }
