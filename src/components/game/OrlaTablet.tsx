@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { ORLA_MAP } from '@/game/map/orlaMap';
-import { GRID_CONFIG } from '@/game/config';
+import { ROAD_LAYOUT } from '@/game/map/roadLayout';
+import { GRID_CONFIG, ORLA_CROSSING } from '@/game/config';
 import { suburbanGameState, type ResponseTeam, type UrbanProblem } from '@/game/core/GameState';
 
 const tiles: Record<string, string> = { '~': 'sea', '.': 'sand', '=': 'prom', '-': 'cycle', R: 'road', '#': 'wall', B: 'counter', E: 'station', C: 'box' };
@@ -12,6 +13,72 @@ const teams: { id: ResponseTeam; label: string; short: string; color: string }[]
   { id: 'infraestrutura', label: 'Infraestrutura', short: 'REPARO ELÉTRICO', color: 'mint' },
   { id: 'mobilidade', label: 'Mobilidade', short: 'ISOLAR O TRECHO', color: 'gold' },
 ];
+
+const MAP_COLUMNS = ORLA_MAP.rows[0].length;
+const MAP_ROWS = ORLA_MAP.rows.length;
+
+const MAP_WIDTH = MAP_COLUMNS * GRID_CONFIG.tileSize;
+const MAP_DEPTH = MAP_ROWS * GRID_CONFIG.tileSize;
+
+const SIDEWALK_ROW = ORLA_MAP.rows.findIndex(
+  (row, index) => row[0] === '-' && ORLA_MAP.rows[index + 1]?.[0] === 'R'
+);
+
+const ROAD_ROW = SIDEWALK_ROW + 1;
+const ROAD_DEPTH = (MAP_ROWS - ROAD_ROW) * GRID_CONFIG.tileSize;
+
+const CROSSING_COLUMN = Math.floor(
+  (ORLA_CROSSING.centerX + MAP_WIDTH / 2) / GRID_CONFIG.tileSize
+);
+
+const SCALE_METERS = 10;
+
+const percent = (value: number, total: number) =>
+  `${(value / total) * 100}%`;
+
+const mapStyle = {
+  '--map-columns': MAP_COLUMNS,
+  '--map-rows': MAP_ROWS,
+} as CSSProperties;
+
+const roadMarksStyle = {
+  top: percent(ROAD_ROW, MAP_ROWS),
+  '--green-end': percent(ROAD_LAYOUT.greenWidth, ROAD_DEPTH),
+  '--east-dash': percent(ROAD_LAYOUT.eastDash, ROAD_DEPTH),
+  '--median': percent(ROAD_LAYOUT.median, ROAD_DEPTH),
+  '--west-dash': percent(ROAD_LAYOUT.westDash, ROAD_DEPTH),
+  '--bottom-edge': percent(ROAD_LAYOUT.bottomEdge, ROAD_DEPTH),
+} as CSSProperties;
+
+const crossingX = (halfWidth: number) => ({
+  left: percent(
+    ORLA_CROSSING.centerX - halfWidth + MAP_WIDTH / 2,
+    MAP_WIDTH
+  ),
+  width: percent(halfWidth * 2, MAP_WIDTH),
+});
+
+const cycleCrossingStyle = {
+  ...crossingX(ORLA_CROSSING.rampHalfWidth),
+  top: percent(SIDEWALK_ROW - 1, MAP_ROWS),
+  height: percent(1, MAP_ROWS),
+};
+
+const tactileEdgeStyle = {
+  ...crossingX(ORLA_CROSSING.rampHalfWidth),
+  top: percent(SIDEWALK_ROW, MAP_ROWS),
+};
+
+const curbRampStyle = {
+  ...crossingX(ORLA_CROSSING.rampHalfWidth),
+  top: `calc(${percent(ROAD_ROW, MAP_ROWS)} - 1.4%)`,
+};
+
+const roadCrossingStyle = {
+  ...crossingX(ORLA_CROSSING.roadClearHalfWidth),
+  top: percent(ROAD_ROW, MAP_ROWS),
+  bottom: 0,
+};
 
 function problemTitle(problem: UrbanProblem): string {
   return problem.type === 'broken-light-pole' ? 'Poste danificado'
@@ -116,18 +183,23 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
   }, [tutorialStep, selectedInGame, infrastructureDispatched, mobilityDispatched, onTutorialProgress]);
 
   const issueByTile = useMemo(() => {
-    const columns = ORLA_MAP.rows[0].length;
-    const rows = ORLA_MAP.rows.length;
-    const width = columns * GRID_CONFIG.tileSize;
-    const depth = rows * GRID_CONFIG.tileSize;
     const result = new Map<string, UrbanProblem[]>();
+
     for (const problem of problems) {
-      const column = Math.floor((problem.position.x + width / 2) / GRID_CONFIG.tileSize);
-      const row = Math.floor((problem.position.z + depth / 2) / GRID_CONFIG.tileSize);
-      if (column < 0 || row < 0 || column >= columns || row >= rows) continue;
+      const column = Math.floor(
+        (problem.position.x + MAP_WIDTH / 2) / GRID_CONFIG.tileSize
+      );
+
+      const row = Math.floor(
+        (problem.position.z + MAP_DEPTH / 2) / GRID_CONFIG.tileSize
+      );
+
+      if (column < 0 || row < 0 || column >= MAP_COLUMNS || row >= MAP_ROWS) continue;
+
       const key = `${row},${column}`;
       result.set(key, [...(result.get(key) ?? []), problem]);
     }
+
     return result;
   }, [problems]);
 
@@ -143,13 +215,13 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
         <div className="tablet-map-column">
           <div className="tablet-section-title"><span>01 / MAPA DA ÁREA</span><b>SETOR ORLA</b></div>
           <div className="tablet-map-frame">
-            <div className="tablet-map" role="grid" aria-label="Mini mapa da Orla">
+            <div className="tablet-map tablet-map-stage" role="grid" aria-label="Mini mapa da Orla" style={mapStyle}>
               {ORLA_MAP.rows.flatMap((row, rowIndex) => Array.from(row, (kind, column) => {
                 const issues = issueByTile.get(`${rowIndex},${column}`) ?? [];
-                const tileClass = kind === '-' && rowIndex === 8 ? 'sidewalk' : tiles[kind] ?? 'sand';
+                const tileClass = kind === '-' && rowIndex === SIDEWALK_ROW ? 'sidewalk' : tiles[kind] ?? 'sand';
                 const trafficZoneTile = kind === 'R' ? ' traffic-zone zone-' + trafficZone : '';
-                const electricLaneTile = kind === 'R' && rowIndex === 9 ? ' electric-lane-map' : '';
-                const pedestrianZoneTile = rowIndex === 8 && column >= 10 && column <= 12 ? ' pedestrian-zone zone-' + pedestrianZone : '';
+                const electricLaneTile = kind === 'R' && rowIndex === ROAD_ROW ? ' electric-lane-map' : '';
+                const pedestrianZoneTile = rowIndex === SIDEWALK_ROW && Math.abs(column - CROSSING_COLUMN) <= 1 ? ' pedestrian-zone zone-' + pedestrianZone : '';
                 return <div key={rowIndex + '-' + column} role="gridcell" className={'map-tile map-row-' + rowIndex + ' map-col-' + column + ' ' + tileClass + trafficZoneTile + pedestrianZoneTile + electricLaneTile + (issues.length ? ' has-incident' : '')}>
                   {issues.length > 0 && <button aria-label={`Ver ${issues.length > 1 ? `${issues.length} ocorrências` : problemTitle(issues[0])}`} onClick={event => { analyze(issues[0].id); event.currentTarget.blur(); }}>
                     <span className={`tablet-map-pin${selectedId === issues[0].id ? ' is-selected' : ''}${issues[0].status === 'RESOLVED' ? ' is-resolved' : ''}`}><i>{issues.length > 1 ? issues.length : '!'}</i></span>
@@ -157,13 +229,14 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
                   {!issues.length && ['B', 'C', 'E'].includes(kind) && <span className={`map-object object-${kind.toLowerCase()}`}>{kind === 'B' ? '▰' : kind === 'C' ? '□' : '⌂'}</span>}
                 </div>;
               }))}
-              <span className="map-crossing cycle-crossing" aria-hidden="true" />
-              <span className="map-crossing tactile-cycle-edge" aria-hidden="true" />
-              <span className="map-crossing north-curb-ramp" aria-hidden="true" />
-              <span className="map-crossing road-crossing" aria-hidden="true" />
+              <span className="map-road-marks" style={roadMarksStyle} aria-hidden="true" />
+              <span className="map-crossing cycle-crossing" style={cycleCrossingStyle} aria-hidden="true" />
+              <span className="map-crossing tactile-cycle-edge" style={tactileEdgeStyle} aria-hidden="true" />
+              <span className="map-crossing north-curb-ramp" style={curbRampStyle} aria-hidden="true" />
+              <span className="map-crossing road-crossing" style={roadCrossingStyle} aria-hidden="true" />
             </div>
             <div className="tablet-map-compass">N <i>▲</i></div>
-            <div className="tablet-map-scale"><i /> 40 m</div>
+            <div className="tablet-map-scale"><i /> {SCALE_METERS} m</div>
           </div>
           <div className="tablet-flow-zones" aria-label="Condições de circulação">
             <span className={'flow-zone ' + trafficZone} aria-label={'Veículos: ' + queuedVehicles + ' na fila, condição ' + zoneLabel[trafficZone].toLocaleLowerCase('pt-BR')}>
@@ -215,7 +288,7 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
             })}
           </div>}
           <button data-tutorial-target={tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? 'true' : undefined} className={`tablet-action${resolved ? ' is-complete' : ''}${tutorialStep !== undefined && tutorialStep !== null && tutorialStep >= 2 && tutorialStep <= 4 ? ' tutorial-focus' : ''}`} disabled={!selected || (!resolved && (isTowIssue ? !!issue?.analyzed && !canCallTow : allDispatched && tutorialStep == null))} onClick={event => { if (isTowIssue && issue?.analyzed && canCallTow) { setPhoneFeedback(''); setPhoneOpen(true); } else onAction(issue?.id); event.currentTarget.blur(); }}><span>{resolved ? '✦' : isTowIssue && canCallTow ? '☎' : allDispatched ? '✓' : !selected ? '!' : '➜'}</span>{actionLabel}<kbd>{resolved ? 'XP' : isTowIssue && canCallTow ? '☎' : 'E'}</kbd></button>
-          <small className="tablet-action-hint">{!issue ? 'Aguarde o pr\u00F3ximo chamado da central.' : resolved ? 'Relat\u00F3rio conclu\u00EDdo. Arquive para registrar XP e liberar o pr\u00F3ximo chamado.' : isTowIssue ? !issue.analyzed ? 'Leia o registro da pane para abrir os contatos de emergência.' : canCallTow ? 'Escolha o serviço correto na lista telefônica para enviar o guincho.' : 'Acompanhe a chegada e aguarde o reboque liberar a faixa.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relat\u00F3rio e confirme a an\u00E1lise para continuar.' : allDispatched ? 'Refor\u00E7o solicitado. Escolha uma equipe liberada para agir.' : 'An\u00E1lise conclu\u00EDda. Solicite refor\u00E7o para liberar a equipe.'}</small>
+          <small className="tablet-action-hint">{!issue ? 'Aguarde o próximo chamado da central.' : resolved ? 'Relatório concluído. Arquive para registrar XP e liberar o próximo chamado.' : isTowIssue ? !issue.analyzed ? 'Leia o registro da pane para abrir os contatos de emergência.' : canCallTow ? 'Escolha o serviço correto na lista telefônica para enviar o guincho.' : 'Acompanhe a chegada e aguarde o reboque liberar a faixa.' : !selected ? 'Clique no chamado da lista ou no alerta do mapa para analisar.' : !issue.analyzed ? 'Leia o relatório e confirme a análise para continuar.' : allDispatched ? 'Reforço solicitado. Escolha uma equipe liberada para agir.' : 'Análise concluída. Solicite reforço para liberar a equipe.'}</small>
         </div>
       </div>
       <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>
