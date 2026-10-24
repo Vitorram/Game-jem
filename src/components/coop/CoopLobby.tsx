@@ -17,10 +17,12 @@ type LobbyScreen = 'home' | 'browse' | 'code';
 const modeOf = (room: Pick<CoopRoom, 'players' | 'mode'>): CoopTeamMode | null => room.mode !== undefined ? room.mode : coopTeamMode(room.players);
 function teamStatus(room: CoopRoom, mode: CoopTeamMode | null): { title: string; detail: string } {
   const count = room.players.length;
+  const choosing = room.players.filter(player => !player.role).length;
   if (count < COOP_MIN_PLAYERS) return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · falta pelo menos mais uma`, detail: 'A partida começa com 2 ou 3 pessoas. Em dupla, escolham Mobilidade e Infraestrutura: as funções da Analista ficam no tablet das duas.' };
+  if (choosing) return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · escolham as personagens`, detail: 'Cada pessoa escolhe uma vaga livre nos cards abaixo. Em dupla, fiquem com Mobilidade e Infraestrutura.' };
   if (mode === 'trio') return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · equipe completa`, detail: 'Cada pessoa cuida de uma função: Analista, Mobilidade e Infraestrutura.' };
   if (mode === 'duo') return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · dupla pronta para jogar`, detail: 'Mobilidade e Infraestrutura dividem a central da Analista: cada uma abre o próprio tablet. Uma terceira pessoa ainda pode entrar como Analista.' };
-  return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · ajuste os papéis`, detail: 'Em dupla a equipe precisa de Mobilidade e Infraestrutura. Quem está como Analista pode trocar de papel abaixo, ou esperem a terceira pessoa.' };
+  return { title: `${count}/${COOP_MAX_PLAYERS} pessoas · ajuste os papéis`, detail: 'Em dupla a equipe precisa de Mobilidade e Infraestrutura. Quem está como Analista pode trocar de personagem nos cards abaixo, ou esperem a terceira pessoa.' };
 }
 
 export default function CoopLobby() {
@@ -28,7 +30,6 @@ export default function CoopLobby() {
   const client = useMemo(() => getCoopClient(), []);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
-  const [role, setRole] = useState<CoopRole>('analista');
   const [screen, setScreen] = useState<LobbyScreen>('home');
   const [room, setRoom] = useState<CoopRoom | null>(null);
   const [rooms, setRooms] = useState<CoopRoomListing[]>([]);
@@ -52,7 +53,7 @@ export default function CoopLobby() {
 
   useEffect(() => {
     const onMessage = (message: CoopMessage) => {
-      if (message.type === 'joined') { setMyId(message.id); setRole(message.role); }
+      if (message.type === 'joined') setMyId(message.id);
       if (message.type === 'room') setRoom(message);
       if (message.type === 'rooms') { setRooms(message.rooms); setListState('loaded'); setListError(''); }
       if (message.type === 'connection') {
@@ -73,7 +74,7 @@ export default function CoopLobby() {
       if (message.type === 'error') { setError(message.message); setBusy(false); }
       if (message.type === 'game-start') {
         const me = message.players.find(player => player.id === myId);
-        if (!me) { setError('Não encontrei seu papel na sala. Entre novamente.'); return; }
+        if (!me?.role) { setError('Não encontrei seu papel na sala. Entre novamente.'); return; }
         try {
           sessionStorage.setItem('suburban-coop-session', JSON.stringify({
             room: message.room, playerId: me.id, role: me.role, name: me.name,
@@ -122,12 +123,13 @@ export default function CoopLobby() {
     catch (cause) { setListState('error'); setListError(cause instanceof Error ? cause.message : 'Não foi possível carregar as salas.'); }
   };
 
-  const createRoom = () => void withConnection(() => client.createRoom(name, role, true));
+  // A personagem é escolhida dentro da sala, depois de ver quais vagas estão livres.
+  const createRoom = () => void withConnection(() => client.createRoom(name, null, true));
   const joinByCode = () => {
     if (!code.trim()) { setError('Digite o código que a anfitriã compartilhou.'); return; }
-    void withConnection(() => client.join(code, name, role));
+    void withConnection(() => client.join(code, name));
   };
-  const joinOpenRoom = (roomCode: string) => void withConnection(() => client.joinOpen(roomCode, name, role));
+  const joinOpenRoom = (roomCode: string) => void withConnection(() => client.joinOpen(roomCode, name));
   const leaveRoom = () => {
     client.disconnect();
     if (navigationTimer.current) clearTimeout(navigationTimer.current);
@@ -140,14 +142,15 @@ export default function CoopLobby() {
     catch { setError('Não consegui copiar. Selecione o código e copie manualmente.'); }
   };
 
-  const isHost = room?.players.find(player => player.id === myId)?.host ?? false;
-  const isReady = room?.players.find(player => player.id === myId)?.ready ?? ready;
+  const me = room?.players.find(player => player.id === myId);
+  const myRole = me?.role ?? null;
+  const isHost = me?.host ?? false;
+  const isReady = me?.ready ?? ready;
   const mode = room ? modeOf(room) : null;
+  const choosing = room ? room.players.filter(player => !player.role) : [];
   const allReady = !!room && mode !== null && room.players.every(player => player.ready);
   const status = room ? teamStatus(room, mode) : null;
-  const slots = room ? roles.map(candidate => ({ role: candidate, player: room.players.find(player => player.role === candidate) })) : [];
-  const freeRoles = room ? roles.filter(candidate => !room.players.some(player => player.role === candidate)) : [];
-  const changeRole = (next: CoopRole) => void roomCommand(async () => { await client.setRole(next); setReady(false); });
+  const chooseRole = (next: CoopRole) => void roomCommand(async () => { await client.setRole(next); setReady(false); });
 
   return <main className={styles.page}>
     <div className={styles.card}>
@@ -155,7 +158,7 @@ export default function CoopLobby() {
       <span className={styles.kicker}>SUBURBAN · COOP ONLINE</span>
       <div className={styles.connectionStatus} data-state={connection} role="status"><i aria-hidden="true" />{connection === 'connected' ? 'Conectada ao servidor' : connection === 'connecting' ? 'Conectando ao servidor…' : 'Sem conexão com o servidor'}</div>
       <h1>Uma cidade.<br /><em>Duas ou três pessoas.</em></h1>
-      {!room && <p className={styles.lead}>Monte sua equipe para cuidar da Orla com 2 ou 3 pessoas: crie uma sala e compartilhe o código, entre em uma sala aberta ou use o código de alguém.</p>}
+      {!room && <p className={styles.lead}>Monte sua equipe para cuidar da Orla com 2 ou 3 pessoas: crie uma sala e compartilhe o código, entre em uma sala aberta ou use o código de alguém. A personagem você escolhe dentro da sala, vendo quais vagas estão livres.</p>}
 
       {room ? <section className={styles.lobby} aria-label="Sala cooperativa">
         <div className={styles.roomTopline}><div><small>SALA DE OPERAÇÕES</small><h2>Sua equipe está chegando</h2></div><button className={styles.textButton} onClick={leaveRoom}>Sair da sala</button></div>
@@ -168,44 +171,39 @@ export default function CoopLobby() {
           {isHost && <button className={styles.textButton} disabled={busy || room.phase !== 'lobby'} onClick={() => void roomCommand(() => client.setPublic(!room.isPublic))}>{room.isPublic ? 'Tornar privada' : 'Mostrar nas salas abertas'}</button>}
         </div>
         {status && <div className={styles.teamStatus} data-mode={mode ?? 'pending'} role="status"><b>{status.title}</b><span>{status.detail}</span></div>}
-        <div className={styles.players} aria-label="Vagas da equipe">
-          {slots.map(({ role: candidate, player }) => {
-            const character = roleInfo[candidate];
-            // Em dupla a vaga da Analista não está "faltando": as duas pessoas a assumem pelo tablet.
-            const sharedSlot = !player && candidate === 'analista' && mode === 'duo';
-            return <article className={`${styles.playerSlot}${player ? '' : ` ${styles.playerSlotEmpty}`}`} key={candidate}>
-              <span className={styles.avatar}><Image src={character.portrait} alt={`Retrato da equipe de ${character.title}`} fill sizes="64px" className={styles.avatarImage} /></span>
-              <div><small>{character.focus}</small><b>{player?.name ?? character.title}{player?.id === myId ? ' (você)' : ''}</b><span>{character.title}{player?.host ? ' · Anfitriã' : player ? ' · Na equipe' : sharedSlot ? ' · Tablet dividido pela dupla' : ' · Aguardando alguém'}</span></div>
-              <span className={player?.ready ? styles.ready : sharedSlot ? styles.shared : styles.waiting}>{player ? player.ready ? 'Pronta' : 'Chegou' : sharedSlot ? 'Compartilhada' : 'Vaga aberta'}</span>
-            </article>;
-          })}
+        <div className={styles.rolePicker} role="group" aria-label="Personagens da equipe">
+          <div className={styles.rolePickerHeading}><b>{myRole ? 'Personagens da equipe' : 'Escolha sua personagem'}</b><small>{myRole ? 'Toque em uma vaga livre para trocar.' : 'Veja quem já está na sala e escolha uma vaga livre.'}</small></div>
+          <div className={styles.roleCards}>
+            {roles.map(candidate => {
+              const character = roleInfo[candidate];
+              const occupant = room.players.find(player => player.role === candidate);
+              const mine = !!occupant && occupant.id === myId;
+              // Em dupla a vaga da Analista não está "faltando": as duas pessoas a assumem pelo tablet.
+              const sharedSlot = !occupant && candidate === 'analista' && mode === 'duo';
+              const mark = mine ? '✓ Sua' : occupant ? 'Ocupada' : sharedSlot ? 'Compartilhada' : myRole ? 'Trocar' : 'Escolher';
+              const detail = occupant ? `${occupant.name}${mine ? ' (você)' : ''}${occupant.host ? ' · anfitriã' : ''} · ${occupant.ready ? 'pronta' : 'se preparando'}`
+                : sharedSlot ? 'Em dupla, Mobilidade e Infraestrutura usam o tablet desta função. Uma terceira pessoa ainda pode assumir.'
+                  : character.summary;
+              return <button type="button" key={candidate} disabled={busy || room.phase !== 'lobby' || !!occupant}
+                className={`${styles.roleCard}${mine ? ` ${styles.roleCardSelected}` : occupant ? ` ${styles.roleCardTaken}` : ''}`}
+                aria-pressed={mine} aria-label={`${character.title}: ${occupant ? `ocupada por ${occupant.name}` : 'vaga livre'}`}
+                onClick={() => chooseRole(candidate)}>
+                <span className={styles.rolePortrait}><Image src={character.portrait} alt="" fill sizes="(max-width: 600px) 96px, 120px" className={styles.rolePortraitImage} priority /></span>
+                <span className={styles.roleCopy}><small>{character.focus}</small><b>{character.title}</b><span>{detail}</span></span>
+                <span className={styles.roleSelectMark} aria-hidden="true">{mark}</span>
+              </button>;
+            })}
+          </div>
+          {choosing.length > 0 && <p className={styles.choosing}>Escolhendo personagem: {choosing.map(player => player.id === myId ? `${player.name} (você)` : player.name).join(', ')}</p>}
         </div>
-        {room.phase === 'lobby' && freeRoles.length > 0 && <div className={styles.roleSwitch} role="group" aria-label="Trocar de papel">
-          <span>Trocar meu papel:</span>
-          {freeRoles.map(candidate => <button key={candidate} type="button" className={styles.textButton} disabled={busy} onClick={() => changeRole(candidate)}>{roleInfo[candidate].title}</button>)}
-        </div>}
         <div className={styles.lobbyActions}>
-          <button className={styles.secondary} disabled={busy || room.phase !== 'lobby'} onClick={() => void roomCommand(() => client.ready(!isReady))}>{isReady ? 'Cancelar prontidão' : 'Estou pronta'}</button>
-          {isHost && <button className={styles.primary} disabled={!allReady || busy || room.phase !== 'lobby'} onClick={() => void roomCommand(() => client.start())}>{room.phase !== 'lobby' ? 'Preparando partida…' : allReady ? mode === 'duo' ? 'Iniciar em dupla' : 'Iniciar partida' : room.players.length < COOP_MIN_PLAYERS ? 'Aguardando mais 1 pessoa' : !mode ? 'Ajuste os papéis da dupla' : 'Aguardando todas ficarem prontas'}</button>}
+          <button className={styles.secondary} disabled={busy || room.phase !== 'lobby' || !myRole} onClick={() => void roomCommand(() => client.ready(!isReady))}>{!myRole ? 'Escolha uma personagem' : isReady ? 'Cancelar prontidão' : 'Estou pronta'}</button>
+          {isHost && <button className={styles.primary} disabled={!allReady || busy || room.phase !== 'lobby'} onClick={() => void roomCommand(() => client.start())}>{room.phase !== 'lobby' ? 'Preparando partida…' : allReady ? mode === 'duo' ? 'Iniciar em dupla' : 'Iniciar partida' : room.players.length < COOP_MIN_PLAYERS ? 'Aguardando mais 1 pessoa' : choosing.length ? 'Aguardando as escolhas' : !mode ? 'Ajuste os papéis da dupla' : 'Aguardando todas ficarem prontas'}</button>}
           {!isHost && <p>A anfitriã inicia quando a equipe tiver 2 ou 3 pessoas prontas.</p>}
         </div>
       </section> : <>
         <div className={styles.setup}>
           <label className={styles.nameField}>Como podemos te chamar?<input value={name} maxLength={24} placeholder="Seu nome na equipe" onChange={event => setName(event.target.value)} /></label>
-          <div className={styles.rolePicker} role="group" aria-label="Escolha sua personagem e sua função">
-            <div className={styles.rolePickerHeading}><b>Escolha seu papel</b><small>Uma personagem por vaga. Em dupla, fiquem com Mobilidade e Infraestrutura.</small></div>
-            <div className={styles.roleCards}>
-              {roles.map(candidate => {
-                const character = roleInfo[candidate];
-                const selected = role === candidate;
-                return <button type="button" key={candidate} disabled={busy} className={`${styles.roleCard}${selected ? ` ${styles.roleCardSelected}` : ''}`} aria-pressed={selected} onClick={() => setRole(candidate)}>
-                  <span className={styles.rolePortrait}><Image src={character.portrait} alt={`Personagem de ${character.title}`} fill sizes="(max-width: 600px) 96px, 120px" className={styles.rolePortraitImage} priority /></span>
-                  <span className={styles.roleCopy}><small>{character.focus}</small><b>{character.title}</b><span>{character.summary}</span></span>
-                  <span className={styles.roleSelectMark} aria-hidden="true">{selected ? '✓ Escolhida' : 'Escolher'}</span>
-                </button>;
-              })}
-            </div>
-          </div>
         </div>
 
         <nav className={styles.entryChoices} aria-label="Opções de partida">
@@ -220,14 +218,14 @@ export default function CoopLobby() {
             : listState === 'error' ? <div className={styles.listError} role="alert"><b>Não foi possível buscar as salas</b><span>{listError}</span><button className={styles.secondary} onClick={() => void refreshRooms()}>Tentar novamente</button></div>
             : rooms.length ? <div className={styles.openRooms}>{rooms.map(openRoom => {
             const hostPlayer = openRoom.players.find(player => player.host);
-            const roleTaken = openRoom.players.some(player => player.role === role);
             const openSlots = COOP_MAX_PLAYERS - openRoom.players.length;
-            // Entrar como a peça que falta já forma a dupla Mobilidade + Infraestrutura.
-            const completesDuo = coopTeamMode([...openRoom.players, { role }]) === 'duo';
+            const taken = openRoom.players.flatMap(player => player.role ? [player.role] : []);
+            const undecided = openRoom.players.length - taken.length;
+            const lineup = [...taken.map(role => roleInfo[role].title), ...(undecided ? [`${undecided} escolhendo`] : [])].join(' · ');
             return <article className={styles.openRoom} key={openRoom.code}>
-              <div className={styles.openRoomPortraits}>{openRoom.players.map(player => <Image key={player.id} src={roleInfo[player.role].portrait} alt="" width={34} height={34} className={styles.openRoomAvatar} />)}</div>
-              <div className={styles.openRoomInfo}><b>Sala de {hostPlayer?.name ?? 'equipe da Orla'}</b><span>{openRoom.players.length}/{COOP_MAX_PLAYERS} pessoas · {openSlots} {openSlots === 1 ? 'vaga' : 'vagas'}{modeOf(openRoom) === 'duo' ? ' · dupla já pode jogar' : completesDuo ? ' · você completa a dupla' : ''}</span><small>{openRoom.players.map(player => roleInfo[player.role].title).join(' · ')}</small></div>
-              <button className={styles.joinButton} disabled={busy || !name.trim() || roleTaken || openRoom.players.length >= COOP_MAX_PLAYERS} title={roleTaken ? 'Escolha um papel livre nos cards acima.' : undefined} onClick={() => joinOpenRoom(openRoom.code)}>{roleTaken ? 'Papel ocupado' : 'Entrar'}</button>
+              <div className={styles.openRoomPortraits}>{taken.map(role => <Image key={role} src={roleInfo[role].portrait} alt="" width={34} height={34} className={styles.openRoomAvatar} />)}</div>
+              <div className={styles.openRoomInfo}><b>Sala de {hostPlayer?.name ?? 'equipe da Orla'}</b><span>{openRoom.players.length}/{COOP_MAX_PLAYERS} pessoas · {openSlots} {openSlots === 1 ? 'vaga' : 'vagas'}{modeOf(openRoom) === 'duo' ? ' · dupla já pode jogar' : ''}</span><small>{lineup}</small></div>
+              <button className={styles.joinButton} disabled={busy || !name.trim() || openRoom.players.length >= COOP_MAX_PLAYERS} onClick={() => joinOpenRoom(openRoom.code)}>Entrar</button>
             </article>;
           })}</div> : <div className={styles.emptyRooms}><b>Nenhuma sala aberta por enquanto</b><span>Crie a primeira ou atualize a lista daqui a pouco.</span></div>}
         </section>}
@@ -239,7 +237,7 @@ export default function CoopLobby() {
       </>}
 
       {error && <p className={styles.error} role="alert">{error}</p>}
-      <footer className={styles.footer}>Jogue com 2 ou 3 pessoas. Em trio: Analista, Mobilidade e Infraestrutura. Em dupla: Mobilidade e Infraestrutura, com o tablet da Analista para as duas. O prólogo e o tutorial começam quando todas estiverem prontas.</footer>
+      <footer className={styles.footer}>Jogue com 2 ou 3 pessoas. Em trio: Analista, Mobilidade e Infraestrutura. Em dupla: Mobilidade e Infraestrutura, com o tablet da Analista para as duas. As personagens são escolhidas dentro da sala; o prólogo e o tutorial começam quando todas estiverem prontas.</footer>
     </div>
   </main>;
 }

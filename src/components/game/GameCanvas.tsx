@@ -94,7 +94,7 @@ export default function GameCanvas() {
         const currentRoom = client.currentRoom;
         const currentPlayer = currentRoom?.players.find(player => player.id === session?.playerId);
         if (!session || !client.hasSession(session.playerId, session.room)
-          || !currentRoom || currentRoom.phase === 'lobby' || !currentPlayer || currentPlayer.role !== session.role) {
+          || !currentRoom || currentRoom.phase === 'lobby' || !currentPlayer || !currentPlayer.role || currentPlayer.role !== session.role) {
           sessionStorage.removeItem('suburban-coop-session');
           setError('A sessão coop expirou. Volte às salas para reunir sua equipe.');
           return;
@@ -369,7 +369,7 @@ export default function GameCanvas() {
           {coopSession.role === 'analista' ? <p>WASD move você e Shift corre. Pressione Q ou toque em Abrir tablet para analisar chamados e coordenar as equipes. Você fica parada no local enquanto usa o tablet; guarde com Q para voltar a andar. O trânsito e o relógio continuam.</p>
             : coopSession.role === 'mobilidade' ? <p>WASD move você, Shift corre e E interage. Organize o trânsito, proteja a área de trabalho e mantenha a ciclovia segura.</p>
               : <p>WASD move você, Shift corre e E interage. Vá até os equipamentos chamados e conclua os reparos quando a área estiver protegida.</p>}
-          {sharedAnalyst && <p className="coop-tutorial-shared">Partida em dupla: vocês duas dividem a central da Analista. Q abre e guarda o seu tablet; com ele aberto, E analisa o chamado e 1 / 2 acionam Infraestrutura e Mobilidade. O que uma de vocês concluir aparece no tablet da outra, e abrir o tablet não trava a parceira.</p>}
+          {sharedAnalyst && <p className="coop-tutorial-shared">Partida em dupla: vocês duas dividem a central da Analista. Q abre e guarda o seu tablet; com ele aberto você fica parada, E analisa o chamado e 1 / 2 acionam Infraestrutura e Mobilidade. O que uma de vocês concluir aparece no tablet da outra, e o seu tablet nunca trava a parceira.</p>}
           <p className="coop-tutorial-note">A partida e os chamados só começam quando {sharedAnalyst ? 'as duas pessoas' : 'todas as pessoas'} da sala confirmarem que entenderam seu papel.</p>
           <button type="button" className="coop-tutorial-ready" disabled={coopTutorialReady} onClick={() => {
             setCoopTutorialReady(true);
@@ -379,7 +379,7 @@ export default function GameCanvas() {
       </div>}
       {coopSession && !coopTutorialWaiting && <aside className="coop-team-hud" aria-label="Equipe cooperativa">
         <b>COOP · {coopSession.room}</b>
-        {coopRoster.map(member => <span key={member.id} className={member.id === coopSession.playerId ? 'is-you' : ''}>{member.name} · {roleTitle(member.role)}</span>)}
+        {coopRoster.map(member => <span key={member.id} className={member.id === coopSession.playerId ? 'is-you' : ''}>{member.name} · {member.role ? roleTitle(member.role) : 'Sem personagem'}</span>)}
         {sharedAnalyst && <span className="is-shared">Analista · tablet compartilhado</span>}
       </aside>}
       {isOriginalOrla && !coopTutorialWaiting && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} onContinue={() => game.current?.togglePause()} onRestart={coopSession ? returnToMenu : undefined} />}

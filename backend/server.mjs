@@ -100,7 +100,7 @@ export function createCoopServer(options = {}) {
   function addPlayer(peer, room, message) {
     if (room.phase !== 'lobby') reject('GAME_STARTED', 'A partida desta sala já começou.');
     if (room.players.size >= MAX_PLAYERS) reject('ROOM_FULL', 'A sala já tem três pessoas.');
-    if ([...room.players.values()].some(player => player.role === message.role)) reject('ROLE_TAKEN', 'Esse papel já está ocupado. Escolha outra personagem.');
+    if (message.role && [...room.players.values()].some(player => player.role === message.role)) reject('ROLE_TAKEN', 'Esse papel já está ocupado. Escolha outra personagem.');
     Object.assign(peer, { room, name: message.name, role: message.role, ready: false, tutorialReady: false, introDone: false });
     room.players.set(peer.id, peer);
     if (!room.host) room.host = peer;
@@ -149,7 +149,9 @@ export function createCoopServer(options = {}) {
     if (!room || room.players.get(peer.id) !== peer) reject('NOT_IN_ROOM', 'Entre em uma sala antes de enviar ações.');
     switch (message.type) {
       case 'ready':
-        requirePhase(room, 'lobby'); peer.ready = message.ready; publishRoom(room); return;
+        requirePhase(room, 'lobby');
+        if (message.ready && !peer.role) reject('ROLE_REQUIRED', 'Escolha sua personagem antes de ficar pronta.');
+        peer.ready = message.ready; publishRoom(room); return;
       case 'set-role':
         requirePhase(room, 'lobby');
         if (message.role === peer.role) return;
@@ -166,6 +168,7 @@ export function createCoopServer(options = {}) {
         if (peer !== room.host) reject('FORBIDDEN', 'Somente a anfitriã pode iniciar a partida.');
         requirePhase(room, 'lobby');
         if (room.players.size < MIN_PLAYERS) reject('TEAM_INCOMPLETE', 'Chame pelo menos mais uma pessoa: a partida começa com 2 ou 3 jogadoras.');
+        if ([...room.players.values()].some(player => !player.role)) reject('TEAM_INCOMPLETE', 'Todas precisam escolher uma personagem antes de iniciar.');
         const mode = modeOf(room);
         if (!mode) reject('TEAM_INCOMPLETE', 'Em dupla, escolham Mobilidade e Infraestrutura; as funções da Analista ficam compartilhadas no tablet.');
         if (roster(room).some(player => !player.ready)) reject('TEAM_NOT_READY', 'Todas precisam marcar “Pronta”.');
@@ -192,10 +195,14 @@ export function createCoopServer(options = {}) {
       case 'action':
         requirePhase(room, 'playing');
         if (message.type === 'action') authorizeAction(peer.role, message.action, room.sharedAnalyst);
-        if (room.paused || Date.now() < room.startAt) {
+        if (Date.now() < room.startAt) {
           if (message.type === 'action') reject('GAME_PAUSED', 'A partida ainda não está liberada para essa ação.');
-          return; // Transient movement frames can safely be discarded across pause/start.
+          return;
         }
+        // Na pausa só o movimento é descartado. Uma ação que chega aqui já foi aplicada no
+        // cliente de origem (que ainda não sabia da pausa); rejeitá-la deixaria a outra
+        // pessoa sem ela e o erro derrubaria a sessão de quem a enviou.
+        if (room.paused && message.type === 'move') return;
         if (message.type === 'move') { broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer); return; }
         // Clientes aplicam a própria ação antes de enviar. Se duas pessoas analisam o mesmo
         // chamado ao mesmo tempo, a ordem do servidor decide e a cópia tardia é absorvida

@@ -50,7 +50,8 @@ export default function StoryIntro({ onComplete }: { onComplete: () => void }) {
   const [exiting, setExiting] = useState(false);
   const beat = SCRIPT[clock.beat];
   const finale = clock.beat === SCRIPT.length - 1;
-  const cinema = clock.beat >= 2;
+  // A cena 3D roda desde o primeiro beat; os escurecimentos dos beats 2 e 3 são feitos no IntroWorld.
+  const cinema = clock.beat >= 0;
   // A digitação do texto é parte da leitura do prólogo, não um movimento de câmera.
   // Mantemos o efeito mesmo quando o sistema pede movimento reduzido.
   const count = beat.timing.filter(at => at <= clock.time).length;

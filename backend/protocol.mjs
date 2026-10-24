@@ -4,14 +4,16 @@ export const MAX_PLAYERS = ROLES.length;
 /** Em dupla não há Analista: as duas equipes de campo dividem a central. */
 export const DUO_ROLES = ['mobilidade', 'infraestrutura'];
 const ROLE_ACTIONS = {
-  analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'],
+  analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select', 'tablet'],
   mobilidade: ['interact', 'mobility-hotkey'],
   infraestrutura: ['interact', 'repair-complete'],
 };
 /** Ações do tablet concedidas às equipes de campo quando a Analista é compartilhada. */
-export const SHARED_ANALYST_ACTIONS = ['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'];
+export const SHARED_ANALYST_ACTIONS = ['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select', 'tablet'];
 /** 'trio' com os três papéis, 'duo' com Mobilidade + Infraestrutura; null quando a sala não pode iniciar. */
 export function teamMode(roles) {
+  // Quem ainda está escolhendo a personagem (papel null) impede o início.
+  if (roles.some(role => !ROLES.includes(role))) return null;
   const unique = new Set(roles);
   if (unique.size !== roles.length) return null;
   if (roles.length === MAX_PLAYERS && ROLES.every(role => unique.has(role))) return 'trio';
@@ -33,6 +35,8 @@ function text(value, min, max) {
 }
 const bool = value => { if (typeof value !== 'boolean') invalid(); return value; };
 const role = value => { if (!ROLES.includes(value)) invalid(); return value; };
+/** A personagem é escolhida dentro da sala; entrar sem papel deixa a vaga como "escolhendo". */
+const optionalRole = value => value === undefined || value === null ? null : role(value);
 const number = (value, max) => { if (!Number.isFinite(value) || Math.abs(value) > max) invalid(); return value; };
 function pose(value) {
   keys(value, ['x', 'z', 'yaw']);
@@ -55,6 +59,8 @@ function action(value) {
       return { type: value.type, team: value.team, ...(value.problemId === undefined ? {} : { problemId: text(value.problemId, 1, 128) }) };
     case 'repair-complete':
       keys(value, ['type']); return { type: value.type };
+    case 'tablet':
+      keys(value, ['type', 'open']); return { type: value.type, open: bool(value.open) };
     case 'analyze': case 'archive': case 'call-tow': case 'problem-select':
       keys(value, ['type', 'problemId']);
       return { type: value.type, problemId: value.type === 'problem-select' && value.problemId === null ? null : text(value.problemId, 1, 128) };
@@ -76,11 +82,11 @@ export function validateMessage(value) {
   if (value.requestId !== undefined) result.requestId = text(value.requestId, 1, 64);
   switch (value.type) {
     case 'create-room':
-      Object.assign(result, { name: text(value.name, 1, 24), role: role(value.role), isPublic: bool(value.isPublic) }); break;
+      Object.assign(result, { name: text(value.name, 1, 24), role: optionalRole(value.role), isPublic: bool(value.isPublic) }); break;
     case 'join': case 'join-open': {
       const code = text(value.code, 4, 8).toUpperCase();
       if (!/^[A-Z0-9]{4,8}$/.test(code)) invalid();
-      Object.assign(result, { name: text(value.name, 1, 24), role: role(value.role), code }); break;
+      Object.assign(result, { name: text(value.name, 1, 24), role: optionalRole(value.role), code }); break;
     }
     case 'set-role': result.role = role(value.role); break;
     case 'ready': case 'tutorial-ready': result.ready = bool(value.ready); break;

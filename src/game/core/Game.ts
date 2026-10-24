@@ -30,6 +30,8 @@ const ANALYST_ACTIONS: ReadonlySet<CoopAction['type']> = new Set(['analyze', 'di
 const ANALYST_ID: PlayerId = 3;
 /** Quanto uma ação remota da central espera pelo chamado local antes de ser descartada. */
 const DEFERRED_ACTION_MS = 15_000;
+/** Tolerância para a simulação local resolver sozinha um chamado que a parceira já arquivou. */
+const ARCHIVE_CONVERGENCE_MS = 4_000;
 
 export class Game {
   readonly input: Input;
@@ -66,7 +68,7 @@ export class Game {
   private sharedAnalyst = false;
   get hasSharedAnalyst(): boolean { return this.sharedAnalyst; }
   private applyingCoopAction = false;
-  private readonly deferredCoopActions: { role: CoopRole; action: CoopAction; expiresAt: number }[] = [];
+  private readonly deferredCoopActions: { role: CoopRole; action: CoopAction; queuedAt: number; expiresAt: number }[] = [];
   private previousTime: number | null = null;
   private session?: GameSession;
   private disposed = false;
@@ -284,7 +286,8 @@ export class Game {
     const readiness = this.coopActionReadiness(action);
     if (readiness === 'stale') return;
     if (readiness === 'wait') {
-      this.deferredCoopActions.push({ role, action, expiresAt: performance.now() + DEFERRED_ACTION_MS });
+      const now = performance.now();
+      this.deferredCoopActions.push({ role, action, queuedAt: now, expiresAt: now + DEFERRED_ACTION_MS });
       return;
     }
     this.applyCoopActionNow(role, action);
@@ -298,9 +301,12 @@ export class Game {
   private coopActionReadiness(action: CoopAction): 'ready' | 'wait' | 'stale' {
     if (action.type !== 'analyze' && action.type !== 'dispatch' && action.type !== 'call-tow' && action.type !== 'archive') return 'ready';
     if (action.problemId === undefined) return 'ready';
+    const scene = this.scenes.current;
+    const agenda = scene instanceof Fase1OrlaScene ? scene.phaseEventStatus(action.problemId) : 'unknown';
+    if (agenda === 'past') return 'stale';
     const problem = suburbanGameState.findProblem(action.problemId);
-    if (action.type === 'archive') return !problem ? 'stale' : problem.status === 'RESOLVED' ? 'ready' : 'wait';
-    if (!problem) return 'wait';
+    if (!problem) return agenda === 'unknown' ? 'stale' : 'wait';
+    if (action.type === 'archive') return problem.status === 'RESOLVED' ? 'ready' : 'wait';
     if (problem.status === 'RESOLVED') return 'stale';
     return action.type === 'analyze' || problem.analyzed ? 'ready' : 'wait';
   }
@@ -308,9 +314,16 @@ export class Game {
   private flushDeferredCoopActions(): void {
     if (!this.deferredCoopActions.length) return;
     const now = performance.now();
+    const scene = this.scenes.current;
     const pending = this.deferredCoopActions.splice(0);
     for (const item of pending) {
-      const readiness = now > item.expiresAt ? 'stale' : this.coopActionReadiness(item.action);
+      let readiness = this.coopActionReadiness(item.action);
+      // A parceira arquivou um chamado que aqui ainda não se resolveu: a simulação local
+      // divergiu. Depois de uma tolerância, conclui o chamado aqui para as agendas coincidirem.
+      if (readiness === 'wait' && item.action.type === 'archive' && now - item.queuedAt >= ARCHIVE_CONVERGENCE_MS
+        && scene instanceof Fase1OrlaScene && scene.phaseEventStatus(item.action.problemId) === 'current'
+        && scene.resolvePhaseOrderFromPeer(item.action.problemId)) readiness = this.coopActionReadiness(item.action);
+      if (readiness === 'wait' && now > item.expiresAt) readiness = 'stale';
       if (readiness === 'ready') this.applyCoopActionNow(item.role, item.action);
       else if (readiness === 'wait') this.deferredCoopActions.push(item);
     }
@@ -347,6 +360,7 @@ export class Game {
           }
           break;
         case 'problem-select': suburbanGameState.selectProblem(action.problemId); break;
+        case 'tablet': current.setRemoteTabletOpen(actorId, action.open); break;
       }
     } finally {
       this.input.setActionAxis(null);
@@ -497,7 +511,14 @@ export class Game {
   }
 
   private setAnalystTabletOpen(open: boolean): void {
+    // Teclas seguradas enquanto o tablet estava aberto não viram movimento ao guardá-lo.
+    const changed = open !== this.analystTabletOpen;
+    if (changed) this.input.clear();
     this.analystTabletOpen = open;
+    // Só a aparência viaja: cada pessoa continua abrindo e guardando o próprio tablet.
+    if (changed && this.coopPlayerId !== null && (this.coopPlayerId === ANALYST_ID || this.sharedAnalyst)) {
+      this.onCoopAction?.({ type: 'tablet', open });
+    }
     const current = this.scenes.current;
     // O tablet é estado só deste cliente: em dupla cada pessoa abre o seu sem afetar a outra.
     if (current instanceof Fase1OrlaScene) current.setAnalystTabletOpen(open, this.sharedAnalyst && this.coopPlayerId !== null ? this.coopPlayerId : ANALYST_ID);

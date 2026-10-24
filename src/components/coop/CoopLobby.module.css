@@ -33,6 +33,14 @@
 .roleCopy > span { max-width: 390px; color: #53665e; font-size: 12px; font-weight: 600; line-height: 1.4; }
 .roleSelectMark { min-width: 76px; padding: 8px 10px; border: 2px solid #a07838; border-radius: 8px; background: #fff1cf; color: #775220; font-size: 10px; font-weight: 900; text-align: center; }
 .roleCardSelected .roleSelectMark { border-color: #203941; background: #edb94e; color: #233d44; }
+.roleCard:disabled { cursor: default; }
+.roleCard:disabled:hover { transform: none; }
+.roleCardSelected:disabled { border-color: #d99027; }
+.roleCardTaken { border-color: #a9a291; background: #f1ece0; box-shadow: none; }
+.roleCardTaken:disabled:hover { border-color: #a9a291; }
+.roleCardTaken .rolePortrait { filter: grayscale(.55); }
+.roleCardTaken .roleSelectMark { border-color: #a9a291; background: #e6e1d4; color: #5e594e; }
+.choosing { margin: 0; color: #68766d; font-size: 11px; font-weight: 700; }
 .entryChoices { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 9px; margin-top: 15px; }
 .primary, .secondary, .choiceButton, .joinButton { min-height: 48px; border: 3px solid #203941; border-radius: 9px; padding: 9px 13px; font-size: 13px; font-weight: 900; cursor: pointer; box-shadow: 0 4px 0 #a07838; }
 .primary { display: grid; align-content: center; gap: 3px; background: #edb94e; color: #233d44; text-align: left; }
@@ -92,7 +100,6 @@
 .teamStatus[data-mode="trio"], .teamStatus[data-mode="duo"] { border-color: #9cc9a5; background: #f1f8ea; }
 .teamStatus b { color: #263f45; font-size: 12px; }
 .teamStatus span { color: #68766d; font-size: 11px; line-height: 1.4; }
-.roleSwitch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #68766d; font-size: 11px; }
 .lobbyActions { display: grid; grid-template-columns: 1fr 1.2fr; gap: 9px; align-items: center; }
 .lobbyActions p { grid-column: 1 / -1; margin: 0; color: #68766d; text-align: center; font-size: 11px; }
 .error { margin: 12px 0 0; padding: 10px 12px; border: 2px solid #9a3e34; border-radius: 9px; color: #682e27; background: #f9d9c7; font-size: 12px; }
