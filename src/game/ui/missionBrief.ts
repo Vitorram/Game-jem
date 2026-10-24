@@ -38,3 +38,30 @@ export function missionBrief(problem: UrbanProblem, order?: Order) {
 export function playerTeamName(player: PlayerId): string {
   return player === 1 ? 'Infraestrutura' : player === 2 ? 'Mobilidade' : 'Analista';
 }
+
+const compactSteps: Record<number, string> = {
+  201: 'Use 3 na faixa e aguarde a travessia.',
+  601: 'Use E no semáforo para reparar.',
+  202: 'Use 1 na faixa para liberar a via.',
+  301: 'Use 4 e mantenha as vias abertas por 8 s.',
+  401: 'Use E no sensor e conclua a calibração.',
+  501: 'Coloque um cone com E e bloqueie o sentido com 2.',
+  502: 'Use E junto aos veículos para liberar a faixa.',
+  101: 'Use E no poste e repare o circuito.',
+  701: 'Use 3 e acompanhe a travessia do entregador.',
+  702: 'Use 1 só quando todos estiverem na calçada.',
+  801: 'Use E no semáforo e confira o controlador.',
+  803: 'Recolha o cone com E e guarde no baú com E.',
+  901: 'Use 4 para desviar os elétricos.',
+  902: 'Use E no carregador e conclua o reparo.',
+  1001: 'No tablet, chame o Guincho Rota Verde.',
+  1002: 'Aguarde o guincho liberar a faixa.',
+};
+
+export function compactMissionObjective(problem: UrbanProblem, order?: Order): string {
+  if (problem.status === 'RESOLVED') return 'Abra o tablet com Q e arquive o relatório.';
+  if (!problem.analyzed) return 'Abra o tablet com Q e analise o chamado.';
+  const missing = (problem.requiredTeams ?? []).filter(team => !problem.dispatchedTeams.includes(team));
+  if (missing.length) return `Acione ${missing.map(team => teamNames[team]).join(' e ')} no tablet.`;
+  return (order && compactSteps[order.nextRiskId]) || 'Siga a seta até o chamado.';
+}

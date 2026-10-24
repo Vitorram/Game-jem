@@ -323,7 +323,7 @@ test('HUD da campanha permanece visível antes da análise e não desaparece em 
     suburbanGameState.setPhase({elapsedMs:30000,recovery:false,waitingPedestrians:0,queuedVehicles:0});
     suburbanGameState.setProblems([{id,label:id,status:'ACTIVE',position:{x:0,z:0},dispatchedTeams:[],requiredTeams:[],analyzed:false}]);
     const html=render('GameObjectiveHUD.tsx',{player:2,distance:99});
-    assert.match(html,/Objetivo da equipe/);assert.match(html,/PRÓXIMO PASSO/);assert.match(html,/Abra o tablet com Q/);assert.doesNotMatch(html,/~99 m/);
+    assert.match(html,/Objetivo da equipe/);assert.match(html,/OBJETIVO/);assert.match(html,/Abra o tablet com Q/);assert.doesNotMatch(html,/~99 m/);
   }
 });
 
@@ -345,4 +345,19 @@ test('resultado de vitória apresenta agradecimento após os dez chamados, sem m
   assert.equal(session.snapshot().status,'finished');
   const html=render('OrdersHud.tsx',{paused:false});
   assert.match(html,/Obrigado por jogar!/);assert.doesNotMatch(html,/VOCÊ PERDEU/);assert.match(html,/Jogar de novo/);
+});
+
+
+test('objetivo compacto mantém somente equipe e ação visíveis; detalhes começam recolhidos', () => {
+  const {suburbanGameState}=require(path.join(SRC,'game','core','GameState.ts'));
+  suburbanGameState.reset();
+  try {
+    suburbanGameState.setPhase({elapsedMs:10000,recovery:false,waitingPedestrians:0,queuedVehicles:0});
+    suburbanGameState.setProblems([{id:'traffic-signal-failure',label:'Semáforo',status:'ACTIVE',position:{x:0,z:4.7},dispatchedTeams:[],requiredTeams:['mobilidade','infraestrutura'],stage:'warning',analyzed:false}]);
+    const html=render('GameObjectiveHUD.tsx',{player:3,distance:null});
+    assert.match(html,/<b>Abra o tablet com Q e analise o chamado\.<\/b>/);
+    assert.match(html,/<details><summary>Ver detalhes<\/summary>/);
+    assert.doesNotMatch(html,/<details[^>]*\bopen/);
+    assert.doesNotMatch(html.split('<details>')[0],/1\. Analisar o chamado|PRÓXIMO PASSO|Você:/);
+  } finally {suburbanGameState.reset();}
 });

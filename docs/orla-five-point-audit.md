@@ -34,3 +34,10 @@ A sincronização integral do coop continua fora desta etapa.
 ## Próximo passo recomendado
 
 Testar a nova orientação com alguém que ainda não conhece as tarefas. Em seguida, medir a cena em GPU real antes de escolher uma otimização gráfica. A auditoria não adiciona snapshots de rede nem muda a arquitetura de sincronização.
+
+## Ajuste solicitado: objetivo compacto no canto superior esquerdo
+
+O resumo agora mostra, por padrão, apenas a equipe e uma ação curta com a tecla necessária.
+Título do chamado, etapa, orientação completa e destino ficam recolhidos em “Ver detalhes”.
+O painel foi reposicionado logo abaixo dos cartões de tarefa (172 px no desktop e 212 px
+no viewport estreito). O teste de componente garante que os detalhes não iniciam abertos.

@@ -4,7 +4,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import { suburbanGameState, type RoadState } from '@/game/core/GameState';
 import type { PlayerId } from '@/game/entities/Player';
 import { sessionStore } from '@/game/session/sessionStore';
-import { missionBrief, playerTeamName } from '@/game/ui/missionBrief';
+import { compactMissionObjective, missionBrief, playerTeamName } from '@/game/ui/missionBrief';
 
 function useWorld() {
   const [world, setWorld] = useState(() => suburbanGameState.snapshot());
@@ -22,24 +22,24 @@ export default function GameObjectiveHUD({ player, distance, tutorialTarget = fa
   const roads: RoadState[] = world.roads;
   if (world.phase) {
     if (!problem) return <aside className="game-objective-hud mission-brief" aria-label="Objetivo da equipe">
-      <small>AGUARDANDO CHAMADO</small><b>Orla em monitoramento</b>
-      <span>O próximo chamado aparecerá aqui. Mantenha as vias livres.</span>
+      <small>OBJETIVO</small><b>Aguarde o próximo chamado.</b>
     </aside>;
     const order = session.snapshot?.orders.find(item => item.definitionId === problem.id);
     const brief = missionBrief(problem, order);
     return <aside className="game-objective-hud mission-brief" aria-label="Objetivo da equipe">
-      <small>{brief.stage}</small>
-      <b>{brief.title}</b>
-      <span className="mission-responsibility">PRÓXIMO PASSO · {brief.team}</span>
-      <p>{brief.action}</p>
-      {(problem.status === 'MAINTENANCE' || problem.id === 'rush-hour') && problem.instruction && <span className="mission-live">{problem.instruction}</span>}
-      <span className="mission-location">{brief.location}{distance !== null && brief.team === playerTeamName(player) && player !== 3 ? ` · ~${distance} m` : ''}</span>
-      {brief.team !== playerTeamName(player) && <span className="mission-handoff">Você: {playerTeamName(player)} · próxima ação: {brief.team}.</span>}
-      {problem.instruction && problem.status !== 'RESOLVED' && <details>
-        <summary>Ver orientação do chamado</summary><p>{problem.instruction}</p>
-      </details>}
+      <small>OBJETIVO · {brief.team}</small>
+      <b>{compactMissionObjective(problem, order)}</b>
+      <details>
+        <summary>Ver detalhes</summary>
+        <p><strong>{brief.title}</strong> · {brief.stage}</p>
+        <p>{brief.action}</p>
+        {(problem.status === 'MAINTENANCE' || problem.id === 'rush-hour') && problem.instruction && <p>{problem.instruction}</p>}
+        <p>{brief.location}{distance !== null && brief.team === playerTeamName(player) && player !== 3 ? ` · ~${distance} m` : ''}</p>
+        {problem.instruction && problem.status !== 'RESOLVED' && problem.instruction !== brief.action && problem.status !== 'MAINTENANCE' && problem.id !== 'rush-hour' && <p>{problem.instruction}</p>}
+      </details>
     </aside>;
   }
+
   if (!problem) return null;
 
   if (player === 3) {
