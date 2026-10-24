@@ -291,3 +291,58 @@ test('aviso de feedback não cria cápsula vazia sem mensagem ou após dispensá
   assert.match(html, /Você perdeu 15 XP/);
   assert.equal(render('FeedbackToast.tsx', { sequence: undefined, message: null }), '');
 });
+
+test('orientação: relatório não analisado, equipe faltante e arquivamento têm próximos passos distintos', () => {
+  const {missionBrief}=require(path.join(SRC,'game','ui','missionBrief.ts'));
+  const p={id:'traffic-signal-failure',label:'Semáforo',status:'ACTIVE',position:{x:0,z:4.7},dispatchedTeams:[],requiredTeams:['mobilidade','infraestrutura'],stage:'warning',analyzed:false};
+  assert.match(missionBrief(p).action,/analise o relatório/);
+  const missing=missionBrief({...p,analyzed:true,dispatchedTeams:['mobilidade']});
+  assert.match(missing.action,/acione Infraestrutura/);
+  assert.doesNotMatch(missing.action,/acione Mobilidade/);
+  const done=missionBrief({...p,status:'RESOLVED'});
+  assert.equal(done.team,'Analista'); assert.match(done.action,/arquive o relatório/);
+});
+
+test('orientação: todos os passos da campanha têm equipe, ação e destino; resgate não anuncia segurança cedo', () => {
+  const {missionBrief}=require(path.join(SRC,'game','ui','missionBrief.ts'));
+  const {ORLA_EVENTS}=require(path.join(SRC,'game','session','orlaEvents.ts'));
+  for(const e of ORLA_EVENTS) for(const nextRiskId of e.steps){
+    const p={id:e.id,label:e.title,status:'ACTIVE',position:e.position,dispatchedTeams:[...e.teams],requiredTeams:[...e.teams],stage:'active',analyzed:true};
+    const brief=missionBrief(p,{nextRiskId,completedSteps:e.steps.indexOf(nextRiskId),riskIds:e.steps});
+    assert.ok(brief.team && brief.action && brief.location);
+    assert.doesNotMatch(brief.team,/Equipe em campo/,'todo passo conhecido precisa de equipe explícita: '+nextRiskId);
+    if(nextRiskId===702) {assert.match(brief.action,/Quando o entregador e todos os pedestres/);assert.doesNotMatch(brief.action,/Entregador em segurança:/);}
+  }
+});
+
+test('HUD da campanha permanece visível antes da análise e não desaparece em missões fora do semáforo', t => {
+  const {suburbanGameState}=require(path.join(SRC,'game','core','GameState.ts'));
+  t.after(()=>suburbanGameState.reset());
+  for(const id of ['sensor-failure','bike-lane-cone','roadside-breakdown']){
+    suburbanGameState.reset();
+    suburbanGameState.setPhase({elapsedMs:30000,recovery:false,waitingPedestrians:0,queuedVehicles:0});
+    suburbanGameState.setProblems([{id,label:id,status:'ACTIVE',position:{x:0,z:0},dispatchedTeams:[],requiredTeams:[],analyzed:false}]);
+    const html=render('GameObjectiveHUD.tsx',{player:2,distance:null});
+    assert.match(html,/Objetivo da equipe/);assert.match(html,/PRÓXIMO PASSO/);assert.match(html,/Abra o tablet com Q/);
+  }
+});
+
+test('resultado de vitória apresenta agradecimento após os dez chamados, sem mensagem de derrota', t => {
+  const {GameSession}=require(path.join(SRC,'game','session','GameSession.ts'));
+  const {ORLA_SESSION_CONFIG}=require(path.join(SRC,'game','session','sessionData.ts'));
+  const {ORLA_EVENTS}=require(path.join(SRC,'game','session','orlaEvents.ts'));
+  const {sessionStore}=require(path.join(SRC,'game','session','sessionStore.ts'));
+  t.mock.method(sessionStore,'getServerSnapshot',()=>sessionStore.getSnapshot());
+  const session=new GameSession(ORLA_SESSION_CONFIG);
+  sessionStore.bind(session);sessionStore.start();t.after(()=>sessionStore.unbind(session));
+  // Verifica somente a apresentação do resultado; o fluxo físico é exercitado em orla-phase.cjs.
+  for(const e of ORLA_EVENTS){
+    sessionStore.tick(Math.max(1,e.atMs-session.snapshot().elapsedMs));
+    for(const step of e.steps)sessionStore.resolveEvent(e.id,step);
+    sessionStore.archiveCompleted(e.id);
+  }
+  assert.equal(session.snapshot().completedOrders,10);
+  assert.equal(session.snapshot().status,'finished');
+  const html=render('OrdersHud.tsx',{paused:false});
+  assert.match(html,/Obrigado por jogar!/);assert.doesNotMatch(html,/VOCÊ PERDEU/);assert.match(html,/Jogar de novo/);
+});

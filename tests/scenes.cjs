@@ -1542,3 +1542,18 @@ test('recuperação interrompida por task ou proteção restaura personagem sem 
     }
   } finally { scene.dispose(); }
 });
+
+test('reinício limpa a dica e a distância da cena anterior antes do primeiro quadro', t => {
+  const {Game,Element}=gameHarness(t);
+  const prompts=[],distances=[];
+  const game=new Game(new Element(),()=>{},undefined,undefined,undefined,p=>prompts.push(p),undefined,d=>distances.push(d));
+  try {
+    game.start('fase1-orla');
+    // Simula os últimos valores que o HUD recebeu na partida anterior.
+    game.onInteractionPrompt('USE 3 PARA PROTEGER A FAIXA'); game.onObjectiveDistance(19);
+    game.returnToMenu();
+    assert.equal(prompts.at(-1),null); assert.equal(distances.at(-1),null);
+    game.start('fase1-orla');
+    assert.equal(prompts.at(-1),null); assert.equal(distances.at(-1),null);
+  } finally {game.dispose();}
+});

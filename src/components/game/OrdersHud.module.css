@@ -161,19 +161,19 @@
 
 .toast {
   position: fixed;
-  top: 36%;
+  bottom: 180px;
   left: 0;
   right: 0;
   margin-inline: auto;
   width: max-content;
-  max-width: calc(100vw - 32px);
+  max-width: min(520px, calc(100vw - 32px));
   z-index: 6;
   padding: 10px 20px;
   border: 3px solid #4a311c;
   border-radius: 14px;
   background: #4a311c;
   color: #fff4d6;
-  font: 900 1.15rem/1.2 ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
+  font: 900 0.95rem/1.4 ui-rounded, 'Nunito', 'Trebuchet MS', system-ui, sans-serif;
   box-shadow: 0 4px 0 rgba(58, 38, 22, 0.35);
   opacity: 0;
   pointer-events: none;
@@ -500,3 +500,7 @@
   .ticket { width: 170px; }
 }
 
+
+@media (max-height: 600px) and (min-width: 601px) {
+  .toast { left: auto; right: 16px; bottom: 140px; max-width: min(420px, calc(100vw - 300px)); }
+}

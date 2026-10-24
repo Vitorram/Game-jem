@@ -599,9 +599,12 @@ export class OrlaPhase {
     const chargerIssue = this.problem('ev-charger-repair');
     const rushIssue = this.problem('rush-hour');
     if (action === 'electricDetour' && rushIssue?.stage === 'warning' && rushIssue.status === 'ACTIVE') {
-      this.patch(rushIssue.id, { instruction: 'Aguarde a Mobilidade assumir o chamado. Depois, pressione 4 para desviar os carros elÃ©tricos.' });
+      this.patch(rushIssue.id, { instruction: 'Aguarde a Mobilidade assumir o chamado. Depois, pressione 4 para desviar os carros elétricos.' });
       return true;
     }
+    // Repeated presses confirm this mission action; they must not undo its progress.
+    if (action === 'electricDetour' && rushIssue?.stage === 'active' && rushIssue.status === 'ACTIVE'
+      && this.rushElectricDetourUsed && this.traffic.isElectricDiversionActive()) return true;
     if (action === 'electricDetour' && chargerIssue?.status === 'ACTIVE' && chargerIssue.stage === 'warning') {
       this.patch(chargerIssue.id, { instruction: 'Aguarde o chamado ser liberado pelas equipes. Depois, use a Habilidade 4 (tecla 4) para desviar os elétricos.' });
       return true;
@@ -611,7 +614,10 @@ export class OrlaPhase {
       this.patch(chargerIssue.id, { instruction: 'Habilidade 4 ativa: elétricos desviados. Infraestrutura: repare o carregador para liberar a avenida verde.' });
       return true;
     }
+    const preserveRushDiversion = action === 'release' && rushIssue?.stage === 'active'
+      && rushIssue.status === 'ACTIVE' && this.rushElectricDetourUsed && this.traffic.isElectricDiversionActive();
     this.traffic.applyMobilityAction(roadId, action);
+    if (preserveRushDiversion) this.traffic.setElectricDiversion(true);
     if (action === 'electricDetour') {
       const rush = this.problem('rush-hour');
       if (rush?.stage === 'active' && rush.status === 'ACTIVE') {
@@ -881,3 +887,4 @@ export class OrlaPhase {
     this.group.clear();
   }
 }
+

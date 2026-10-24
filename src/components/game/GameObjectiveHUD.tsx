@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { suburbanGameState, type RoadState } from '@/game/core/GameState';
 import type { PlayerId } from '@/game/entities/Player';
+import { sessionStore } from '@/game/session/sessionStore';
+import { missionBrief, playerTeamName } from '@/game/ui/missionBrief';
 
 function useWorld() {
   const [world, setWorld] = useState(() => suburbanGameState.snapshot());
@@ -15,16 +17,28 @@ function useWorld() {
 
 export default function GameObjectiveHUD({ player, distance, tutorialTarget = false }: { player: PlayerId; distance: number | null; tutorialTarget?: boolean }) {
   const world = useWorld();
+  const session = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
   const problem = world.problems[0];
   const roads: RoadState[] = world.roads;
   if (world.phase) {
-    const crossing = world.problems.find(item => item.id === 'traffic-signal-failure');
-    const returnToMobility = crossing?.instruction?.includes('Troque para Mobilidade');
-    return returnToMobility && (player === 1 || player === 2)
-      ? <div className="game-objective-hud phase-objective" role="status">
-          <b>PRÓXIMA ETAPA · MOBILIDADE</b><span>{crossing?.instruction}</span>
-        </div>
-      : null;
+    if (!problem) return <aside className="game-objective-hud mission-brief" aria-label="Objetivo da equipe">
+      <small>AGUARDANDO CHAMADO</small><b>Orla em monitoramento</b>
+      <span>O próximo chamado aparecerá aqui. Mantenha as vias livres.</span>
+    </aside>;
+    const order = session.snapshot?.orders.find(item => item.definitionId === problem.id);
+    const brief = missionBrief(problem, order);
+    return <aside className="game-objective-hud mission-brief" aria-label="Objetivo da equipe">
+      <small>{brief.stage}</small>
+      <b>{brief.title}</b>
+      <span className="mission-responsibility">PRÓXIMO PASSO · {brief.team}</span>
+      <p>{brief.action}</p>
+      {(problem.status === 'MAINTENANCE' || problem.id === 'rush-hour') && problem.instruction && <span className="mission-live">{problem.instruction}</span>}
+      <span className="mission-location">{brief.location}{distance === null ? '' : ` · ~${distance} m`}</span>
+      {brief.team !== playerTeamName(player) && <span className="mission-handoff">Você: {playerTeamName(player)} · próxima ação: {brief.team}.</span>}
+      {problem.instruction && problem.status !== 'RESOLVED' && <details>
+        <summary>Ver orientação do chamado</summary><p>{problem.instruction}</p>
+      </details>}
+    </aside>;
   }
   if (!problem) return null;
 
@@ -68,4 +82,5 @@ export default function GameObjectiveHUD({ player, distance, tutorialTarget = fa
     {player === 2 ? <span>{problem.status === 'RESOLVED' ? 'O reparo terminou. Recolha os cones com E e devolva-os ao baú para normalizar a via.' : 'Pegue um cone no baú com E e leve até a seta para proteger a via. Mantenha-o no local enquanto Infraestrutura repara o poste.'}</span> : <span>Chegue perto do poste. Com a área segura, use E para reparar; Espaço ou toque para alinhar os pinos.</span>}
   </div>;
 }
+
 
