@@ -441,7 +441,7 @@ export default function GameCanvas() {
           </button>
 
         </div>}
-        {isOriginalOrla && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
+        {isOriginalOrla && !isAnalystTablet && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
           {selectedPlayer === 3 ? <button type="button" className={`analyst-tablet-toggle${analystAttention ? ' needs-attention' : ''}`} aria-expanded={isAnalystTablet} aria-controls="analyst-tablet" aria-keyshortcuts="Q" disabled={coopTutorialWaiting} onClick={event => { game.current?.toggleAnalystTablet(); event.currentTarget.blur(); }}>
             <kbd>Q</kbd> {isAnalystTablet ? 'Guardar tablet' : 'Abrir tablet'}
             {!isAnalystTablet && analystAttention && <span className="tablet-alert-dot" aria-label="Chamado aguardando" />}
