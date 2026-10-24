@@ -993,3 +993,15 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
 .coop-team-hud>span.is-you{color:#f3c458;font-weight:800}
 .coop-team-hud>span.is-shared{color:#7adcf2;font-style:italic}
 @media(max-width:640px){.coop-team-hud{top:auto;right:8px;bottom:64px;min-width:0;padding:8px 10px;font-size:9px}}
+
+
+/* Compact objective overlay; extended instructions are optional. */
+.is-orla .game-objective-hud.mission-brief { top: 172px; left: 16px; width: 280px; max-width: calc(100vw - 32px); box-sizing: border-box; padding: 9px 11px; gap: 5px; pointer-events: auto; text-shadow: none; max-height: 45vh; overflow-y: auto; }
+.mission-brief small { color: #ffdc7a; font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.is-orla .mission-brief > b { color: #fff4d6; font-size: 12px; line-height: 1.4; }
+.mission-brief details { border-top: 1px solid #ffffff26; padding-top: 5px; }
+.mission-brief summary { color: #d2e8df; cursor: pointer; font-size: 10px; }
+.mission-brief details p { margin: 7px 0 0; font-size: 11px; line-height: 1.45; }
+@media (max-width: 600px) {
+  .is-orla .game-objective-hud.mission-brief { top: 212px; left: 10px; width: 245px; max-width: calc(100vw - 20px); max-height: 40vh; padding: 8px 10px; }
+}

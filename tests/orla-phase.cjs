@@ -437,3 +437,101 @@ test('D11: rodadas com outras sementes e quadros irregulares (inclusive picos) c
     } finally { game.scene.dispose(); }
   }
 });
+
+
+test('auditoria: campanha inteira usa interações reais, sem pular chamados ou forçar passos', () => {
+  let scene;
+  const session = new GameSession(ORLA_SESSION_CONFIG);
+  const puzzles = [];
+  scene = new Fase1OrlaScene(undefined, undefined, undefined, type => {
+    puzzles.push(type);
+    scene.completeRepairPuzzle(type); // O minigame é validado separadamente; aqui valida-se a integração.
+  });
+  scene.setTutorialCollisionProtection(true);
+  session.start();
+  scene.startPhase((id, risk) => {
+    const order = session.snapshot().orders.find(item => item.definitionId === id);
+    if (order) session.resolveRisk(order.id, risk);
+  });
+  const resolved = new Set();
+  const activated = new Set();
+  const pose = (id, point) => { scene.selectPlayer(id); assert.equal(scene.player.id, id); scene.player.setPosition(point.x, point.z); };
+  const crate = scene.map.cellCenter(11, 5);
+  try {
+    for (let frame = 0; frame < 9000 && session.snapshot().status === 'playing'; frame++) {
+      const events = session.advance(50);
+      assert.ok(!events.some(event => event.type === 'order-expired'), 'nenhuma missão deveria expirar: ' + JSON.stringify(session.snapshot().orders));
+      scene.advancePhase(session.snapshot().elapsedMs);
+      scene.update(.05);
+      const current = suburbanGameState.getProblems()[0];
+      if (!current) continue;
+      if (current.status === 'RESOLVED') {
+        resolved.add(current.id);
+        scene.selectPlayer(3);
+        assert.equal(scene.archiveResolvedProblem(current.id), true);
+        const order = session.snapshot().orders.find(item => item.definitionId === current.id);
+        if (order) session.archiveCompleted(order.id);
+        continue;
+      }
+      if (!current.analyzed) { scene.selectPlayer(3); scene.analyzeProblem(current.id); scene.requestReinforcements(current.id); continue; }
+      if (current.stage !== 'active') continue;
+      const order = session.snapshot().orders.find(item => item.definitionId === current.id);
+      switch (current.id) {
+        case 'traffic-signal-failure':
+          if (order.completedSteps === 0) { pose(2, {x:1,z:5}); scene.useMobilityHotkey('Digit3'); }
+          else if (order.completedSteps === 1) { pose(1, current.position); scene.interact(); }
+          else { pose(2, {x:1,z:5}); scene.useMobilityHotkey('Digit1'); }
+          break;
+        case 'rush-hour':
+          pose(2, current.position);
+          if (!activated.has(current.id)) { scene.useMobilityHotkey('Digit1'); scene.useMobilityHotkey('Digit4'); activated.add(current.id); }
+          break;
+        case 'cyclist-assist':
+          pose(2, current.position); scene.useMobilityHotkey(order.completedSteps ? 'Digit1' : 'Digit3'); break;
+        case 'bike-lane-cone':
+          pose(2, scene.items.heldBy(2) === 'cone' ? {x:crate.x-2,z:crate.z} : current.position); scene.interact(); break;
+        case 'minor-collision': {
+          if (scene.traffic.isIncidentProtected()) { const incident=scene.traffic.getIncidentPosition(); pose(1,{x:incident.x,z:incident.z-1.1}); scene.interact(); }
+          else {
+            pose(2, scene.items.heldBy(2) === 'cone' ? scene.traffic.getIncidentConeTarget() : {x:crate.x-2,z:crate.z});
+            scene.interact(); scene.useMobilityHotkey('Digit2');
+          }
+          break;
+        }
+        case 'ev-charger-repair':
+          if (order.completedSteps === 0) { pose(2,current.position); scene.useMobilityHotkey('Digit4'); }
+          else { pose(1,current.position); scene.interact(); }
+          break;
+        case 'roadside-breakdown': scene.selectPlayer(3); scene.callTow(current.id); break;
+        default: pose(1,current.position); scene.interact();
+      }
+    }
+    const result=session.snapshot();
+    assert.equal(result.status,'finished');
+    assert.equal(result.completedOrders,ORLA_EVENTS.length);
+    assert.equal(result.expiredOrders,0);
+    assert.ok(puzzles.includes('pole') && puzzles.includes('signal') && puzzles.includes('car') && puzzles.includes('sensor') && puzzles.includes('charger') && puzzles.includes('signal-check'));
+    assert.equal(resolved.size,ORLA_EVENTS.length);
+    assert.equal(suburbanGameState.getProblems().length,0);
+    assert.deepEqual(scene.getTrafficDiagnostics().persistentInvalidBlocks,[]);
+    console.log('Campanha por ações reais:', JSON.stringify({elapsedMs:result.elapsedMs,completedOrders:result.completedOrders,puzzles}));
+  } finally { scene.dispose(); }
+});
+
+
+test('fluxo intenso: pressionar 4 novamente não desfaz o desvio nem reinicia os oito segundos', () => {
+  const game = phase();
+  try {
+    skipTo(game, 'rush-hour'); dispatch(game, 'rush-hour');
+    game.scene.selectPlayer(2); game.scene.player.setPosition(-16, 8.2);
+    game.scene.useMobilityHotkey('Digit1'); game.scene.useMobilityHotkey('Digit4');
+    game.run(7);
+    const progress = game.scene.phase.rushFlowSeconds;
+    game.scene.useMobilityHotkey('Digit4'); game.scene.useMobilityHotkey('Digit4');
+    game.scene.useMobilityHotkey('Digit1');
+    assert.equal(game.scene.traffic.isElectricDiversionActive(), true);
+    assert.equal(game.scene.phase.rushFlowSeconds, progress);
+    game.run(3);
+    assert.equal(problem('rush-hour').status,'RESOLVED');
+  } finally { game.scene.dispose(); }
+});

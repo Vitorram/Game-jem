@@ -173,6 +173,8 @@ export class Game {
 
   start(sceneId: GameSceneId = 'test', cooperativeWaitingTutorial = false) {
     if (this.status !== 'ready' || this.disposed) return;
+    this.onInteractionPrompt?.(null);
+    this.onObjectiveDistance?.(null);
 
     if (sceneId === 'fase1-orla') {
       this.observedCallIds.clear();
@@ -471,6 +473,8 @@ export class Game {
 
   returnToMenu() {
     if (this.disposed || this.status === 'ready') return;
+    this.onInteractionPrompt?.(null);
+    this.onObjectiveDistance?.(null);
     this.setAnalystTabletOpen(false);
     this.repairPuzzleOpen = false;
     this.mandatoryTutorialActive = false;
