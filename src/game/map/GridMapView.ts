@@ -21,6 +21,8 @@ import { GRID_CONFIG, ORLA_CROSSING, ORLA_SCENERY_MARGIN } from '../config';
 import { GridMap, TILE_TYPES, type TileKind } from './GridMap';
 import { ROAD_LAYOUT } from './roadLayout';
 import { TextureLibrary, type TextureKey } from './proceduralTextures';
+import { BeachSurface } from './BeachSurface';
+import { StaticSceneryBatches } from './StaticSceneryBatches';
 
 /** Cor do tampo de cada objeto sólido (fica 0,05 acima do topo; itens pousam 0,08 acima). */
 const TOP_ACCENT: Partial<Record<TileKind, string>> = {
@@ -260,6 +262,8 @@ export class GridMapView {
   }[] = [];
 
   private time = 0;
+  private beachSurface: BeachSurface | null = null;
+  private staticBatches: StaticSceneryBatches | null = null;
   private disposed = false;
 
   /**
@@ -350,6 +354,25 @@ export class GridMapView {
     this.addOutdoorGym();
     this.addSeaAmbience();
     this.addApron();
+    const shoreRow = Array.from({ length: map.rows }, (_, row) => row)
+      .find(row => row > 0 && map.tileAt(0, row) === 'ground' && map.tileAt(0, row - 1) === 'sea');
+    if (shoreRow !== undefined) {
+      const shore = map.cellCenter(0, shoreRow).z - map.tileSize / 2;
+      this.beachSurface = new BeachSurface(map.width + ORLA_SCENERY_MARGIN * 2 + 128, -map.depth / 2 - 64,
+        shore + map.tileSize * 3, shore);
+      this.group.traverse(object => {
+        if (object instanceof Mesh && (object.name.endsWith('-sea') || object.name.startsWith('wet-sand-')
+          || object.name.startsWith('foam-') || object.name.startsWith('apron-n')
+          || ((object.name.endsWith('-ground') || object.name.startsWith('apron-'))
+            && object.position.z >= shore && object.position.z < shore + map.tileSize * 3)
+          || this.seaMaterials.some(entry => entry.material === object.material))) object.visible = false;
+      });
+      this.foam.length = 0;
+      this.group.add(this.beachSurface.mesh);
+    }
+    const animated = new Set<object>([...this.floatingDecorations.map(item => item.mesh), ...this.foam.map(item => item.mesh)]);
+    if (this.beachSurface) animated.add(this.beachSurface.mesh);
+    this.staticBatches = new StaticSceneryBatches(this.group, animated);
   }
 
   /** Anima a cor e a textura do mar e a espuma. Chame uma vez por frame, com dt em segundos. */
@@ -357,6 +380,7 @@ export class GridMapView {
     if (this.disposed || !Number.isFinite(dt) || dt <= 0) return;
 
     this.time += dt;
+    this.beachSurface?.update(dt);
 
     const wave = (Math.sin(this.time * 1.2) + 1) / 2;
     const offsetX = (this.time * 0.016) % 1;
@@ -392,6 +416,8 @@ export class GridMapView {
     if (this.disposed) return;
 
     this.disposed = true;
+    this.staticBatches?.dispose();
+    this.beachSurface?.dispose();
 
     this.flat.dispose();
     this.pebble.dispose();
@@ -1974,3 +2000,4 @@ export class GridMapView {
     strip('s', 0, rows - 1, 0, south, 2 * (reach + APRON), APRON);
   }
 }
+
