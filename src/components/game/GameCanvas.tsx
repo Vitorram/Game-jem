@@ -21,10 +21,12 @@ import { useGameAudio } from '@/game/audio/useGameAudio';
 import AudioControls from '../audio/AudioControls';
 
 import { gameMusic } from '@/game/audio/musicManager';
-import { coopRoleToPlayerId, getCoopClient, type CoopMessage, type CoopPlayer, type CoopRole } from '@/game/coop/CoopClient';
+import { coopRoleToPlayerId, coopTeamMode, getCoopClient, type CoopMessage, type CoopPlayer, type CoopRole } from '@/game/coop/CoopClient';
 
 
 const playerIds: PlayerId[] = [1, 2, 3];
+type CoopSession = { room: string; playerId: string; role: CoopRole; name: string; serverUrl: string; players?: CoopPlayer[]; sharedAnalyst: boolean };
+const roleTitle = (role: CoopRole) => role === 'analista' ? 'Analista' : role === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura';
 
 const directions = [
   { code: 'ArrowUp', label: 'Mover para cima', symbol: '↑' },
@@ -38,10 +40,10 @@ export default function GameCanvas() {
   const panel = useRef<HTMLDivElement>(null);
   const game = useRef<Game | null>(null);
   const coopClient = useRef<ReturnType<typeof getCoopClient> | null>(null);
-  const coopRef = useRef<{ room: string; playerId: string; role: CoopRole; name: string; serverUrl: string; players?: CoopPlayer[] } | null>(null);
+  const coopRef = useRef<CoopSession | null>(null);
   const suppressRemotePause = useRef(false);
   const statusRef = useRef<GameStatus>('ready');
-  const [coopSession, setCoopSession] = useState<{ room: string; playerId: string; role: CoopRole; name: string; serverUrl: string; players?: CoopPlayer[] } | null>(null);
+  const [coopSession, setCoopSession] = useState<CoopSession | null>(null);
   const [coopRoster, setCoopRoster] = useState<CoopPlayer[]>([]);
   const [coopTutorialWaiting, setCoopTutorialWaiting] = useState(false);
   const [coopTutorialReady, setCoopTutorialReady] = useState(false);
@@ -54,7 +56,10 @@ export default function GameCanvas() {
   const [storyOpen, setStoryOpen] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<PlayerId>(1);
   const [analystTabletOpen, setAnalystTabletOpen] = useState(false);
-  const isAnalystTablet = isOriginalOrla && selectedPlayer === 3 && analystTabletOpen;
+  // Em dupla não há Analista: Mobilidade e Infraestrutura têm o próprio tablet da central.
+  const sharedAnalyst = !!coopSession?.sharedAnalyst;
+  const hasAnalystTablet = isOriginalOrla && (selectedPlayer === 3 || sharedAnalyst);
+  const isAnalystTablet = hasAnalystTablet && analystTabletOpen;
   const [closeView, setCloseView] = useState(false);
   const [analystAttention, setAnalystAttention] = useState(false);
   const [analystTutorialStep, setAnalystTutorialStep] = useState<AnalystTutorialStep | null>(null);
@@ -97,6 +102,8 @@ export default function GameCanvas() {
         setCoopSession({
           room: currentRoom.code, playerId: currentPlayer.id, role: currentPlayer.role,
           name: currentPlayer.name, serverUrl: client.url, players: currentRoom.players,
+          // O servidor decide o modo no início; o roster serve de reserva se a mensagem não o trouxer.
+          sharedAnalyst: currentRoom.sharedAnalyst ?? coopTeamMode(currentRoom.players) === 'duo',
         });
       }
     } catch { setError('Não foi possível recuperar a sessão. Volte ao menu para começar novamente.'); }
@@ -197,7 +204,7 @@ export default function GameCanvas() {
     setStoryOpen(false);
     if (coopSession) {
       clientTutorialOpen();
-      game.current?.startCoopOrlaTutorial(coopRoleToPlayerId(coopSession.role));
+      game.current?.startCoopOrlaTutorial(coopRoleToPlayerId(coopSession.role), { sharedAnalyst: coopSession.sharedAnalyst });
       setCoopTutorialWaiting(true);
       setSelectedPlayer(coopRoleToPlayerId(coopSession.role));
     } else {
@@ -358,11 +365,12 @@ export default function GameCanvas() {
       {coopTutorialWaiting && coopSession && status !== 'paused' && <div className="coop-tutorial-overlay" role="dialog" aria-modal="true" aria-labelledby="coop-tutorial-title">
         <section className="coop-tutorial-card">
           <span className="eyebrow">TUTORIAL COLETIVO · SALA {coopSession.room}</span>
-          <h2 id="coop-tutorial-title">Sua equipe: {coopSession.role === 'analista' ? 'Analista' : coopSession.role === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura'}</h2>
+          <h2 id="coop-tutorial-title">Sua equipe: {roleTitle(coopSession.role)}{sharedAnalyst ? ' + Analista' : ''}</h2>
           {coopSession.role === 'analista' ? <p>WASD move você e Shift corre. Pressione Q ou toque em Abrir tablet para analisar chamados e coordenar as equipes. Você fica parada no local enquanto usa o tablet; guarde com Q para voltar a andar. O trânsito e o relógio continuam.</p>
             : coopSession.role === 'mobilidade' ? <p>WASD move você, Shift corre e E interage. Organize o trânsito, proteja a área de trabalho e mantenha a ciclovia segura.</p>
               : <p>WASD move você, Shift corre e E interage. Vá até os equipamentos chamados e conclua os reparos quando a área estiver protegida.</p>}
-          <p className="coop-tutorial-note">A partida e os chamados só começam quando todas as pessoas da sala confirmarem que entenderam seu papel.</p>
+          {sharedAnalyst && <p className="coop-tutorial-shared">Partida em dupla: vocês duas dividem a central da Analista. Q abre e guarda o seu tablet; com ele aberto, E analisa o chamado e 1 / 2 acionam Infraestrutura e Mobilidade. O que uma de vocês concluir aparece no tablet da outra, e abrir o tablet não trava a parceira.</p>}
+          <p className="coop-tutorial-note">A partida e os chamados só começam quando {sharedAnalyst ? 'as duas pessoas' : 'todas as pessoas'} da sala confirmarem que entenderam seu papel.</p>
           <button type="button" className="coop-tutorial-ready" disabled={coopTutorialReady} onClick={() => {
             setCoopTutorialReady(true);
             void coopClient.current?.tutorialReady(true).catch(cause => { setCoopTutorialReady(false); failCoop(cause instanceof Error ? cause.message : 'Não foi possível confirmar o tutorial.'); });
@@ -371,7 +379,8 @@ export default function GameCanvas() {
       </div>}
       {coopSession && !coopTutorialWaiting && <aside className="coop-team-hud" aria-label="Equipe cooperativa">
         <b>COOP · {coopSession.room}</b>
-        {coopRoster.map(member => <span key={member.id} className={member.id === coopSession.playerId ? 'is-you' : ''}>{member.name} · {member.role === 'analista' ? 'Analista' : member.role === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura'}</span>)}
+        {coopRoster.map(member => <span key={member.id} className={member.id === coopSession.playerId ? 'is-you' : ''}>{member.name} · {roleTitle(member.role)}</span>)}
+        {sharedAnalyst && <span className="is-shared">Analista · tablet compartilhado</span>}
       </aside>}
       {isOriginalOrla && !coopTutorialWaiting && !error && analystTutorialStep === null && mobilityTutorialStep === null && infrastructureTutorialStep === null && <OrdersHud paused={status !== 'playing'} onMenu={returnToMenu} onContinue={() => game.current?.togglePause()} onRestart={coopSession ? returnToMenu : undefined} />}
       {isOriginalOrla && repairPuzzleOpen && <RepairPuzzle type={repairPuzzleType} paused={status !== 'playing'} onComplete={() => game.current?.completeRepairPuzzle()} />}
@@ -389,7 +398,8 @@ export default function GameCanvas() {
           if (problem?.status === 'RESOLVED') game.current?.archiveResolvedProblem(id);
           else if (!problem?.analyzed) game.current?.analyzeProblem(id);
           else game.current?.requestReinforcements(id);
-        }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} onClose={analystTutorialStep === null ? () => game.current?.toggleAnalystTablet() : undefined} />}
+        }} tutorialStep={analystTutorialStep} onTutorialProgress={progressAnalystTutorial} onClose={analystTutorialStep === null ? () => game.current?.toggleAnalystTablet() : undefined}
+          operator={sharedAnalyst && coopSession ? `${roleTitle(coopSession.role).toLocaleUpperCase('pt-BR')} · CENTRAL COMPARTILHADA` : undefined} />}
         {isOriginalOrla && analystTutorialStep !== null && <AnalystTutorialGuide
           step={analystTutorialStep}
           onBegin={beginAnalystTutorialSteps}
@@ -410,9 +420,12 @@ export default function GameCanvas() {
           onComplete={finishInfrastructureTutorial}
           onSkip={skipTutorial}
         />}
-        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : isOriginalOrla && selectedPlayer === 3 ? isAnalystTablet ? 'PARADA · Q guardar tablet / E ou clique · ação' : 'WASD · mover / Shift · correr / Q · abrir tablet' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
+        <div className="hud"><span><b>[ {PLAYER_APPEARANCES[selectedPlayer].name.toLocaleUpperCase('pt-BR')} ]</b><small>{analystTutorialStep !== null ? 'TABLET · E / CLIQUE CONFIRMAR / ACIONAR EQUIPES' : isOriginalOrla && selectedPlayer === 3 ? isAnalystTablet ? 'PARADA · Q guardar tablet / E ou clique · ação' : 'WASD · mover / Shift · correr / Q · abrir tablet'
+          : sharedAnalyst && isAnalystTablet ? 'TABLET · Q guardar / E analisar / 1 · 2 acionar equipes'
+            : sharedAnalyst ? 'WASD · mover / Shift · correr / E · ação / Q · tablet da central' : mobilityTutorialStep !== null ? 'MOBILIDADE · WASD MOVER / E / CLIQUE INTERAGIR' : !isLaboratory ? 'WASD · mover / Shift · correr / E ou clique · ação / T · trocar' : selectedPlayer === 3 ? 'Mouse · investigar e marcar / T · trocar' : 'WASD · mover / Shift · correr / T · trocar'}</small></span><button className="secondary" onClick={() => game.current?.togglePause()}>Pausar · Esc</button></div>
         {isOriginalOrla && !isAnalystTablet && <GameObjectiveHUD player={selectedPlayer} distance={objectiveDistance} tutorialTarget={infrastructureTutorialStep === 1} />}
-        {!isLaboratory && interactionPrompt && (selectedPlayer !== 3 || isAnalystTablet) && (promptIsInstruction
+        {/* Com o tablet aberto em dupla, E/clique pertence à central: os avisos de campo voltam ao guardar. */}
+        {!isLaboratory && interactionPrompt && (selectedPlayer === 3 ? isAnalystTablet : !isAnalystTablet) && (promptIsInstruction
           ? <div className={`${promptClassName} is-hotkey-hint`} role="status">{interactionPrompt}</div>
           : <button type="button" className={promptClassName} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }} aria-label={`Interagir: ${interactionPrompt}`}><kbd>E</kbd> / clique {interactionPrompt}</button>)}
 
@@ -442,10 +455,11 @@ export default function GameCanvas() {
 
         </div>}
         {isOriginalOrla && !isAnalystTablet && !repairPuzzleOpen && analystTutorialStep === null && (infrastructureTutorialStep === null || infrastructureTutorialStep === 3) && (mobilityTutorialStep === null || mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || [9, 11, 13, 15, 17].includes(mobilityTutorialStep)) && <div className="orla-actions" role="group" aria-label="Ações da equipe">
-          {selectedPlayer === 3 ? <button type="button" className={`analyst-tablet-toggle${analystAttention ? ' needs-attention' : ''}`} aria-expanded={isAnalystTablet} aria-controls="analyst-tablet" aria-keyshortcuts="Q" disabled={coopTutorialWaiting} onClick={event => { game.current?.toggleAnalystTablet(); event.currentTarget.blur(); }}>
+          {hasAnalystTablet && <button type="button" className={`analyst-tablet-toggle${analystAttention ? ' needs-attention' : ''}`} aria-expanded={isAnalystTablet} aria-controls="analyst-tablet" aria-keyshortcuts="Q" disabled={coopTutorialWaiting} onClick={event => { game.current?.toggleAnalystTablet(); event.currentTarget.blur(); }}>
             <kbd>Q</kbd> {isAnalystTablet ? 'Guardar tablet' : 'Abrir tablet'}
             {!isAnalystTablet && analystAttention && <span className="tablet-alert-dot" aria-label="Chamado aguardando" />}
-          </button> : <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>}
+          </button>}
+          {selectedPlayer !== 3 && <button disabled={mobilityTutorialStep !== null && mobilityTutorialStep !== 3 && mobilityTutorialStep !== 7} className={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'tutorial-focus' : undefined} data-tutorial-target={mobilityTutorialStep === 3 || mobilityTutorialStep === 7 || infrastructureTutorialStep === 3 ? 'true' : undefined} onClick={event => { game.current?.interact(); event.currentTarget.blur(); }}><kbd>E</kbd> {selectedPlayer === 2 ? 'Cone' : 'Interagir'}</button>}
 
           {selectedPlayer === 2 && ['Liberar via', 'Bloquear sentido', 'Interditar tudo', 'Habilidade 4 · Desviar elétricos'].map((label, index) => {
             const activeSkill = mobilityTutorialStep !== null && mobilityTutorialStep === 9 ? 0 : mobilityTutorialStep === 11 ? 1 : mobilityTutorialStep === 13 ? 2 : mobilityTutorialStep === 15 ? 3 : mobilityTutorialStep === 17 ? 0 : -1;

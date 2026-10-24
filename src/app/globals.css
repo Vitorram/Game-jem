@@ -962,10 +962,12 @@ button.circuit-cell:hover:not(:disabled),button.circuit-cell:focus-visible { out
 .coop-tutorial-card h2{font-size:clamp(26px,5vw,38px);margin:12px 0}
 .coop-tutorial-card p{line-height:1.5;color:#405d67}
 .coop-tutorial-card .coop-tutorial-note{padding:12px;border-radius:10px;background:#fff9e9;font-size:13px}
+.coop-tutorial-card .coop-tutorial-shared{padding:12px;border:2px solid #7adcf2;border-radius:10px;background:#e8f8fb;font-size:13px}
 .coop-tutorial-ready{width:100%;min-height:48px;border:2px solid #183847;border-radius:10px;background:#efbd4f;color:#153547;font-weight:800;cursor:pointer}
 .coop-tutorial-ready:disabled{opacity:.8;cursor:wait}
 .coop-team-hud{position:fixed;z-index:24;top:76px;right:18px;display:grid;gap:5px;min-width:160px;padding:11px 13px;border:1px solid #8bc7d166;border-radius:12px;background:#082944d9;color:#edf7f6;backdrop-filter:blur(8px);font:11px/1.35 Arial,sans-serif;pointer-events:none}
 .coop-team-hud>b{color:#7adcf2;font-size:10px;letter-spacing:.12em;margin-bottom:2px}
 .coop-team-hud>span{color:#c1d8df}
 .coop-team-hud>span.is-you{color:#f3c458;font-weight:800}
+.coop-team-hud>span.is-shared{color:#7adcf2;font-style:italic}
 @media(max-width:640px){.coop-team-hud{top:auto;right:8px;bottom:64px;min-width:0;padding:8px 10px;font-size:9px}}

@@ -113,11 +113,13 @@ const towContacts = [
 
 export type AnalystTutorialStep = 0 | 1 | 2 | 3 | 4 | 5;
 
-export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialStep, onTutorialProgress, onClose }: {
+export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialStep, onTutorialProgress, onClose, operator }: {
   onAction: (problemId?: string) => void;
   onAnalyze?: (problemId: string) => void;
   onCallTow?: (problemId: string) => boolean;
   onClose?: () => void;
+  /** Quem opera o terminal quando a central é compartilhada no coop em dupla. */
+  operator?: string;
   tutorialStep?: AnalystTutorialStep | null;
   onTutorialProgress?: (milestone: 'selected' | 'confirmed' | 'infrastructure' | 'mobility') => void;
 }) {
@@ -324,7 +326,7 @@ export default function OrlaTablet({ onAction, onAnalyze, onCallTow, tutorialSte
           </div>
         </div>
       </div>
-      <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>ANALISTA <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>
+      <footer className="tablet-footer"><span><i /> CONEXÃO ESTÁVEL</span><span>{operator ?? 'ANALISTA'} <b>◆</b> DISPOSITIVO SINCRONIZADO</span></footer>
     </div>
     {phoneOpen && isTowIssue && <div className="tow-phone-overlay">
       <div className="tow-phone-dialog" role="dialog" aria-modal="true" aria-labelledby="tow-phone-title" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape') setPhoneOpen(false); }}>

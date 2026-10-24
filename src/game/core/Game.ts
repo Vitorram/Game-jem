@@ -25,6 +25,12 @@ import type { CoopAction, CoopRole } from '../coop/CoopClient';
 export type GameSceneId = 'test' | 'fase1-orla';
 export type GameStatus = 'ready' | 'playing' | 'paused' | 'finished';
 
+/** Ações da central de análise: no coop remoto quem as executa é a Analista (3), não a personagem de quem enviou. */
+const ANALYST_ACTIONS: ReadonlySet<CoopAction['type']> = new Set(['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select']);
+const ANALYST_ID: PlayerId = 3;
+/** Quanto uma ação remota da central espera pelo chamado local antes de ser descartada. */
+const DEFERRED_ACTION_MS = 15_000;
+
 export class Game {
   readonly input: Input;
 
@@ -56,7 +62,11 @@ export class Game {
   private tutorialStage = 0;
   private coopPlayerId: PlayerId | null = null;
   private coopTutorialActive = false;
+  /** Partida em dupla: Mobilidade e Infraestrutura também operam o tablet da Analista. */
+  private sharedAnalyst = false;
+  get hasSharedAnalyst(): boolean { return this.sharedAnalyst; }
   private applyingCoopAction = false;
+  private readonly deferredCoopActions: { role: CoopRole; action: CoopAction; expiresAt: number }[] = [];
   private previousTime: number | null = null;
   private session?: GameSession;
   private disposed = false;
@@ -232,9 +242,10 @@ export class Game {
     this.setAnalystTabletOpen(true);
   }
 
-  startCoopOrlaTutorial(playerId: PlayerId): void {
+  startCoopOrlaTutorial(playerId: PlayerId, options: { sharedAnalyst?: boolean } = {}): void {
     if (this.status !== 'ready' || this.disposed) return;
     this.coopPlayerId = playerId;
+    this.sharedAnalyst = !!options.sharedAnalyst && playerId !== ANALYST_ID;
     this.mandatoryTutorialActive = false;
     this.start('fase1-orla', true);
   }
@@ -267,8 +278,48 @@ export class Game {
   }
 
   applyCoopAction(role: CoopRole, action: CoopAction): void {
-    if (this.disposed || this.coopPlayerId === null || this.status !== 'playing') return;
-    const actorId: PlayerId = role === 'infraestrutura' ? 1 : role === 'mobilidade' ? 2 : 3;
+    // Uma pausa local (perda de foco) chega aos outros com atraso; descartar ações já
+    // aplicadas no cliente de origem nesse intervalo deixaria a agenda divergente.
+    if (this.disposed || this.coopPlayerId === null || (this.status !== 'playing' && this.status !== 'paused')) return;
+    const readiness = this.coopActionReadiness(action);
+    if (readiness === 'stale') return;
+    if (readiness === 'wait') {
+      this.deferredCoopActions.push({ role, action, expiresAt: performance.now() + DEFERRED_ACTION_MS });
+      return;
+    }
+    this.applyCoopActionNow(role, action);
+  }
+
+  /**
+   * Cada cliente roda a agenda no próprio relógio, então uma ação da central pode chegar
+   * alguns quadros antes de o chamado existir (ou ser resolvido) aqui. Ela espera em vez
+   * de ser descartada; repetições de algo que já aconteceu são ignoradas.
+   */
+  private coopActionReadiness(action: CoopAction): 'ready' | 'wait' | 'stale' {
+    if (action.type !== 'analyze' && action.type !== 'dispatch' && action.type !== 'call-tow' && action.type !== 'archive') return 'ready';
+    if (action.problemId === undefined) return 'ready';
+    const problem = suburbanGameState.findProblem(action.problemId);
+    if (action.type === 'archive') return !problem ? 'stale' : problem.status === 'RESOLVED' ? 'ready' : 'wait';
+    if (!problem) return 'wait';
+    if (problem.status === 'RESOLVED') return 'stale';
+    return action.type === 'analyze' || problem.analyzed ? 'ready' : 'wait';
+  }
+
+  private flushDeferredCoopActions(): void {
+    if (!this.deferredCoopActions.length) return;
+    const now = performance.now();
+    const pending = this.deferredCoopActions.splice(0);
+    for (const item of pending) {
+      const readiness = now > item.expiresAt ? 'stale' : this.coopActionReadiness(item.action);
+      if (readiness === 'ready') this.applyCoopActionNow(item.role, item.action);
+      else if (readiness === 'wait') this.deferredCoopActions.push(item);
+    }
+  }
+
+  private applyCoopActionNow(role: CoopRole, action: CoopAction): void {
+    if (this.disposed || this.coopPlayerId === null) return;
+    const actorId: PlayerId = ANALYST_ACTIONS.has(action.type) ? ANALYST_ID
+      : role === 'infraestrutura' ? 1 : role === 'mobilidade' ? 2 : 3;
     const current = this.scenes.current;
     if (!(current instanceof Fase1OrlaScene)) return;
     this.applyingCoopAction = true;
@@ -280,7 +331,11 @@ export class Game {
       switch (action.type) {
         case 'interact': this.input.setActionAxis(action.axis); current.interact(); break;
         case 'analyze': current.analyzeProblem(action.problemId); break;
-        case 'dispatch': current.dispatchTeam(action.team); break;
+        case 'dispatch':
+          // Despacho nomeia o chamado: não depende da seleção local, que pode ter mudado.
+          if (action.problemId !== undefined) suburbanGameState.selectProblem(action.problemId);
+          current.dispatchTeam(action.team);
+          break;
         case 'archive': this.archiveResolvedProblem(action.problemId); break;
         case 'call-tow': current.callTow(action.problemId, true); break;
         case 'mobility-hotkey': this.useMobilityHotkey(action.key); break;
@@ -406,6 +461,7 @@ export class Game {
     this.session = undefined;
     this.observedCallIds.clear();
     this.promptedArchiveIds.clear();
+    this.deferredCoopActions.length = 0;
     this.pendingAnalystSelection = false;
     this.input.clear();
     suburbanGameState.setActiveCharacter(1);
@@ -436,21 +492,50 @@ export class Game {
     const current = this.scenes.current;
     if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen
       || this.mandatoryTutorialActive || this.coopTutorialActive
-      || !(current instanceof Fase1OrlaScene) || current.player.id !== 3) return;
+      || !(current instanceof Fase1OrlaScene) || !this.canHoldAnalystTablet(current)) return;
     this.setAnalystTabletOpen(!this.analystTabletOpen);
   }
 
   private setAnalystTabletOpen(open: boolean): void {
     this.analystTabletOpen = open;
     const current = this.scenes.current;
-    if (current instanceof Fase1OrlaScene) current.setAnalystTabletOpen(open);
+    // O tablet é estado só deste cliente: em dupla cada pessoa abre o seu sem afetar a outra.
+    if (current instanceof Fase1OrlaScene) current.setAnalystTabletOpen(open, this.sharedAnalyst && this.coopPlayerId !== null ? this.coopPlayerId : ANALYST_ID);
     this.onAnalystTabletChange?.(open);
   }
 
+  /** A Analista segura o tablet; em dupla, qualquer uma das duas equipes de campo também. */
+  private canHoldAnalystTablet(scene: Fase1OrlaScene): boolean {
+    return scene.player.id === ANALYST_ID || this.sharedAnalyst;
+  }
+
+  /**
+   * Ações locais da central exigem o tablet aberto. Ações remotas sempre passam: já foram
+   * aplicadas no cliente de origem, mesmo que aqui exista pausa ou puzzle aberto.
+   */
   private canUseAnalystTablet(): boolean {
     const current = this.scenes.current;
-    return this.applyingCoopAction || (this.analystTabletOpen
-      && current instanceof Fase1OrlaScene && current.player.id === 3);
+    if (this.disposed || !(current instanceof Fase1OrlaScene)) return false;
+    if (this.applyingCoopAction) return true;
+    return this.status === 'playing' && !this.repairPuzzleOpen && this.analystTabletOpen && this.canHoldAnalystTablet(current);
+  }
+
+  /** Em dupla, a ação do tablet é executada pela central sem trocar a personagem que a pessoa controla. */
+  private asAnalyst<T>(run: () => T): T {
+    const previous = suburbanGameState.activeCharacter;
+    if (!this.sharedAnalyst || previous === ANALYST_ID) return run();
+    suburbanGameState.setActiveCharacter(ANALYST_ID);
+    try { return run(); } finally { suburbanGameState.setActiveCharacter(previous); }
+  }
+
+  /** E/clique com o tablet aberto em dupla: o mesmo atalho da Analista (analisar, depois solicitar reforço). */
+  private sharedAnalystInteract(): void {
+    const state = suburbanGameState.snapshot();
+    const problem = state.problems.find(item => item.id === state.selectedProblemId && item.status !== 'RESOLVED')
+      ?? state.problems.find(item => item.status !== 'RESOLVED');
+    if (!problem) return;
+    if (!problem.analyzed) this.analyzeProblem(problem.id);
+    else this.requestReinforcements(problem.id);
   }
 
   /** Escolha feita pelo jogador: cancela qualquer troca automática pendente. */
@@ -480,7 +565,7 @@ export class Game {
 
   private applyPlayerSelection(id: PlayerId) {
     this.input.clear();
-    if (id !== 3) this.setAnalystTabletOpen(false);
+    if (id !== ANALYST_ID && !this.sharedAnalyst) this.setAnalystTabletOpen(false);
     const current = this.scenes.current;
     if (current instanceof TestScene || current instanceof Fase1OrlaScene) {
       current.selectPlayer(id);
@@ -506,7 +591,11 @@ export class Game {
         || this.tutorialStage === 33 || this.tutorialStage === 35)) return;
     const current = this.scenes.current;
     if (current instanceof Fase1OrlaScene) {
-      if (current.player.id === 3 && !this.canUseAnalystTablet()) return;
+      if (this.sharedAnalyst && this.analystTabletOpen && current.player.id !== ANALYST_ID) {
+        this.sharedAnalystInteract();
+        return;
+      }
+      if (current.player.id === ANALYST_ID && !this.canUseAnalystTablet()) return;
       current.interact();
       if (this.coopPlayerId !== null && !this.applyingCoopAction) {
         const player = current.player;
@@ -517,66 +606,61 @@ export class Game {
 
   selectProblem(id: string): void {
     if (!this.canUseAnalystTablet()) return;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
-    const scene = this.scenes.current;
-    if (scene instanceof Fase1OrlaScene && scene.player.role !== 'analista') return;
     suburbanGameState.selectProblem(id);
     if (this.coopPlayerId !== null && !this.applyingCoopAction) this.onCoopAction?.({ type: 'problem-select', problemId: id });
   }
 
   analyzeProblem(id: string): boolean {
-    if (!this.canUseAnalystTablet()) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    const analyzed = scene instanceof Fase1OrlaScene && scene.analyzeProblem(id);
+    if (!(scene instanceof Fase1OrlaScene) || !this.canUseAnalystTablet()) return false;
+    const analyzed = this.asAnalyst(() => scene.analyzeProblem(id));
     if (analyzed && this.coopPlayerId !== null && !this.applyingCoopAction) this.onCoopAction?.({ type: 'analyze', problemId: id });
     return analyzed;
   }
 
   callTow(id: string): boolean {
-    if (!this.canUseAnalystTablet()) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    if (!(scene instanceof Fase1OrlaScene) || !scene.callTow(id)) return false;
+    if (!(scene instanceof Fase1OrlaScene) || !this.canUseAnalystTablet()) return false;
+    if (!this.asAnalyst(() => scene.callTow(id))) return false;
     if (this.coopPlayerId !== null && !this.applyingCoopAction) this.onCoopAction?.({ type: 'call-tow', problemId: id });
     return true;
   }
 
   requestReinforcements(id: string): boolean {
-    if (!this.canUseAnalystTablet()) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    if (!(scene instanceof Fase1OrlaScene)) return false;
+    if (!(scene instanceof Fase1OrlaScene) || !this.canUseAnalystTablet()) return false;
     const before = suburbanGameState.snapshot().problems.find(item => item.id === id)?.dispatchedTeams ?? [];
-    const dispatched = scene.requestReinforcements(id);
+    const dispatched = this.asAnalyst(() => scene.requestReinforcements(id));
     if (!dispatched) return false;
     if (this.coopPlayerId !== null && !this.applyingCoopAction) {
       const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
       for (const team of problem?.dispatchedTeams ?? []) {
-        if (!before.includes(team)) this.onCoopAction?.({ type: 'dispatch', team });
+        if (!before.includes(team)) this.onCoopAction?.({ type: 'dispatch', team, problemId: id });
       }
     }
     const problem = suburbanGameState.snapshot().problems.find(item => item.id === id);
     const assigned = problem?.requiredTeams?.find(team => problem.dispatchedTeams.includes(team));
-    if (assigned) this.autoSelectPlayer(assigned === 'infraestrutura' ? 1 : 2);
+    // No coop cada pessoa fica com a própria personagem; a troca automática é só do modo local.
+    if (assigned && this.coopPlayerId === null) this.autoSelectPlayer(assigned === 'infraestrutura' ? 1 : 2);
     return true;
   }
 
   archiveResolvedProblem(id: string): boolean {
-    if (!this.canUseAnalystTablet()) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
     const scene = this.scenes.current;
-    if (!(scene instanceof Fase1OrlaScene) || !scene.archiveResolvedProblem(id)) return false;
+    if (!(scene instanceof Fase1OrlaScene) || !this.canUseAnalystTablet()) return false;
+    if (!this.asAnalyst(() => scene.archiveResolvedProblem(id))) return false;
     sessionStore.archiveCompleted(id);
     if (this.coopPlayerId !== null && !this.applyingCoopAction) this.onCoopAction?.({ type: 'archive', problemId: id });
-    if (!suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED')) this.autoSelectPlayer(2);
+    if (this.coopPlayerId === null && !suburbanGameState.snapshot().problems.some(problem => problem.status !== 'RESOLVED')) this.autoSelectPlayer(2);
     this.checkSessionEnd();
     return true;
   }
 
   useMobilityHotkey(key: string): boolean {
-    if (this.coopTutorialActive) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    if (this.coopTutorialActive || this.disposed) return false;
+    // Remotas não dependem do estado local (pausa, puzzle ou tablet de quem recebe).
+    if (!this.applyingCoopAction && (this.status !== 'playing' || this.repairPuzzleOpen
+      || (this.sharedAnalyst && this.analystTabletOpen))) return false;
     const scene = this.scenes.current;
     const mobilityStep = this.tutorialStage - 10;
     const tutorialKeys: Record<number, string> = { 9: 'Digit1', 11: 'Digit2', 13: 'Digit3', 15: 'Digit4', 17: 'Digit1' };
@@ -719,13 +803,15 @@ export class Game {
         this.toggleAnalystTablet();
         return;
       }
-      if (current.player.role === 'analista' && event.code === 'Digit1') {
+      // Em dupla, com o tablet aberto, 1 e 2 acionam equipes como na Analista; guardado, voltam a ser habilidades.
+      const operatingTablet = current.player.role === 'analista' || (this.sharedAnalyst && this.analystTabletOpen);
+      if (operatingTablet && event.code === 'Digit1') {
         event.preventDefault();
         if (this.mandatoryTutorialActive && this.tutorialStage !== 3) return;
         this.dispatchTeam('infraestrutura');
         return;
       }
-      if (current.player.role === 'analista' && event.code === 'Digit2') {
+      if (operatingTablet && event.code === 'Digit2') {
         event.preventDefault();
         if (this.mandatoryTutorialActive && this.tutorialStage !== 4) return;
         this.dispatchTeam('mobilidade');
@@ -790,6 +876,7 @@ export class Game {
       sessionStore.tick(elapsedMs);
       const scene = this.scenes.current;
       if (scene instanceof Fase1OrlaScene) scene.advancePhase(this.session.snapshot().elapsedMs);
+      this.flushDeferredCoopActions();
       this.checkSessionEnd();
     }
     if (this.status === 'playing') {
@@ -829,11 +916,12 @@ export class Game {
   };
 
   private openRepairPuzzle(type: RepairPuzzleType = 'pole'): void {
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return;
+    if (this.disposed) return;
     if (this.applyingCoopAction && this.coopPlayerId !== 1) {
       this.remoteRepairType = type;
       return;
     }
+    if (this.status !== 'playing' || this.repairPuzzleOpen) return;
     this.repairPuzzleOpen = true;
     this.activeRepairType = type;
     this.input.clear();
@@ -878,13 +966,15 @@ export class Game {
   }
 
   dispatchTeam(team: ResponseTeam): boolean {
-    if (!this.canUseAnalystTablet()) return false;
-    if (this.disposed || this.status !== 'playing' || this.repairPuzzleOpen) return false;
+    const current = this.scenes.current;
+    if (!(current instanceof Fase1OrlaScene) || !this.canUseAnalystTablet()) return false;
     if (this.mandatoryTutorialActive && !((this.tutorialStage === 3 && team === 'infraestrutura')
       || (this.tutorialStage === 4 && team === 'mobilidade'))) return false;
-    const current = this.scenes.current;
-    const dispatched = current instanceof Fase1OrlaScene ? current.dispatchTeam(team) : false;
-    if (dispatched && this.coopPlayerId !== null && !this.applyingCoopAction) this.onCoopAction?.({ type: 'dispatch', team });
+    const problemId = suburbanGameState.selectedProblemId;
+    const dispatched = this.asAnalyst(() => current.dispatchTeam(team));
+    if (dispatched && this.coopPlayerId !== null && !this.applyingCoopAction) {
+      this.onCoopAction?.(problemId === null ? { type: 'dispatch', team } : { type: 'dispatch', team, problemId });
+    }
     return dispatched;
   }
 

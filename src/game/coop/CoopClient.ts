@@ -1,11 +1,16 @@
 export type CoopRole = 'analista' | 'mobilidade' | 'infraestrutura';
+/** 'trio': cada papel com uma pessoa. 'duo': Mobilidade + Infraestrutura dividem o tablet da Analista. */
+export type CoopTeamMode = 'trio' | 'duo';
 export type CoopPlayer = { id: string; name: string; role: CoopRole; ready: boolean; tutorialReady: boolean; host: boolean };
-export type CoopRoom = { code: string; phase: 'lobby' | 'story' | 'tutorial' | 'playing'; isPublic: boolean; paused: boolean; players: CoopPlayer[] };
-export type CoopRoomListing = Pick<CoopRoom, 'code' | 'phase' | 'players'>;
+export type CoopRoom = {
+  code: string; phase: 'lobby' | 'story' | 'tutorial' | 'playing'; isPublic: boolean; paused: boolean; players: CoopPlayer[];
+  mode?: CoopTeamMode | null; sharedAnalyst?: boolean;
+};
+export type CoopRoomListing = Pick<CoopRoom, 'code' | 'phase' | 'players' | 'mode'>;
 export type CoopAction =
   | { type: 'interact'; axis: { x: number; z: number }; pose: { x: number; z: number; yaw: number } }
   | { type: 'analyze'; problemId: string }
-  | { type: 'dispatch'; team: 'infraestrutura' | 'mobilidade' }
+  | { type: 'dispatch'; team: 'infraestrutura' | 'mobilidade'; problemId?: string }
   | { type: 'archive'; problemId: string }
   | { type: 'call-tow'; problemId: string }
   | { type: 'mobility-hotkey'; key: string; pose: { x: number; z: number; yaw: number } }
@@ -21,7 +26,7 @@ export type CoopMessage =
   | { type: 'joined'; id: string; role: CoopRole; code: string; host: boolean }
   | ({ type: 'room' } & CoopRoom)
   | { type: 'rooms'; rooms: CoopRoomListing[] }
-  | { type: 'game-start'; room: string; startDelayMs: number; players: CoopPlayer[] }
+  | { type: 'game-start'; room: string; startDelayMs: number; players: CoopPlayer[]; mode?: CoopTeamMode; sharedAnalyst?: boolean }
   | { type: 'tutorial-start'; startDelayMs: number }
   | { type: 'move'; id: string; role: CoopRole; x: number; z: number; yaw: number }
   | { type: 'action'; id: string; role: CoopRole; action: CoopAction }
@@ -36,6 +41,19 @@ export class CoopError extends Error {
 type Pending = { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> };
 const roles = ['analista', 'mobilidade', 'infraestrutura'];
 const phases = ['lobby', 'story', 'tutorial', 'playing'];
+export const COOP_MIN_PLAYERS = 2;
+export const COOP_MAX_PLAYERS = roles.length;
+export const COOP_DUO_ROLES: readonly CoopRole[] = ['mobilidade', 'infraestrutura'];
+/** Mesma regra do servidor (backend/protocol.mjs): o lobby só a usa para orientar, quem decide é o servidor. */
+export function coopTeamMode(members: readonly Pick<CoopPlayer, 'role'>[]): CoopTeamMode | null {
+  const unique = new Set(members.map(member => member.role));
+  if (unique.size !== members.length) return null;
+  if (members.length === COOP_MAX_PLAYERS && roles.every(role => unique.has(role as CoopRole))) return 'trio';
+  if (members.length === COOP_MIN_PLAYERS && COOP_DUO_ROLES.every(role => unique.has(role))) return 'duo';
+  return null;
+}
+const validMode = (value: unknown) => value === undefined || value === null || value === 'trio' || value === 'duo';
+const optionalBoolean = (value: unknown) => value === undefined || typeof value === 'boolean';
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && value.length <= 1024;
 const validRole = (value: unknown) => typeof value === 'string' && roles.includes(value);
@@ -45,13 +63,13 @@ const players = (value: unknown): boolean => Array.isArray(value) && value.lengt
   && ['ready', 'tutorialReady', 'host'].every(key => typeof player[key] === 'boolean'))
   && new Set(value.map(player => player.id)).size === value.length
   && new Set(value.map(player => player.role)).size === value.length;
-const listing = (value: unknown) => record(value) && string(value.code) && typeof value.phase === 'string' && phases.includes(value.phase) && players(value.players);
+const listing = (value: unknown) => record(value) && string(value.code) && typeof value.phase === 'string' && phases.includes(value.phase) && players(value.players) && validMode(value.mode);
 function validAction(value: unknown): boolean {
   if (!record(value)) return false;
   switch (value.type) {
     case 'interact': return validPose(value.pose) && record(value.axis) && Number.isFinite(value.axis.x) && Number.isFinite(value.axis.z);
     case 'mobility-hotkey': return validPose(value.pose) && ['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(String(value.key));
-    case 'dispatch': return ['mobilidade', 'infraestrutura'].includes(String(value.team));
+    case 'dispatch': return ['mobilidade', 'infraestrutura'].includes(String(value.team)) && (value.problemId === undefined || string(value.problemId));
     case 'repair-complete': return true;
     case 'analyze': case 'archive': case 'call-tow': return string(value.problemId);
     case 'problem-select': return value.problemId === null || string(value.problemId);
@@ -66,9 +84,10 @@ function isServerMessage(value: unknown): value is CoopMessage {
     case 'error': return string(value.code) && string(value.message) && (value.requestId === undefined || string(value.requestId));
     case 'session-ended': return string(value.code) && string(value.message);
     case 'joined': return string(value.id) && validRole(value.role) && string(value.code) && typeof value.host === 'boolean';
-    case 'room': return listing(value) && typeof value.isPublic === 'boolean' && typeof value.paused === 'boolean';
+    case 'room': return listing(value) && typeof value.isPublic === 'boolean' && typeof value.paused === 'boolean' && optionalBoolean(value.sharedAnalyst);
     case 'rooms': return Array.isArray(value.rooms) && value.rooms.every(listing);
-    case 'game-start': return string(value.room) && players(value.players) && typeof value.startDelayMs === 'number' && value.startDelayMs >= 0 && value.startDelayMs <= 10000;
+    case 'game-start': return string(value.room) && players(value.players) && typeof value.startDelayMs === 'number' && value.startDelayMs >= 0 && value.startDelayMs <= 10000
+      && validMode(value.mode) && optionalBoolean(value.sharedAnalyst);
     case 'tutorial-start': return typeof value.startDelayMs === 'number' && value.startDelayMs >= 0 && value.startDelayMs <= 10000;
     case 'move': return string(value.id) && validRole(value.role) && validPose(value);
     case 'action': return string(value.id) && validRole(value.role) && validAction(value.action);
@@ -171,6 +190,7 @@ export class CoopClient {
   joinOpen(code: string, name: string, role: CoopRole): Promise<void> { return this.request({ type: 'join-open', code, name, role }); }
   requestRooms(): Promise<void> { return this.request({ type: 'list-rooms' }); }
   setPublic(isPublic: boolean): Promise<void> { return this.request({ type: 'set-public', isPublic }); }
+  setRole(role: CoopRole): Promise<void> { return this.request({ type: 'set-role', role }); }
   ready(ready: boolean): Promise<void> { return this.request({ type: 'ready', ready }); }
   start(): Promise<void> { return this.request({ type: 'start' }); }
   leave(): Promise<void> { return this.request({ type: 'leave' }); }
@@ -206,3 +226,7 @@ export function getCoopClient(url?: string): CoopClient {
   return window.__suburbanCoopClient;
 }
 export const coopRoleToPlayerId = (role: CoopRole): 1 | 2 | 3 => role === 'infraestrutura' ? 1 : role === 'mobilidade' ? 2 : 3;
+/** Ações executadas pela central de análise, não pela personagem de quem as enviou. */
+export const COOP_ANALYST_ACTIONS: ReadonlySet<CoopAction['type']> = new Set(['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select']);
+export const coopHasAnalystAccess = (role: CoopRole, sharedAnalyst: boolean): boolean =>
+  role === 'analista' || (sharedAnalyst && COOP_DUO_ROLES.includes(role));

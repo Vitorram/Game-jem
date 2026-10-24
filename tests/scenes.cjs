@@ -1122,6 +1122,130 @@ test('Analista móvel: usar tablet na rua mantém colisões e não bloqueia aç�
   assert.equal(game.isAnalystTabletOpen, true);
 });
 
+const runUntil = (renderer, from, to) => { for (let time = from; time <= to; time += 50) renderer.loop(time); return to; };
+const pressKey = (code, extra = {}) => {
+  const event = Object.assign(new Event('keydown', { cancelable: true }), { code, ...extra });
+  window.dispatchEvent(event);
+  return event;
+};
+
+test('coop em dupla: a Mobilidade opera o tablet da central sem perder a própria personagem nem as habilidades', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const actions = [];
+  const game = new Game(new Element(), () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, action => actions.push(action));
+  try {
+    game.startCoopOrlaTutorial(2, { sharedAnalyst: true });
+    assert.equal(game.hasSharedAnalyst, true);
+    game.toggleAnalystTablet();
+    assert.equal(game.isAnalystTabletOpen, false, 'tutorial coletivo ainda não liberou o tablet');
+    game.finishCoopTutorial();
+    const scene = game.scenes.current, renderer = created.at(-1), id = ORLA_EVENTS[0].id;
+    runUntil(renderer, 0, ORLA_EVENTS[0].atMs + 100);
+    assert.ok(suburbanGameState.findProblem(id), 'chamado emitido sem uma Analista na sala');
+    assert.equal(game.analystNeedsAttention(), true, 'o botão do tablet avisa a dupla');
+    assert.equal(game.analyzeProblem(id), false, 'tablet guardado não analisa');
+    const hotkey = t.mock.method(scene, 'useMobilityHotkey', () => true);
+    pressKey('KeyQ');
+    assert.equal(game.isAnalystTabletOpen, true);
+    assert.equal(scene.player.id, 2, 'quem abre o tablet continua controlando a Mobilidade');
+    const tablet = player => player.mesh.getObjectByName('analyst-handheld-tablet').visible;
+    assert.equal(tablet(scene.players[1]), true, 'o tablet aparece na mão de quem o abriu');
+    assert.equal(tablet(scene.players[2]), false);
+    pressKey('KeyE');
+    assert.equal(suburbanGameState.findProblem(id).analyzed, true, 'E com o tablet aberto analisa como a Analista');
+    pressKey('Digit1'); pressKey('Digit2'); pressKey('Digit3');
+    assert.deepEqual(suburbanGameState.findProblem(id).dispatchedTeams, ['infraestrutura', 'mobilidade']);
+    assert.equal(hotkey.mock.callCount(), 0, 'com o tablet aberto os números acionam equipes, não habilidades');
+    assert.deepEqual(actions, [
+      { type: 'analyze', problemId: id },
+      { type: 'dispatch', team: 'infraestrutura', problemId: id },
+      { type: 'dispatch', team: 'mobilidade', problemId: id },
+    ]);
+    assert.equal(suburbanGameState.activeCharacter, 2, 'a central não toma o controle da personagem');
+    pressKey('KeyQ');
+    assert.equal(game.isAnalystTabletOpen, false);
+    assert.equal(tablet(scene.players[1]), false);
+    pressKey('Digit3');
+    assert.equal(hotkey.mock.callCount(), 1, 'guardado o tablet, a Mobilidade volta às próprias habilidades');
+    assert.equal(actions.at(-1).type, 'mobility-hotkey');
+  } finally { game.dispose(); }
+});
+
+test('coop em dupla: Infraestrutura mantém o reparo e recebe as análises da parceira uma vez só', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const actions = [];
+  const game = new Game(new Element(), () => {}, undefined, undefined, undefined, undefined,
+    undefined, undefined, action => actions.push(action));
+  try {
+    game.startCoopOrlaTutorial(1, { sharedAnalyst: true });
+    game.finishCoopTutorial();
+    const scene = game.scenes.current, renderer = created.at(-1), id = ORLA_EVENTS[0].id;
+    // A agenda roda no relógio de cada cliente: a análise da parceira pode chegar antes do chamado.
+    game.applyCoopAction('mobilidade', { type: 'analyze', problemId: id });
+    assert.equal(suburbanGameState.findProblem(id), undefined);
+    runUntil(renderer, 0, ORLA_EVENTS[0].atMs + 100);
+    assert.equal(suburbanGameState.findProblem(id).analyzed, true, 'análise adiada é aplicada quando o chamado chega');
+    assert.equal(suburbanGameState.activeCharacter, 1);
+    assert.equal(game.isAnalystTabletOpen, false, 'ação remota não abre nem bloqueia o tablet local');
+    // As duas acionam a Infraestrutura quase juntas: o efeito acontece uma única vez.
+    game.toggleAnalystTablet();
+    assert.equal(game.dispatchTeam('infraestrutura'), true);
+    game.applyCoopAction('mobilidade', { type: 'dispatch', team: 'infraestrutura', problemId: id });
+    game.applyCoopAction('mobilidade', { type: 'dispatch', team: 'mobilidade', problemId: id });
+    game.applyCoopAction('mobilidade', { type: 'dispatch', team: 'mobilidade', problemId: id });
+    assert.deepEqual(suburbanGameState.findProblem(id).dispatchedTeams, ['infraestrutura', 'mobilidade']);
+    game.toggleAnalystTablet();
+    const interact = t.mock.method(scene, 'interact', () => {});
+    game.interact();
+    assert.equal(interact.mock.callCount(), 1, 'tablet guardado: E volta a ser a ação de Infraestrutura');
+    // Puzzle aberto e pausa local não podem fazer este cliente perder ações remotas.
+    game.repairPuzzleOpen = true;
+    game.togglePause();
+    const hotkey = t.mock.method(scene, 'useMobilityHotkey', () => true);
+    game.applyCoopAction('mobilidade', { type: 'mobility-hotkey', key: 'Digit3', pose: { x: 0, z: 4.6, yaw: 0 } });
+    assert.equal(hotkey.mock.callCount(), 1, 'habilidade remota aplicada mesmo com puzzle aberto aqui');
+    suburbanGameState.setProblemStatus(id, 'RESOLVED');
+    const archive = t.mock.method(scene.phase, 'archiveResolved');
+    game.applyCoopAction('mobilidade', { type: 'archive', problemId: id });
+    game.applyCoopAction('infraestrutura', { type: 'archive', problemId: id });
+    assert.equal(archive.mock.callCount(), 1, 'arquivamento repetido não avança a agenda duas vezes');
+    assert.equal(scene.phase.eventIndex, 1);
+    assert.equal(suburbanGameState.findProblem(id), undefined);
+    assert.equal(suburbanGameState.activeCharacter, 1);
+    assert.equal(actions.filter(action => action.type === 'dispatch').length, 1, 'só o acionamento local é reenviado');
+  } finally { game.dispose(); }
+});
+
+test('coop em trio: equipes de campo seguem sem tablet e aplicam a análise da Analista', t => {
+  const { Game, Element, created } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.startCoopOrlaTutorial(2);
+    assert.equal(game.hasSharedAnalyst, false);
+    game.finishCoopTutorial();
+    runUntil(created.at(-1), 0, ORLA_EVENTS[0].atMs + 100);
+    game.toggleAnalystTablet();
+    assert.equal(game.isAnalystTabletOpen, false, 'Mobilidade não abre o tablet quando há Analista');
+    const id = ORLA_EVENTS[0].id;
+    assert.equal(game.analyzeProblem(id), false);
+    game.applyCoopAction('analista', { type: 'analyze', problemId: id });
+    game.applyCoopAction('analista', { type: 'dispatch', team: 'mobilidade' });
+    assert.equal(suburbanGameState.findProblem(id).analyzed, true);
+    assert.deepEqual(suburbanGameState.findProblem(id).dispatchedTeams, ['mobilidade'], 'despacho antigo, sem chamado nomeado, continua aceito');
+    assert.equal(suburbanGameState.activeCharacter, 2);
+  } finally { game.dispose(); }
+});
+
+test('coop: Analista local não recebe modo compartilhado mesmo se a sala pedir', t => {
+  const { Game, Element } = gameHarness(t);
+  const game = new Game(new Element(), () => {});
+  try {
+    game.startCoopOrlaTutorial(3, { sharedAnalyst: true });
+    assert.equal(game.hasSharedAnalyst, false);
+  } finally { game.dispose(); }
+});
+
 test('CT-5.1: durante o treino de Mobilidade e de Infraestrutura o jogador anda livremente', t => {
   const { Game, Element, created } = gameHarness(t);
   const game = new Game(new Element(), () => {});

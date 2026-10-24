@@ -80,6 +80,13 @@ test('tablet portátil: botão para guardar acessível e tutorial sem fechamento
   assert.ok(!buttons(tutorial).some(action => action.text.includes('Guardar tablet')));
 });
 
+test('coop em dupla: tablet identifica a equipe que opera a central compartilhada', () => {
+  assert.match(render('OrlaTablet.tsx', { onAction: noop, onClose: noop }), /ANALISTA <b>◆<\/b> DISPOSITIVO SINCRONIZADO/);
+  const shared = render('OrlaTablet.tsx', { onAction: noop, onClose: noop, operator: 'MOBILIDADE · CENTRAL COMPARTILHADA' });
+  assert.match(shared, /MOBILIDADE · CENTRAL COMPARTILHADA <b>◆<\/b>/);
+  assert.ok(buttons(shared).some(action => action.text.includes('Guardar tablet')), 'cada pessoa guarda o próprio tablet');
+});
+
 test('CT-6.1: alertas do tablet usam cor junto com símbolo e texto', () => {
   const { suburbanGameState } = require(path.join(SRC, 'game', 'core', 'GameState.ts'));
   suburbanGameState.reset();

@@ -87,6 +87,12 @@
 .ready, .waiting { font-size: 10px; font-weight: 900; white-space: nowrap; }
 .ready { color: #34724c; }
 .waiting { color: #a66d22; }
+.shared { color: #23687a; }
+.teamStatus { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid #d9c99f; border-radius: 10px; background: #fffdf5; }
+.teamStatus[data-mode="trio"], .teamStatus[data-mode="duo"] { border-color: #9cc9a5; background: #f1f8ea; }
+.teamStatus b { color: #263f45; font-size: 12px; }
+.teamStatus span { color: #68766d; font-size: 11px; line-height: 1.4; }
+.roleSwitch { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; color: #68766d; font-size: 11px; }
 .lobbyActions { display: grid; grid-template-columns: 1fr 1.2fr; gap: 9px; align-items: center; }
 .lobbyActions p { grid-column: 1 / -1; margin: 0; color: #68766d; text-align: center; font-size: 11px; }
 .error { margin: 12px 0 0; padding: 10px 12px; border: 2px solid #9a3e34; border-radius: 9px; color: #682e27; background: #f9d9c7; font-size: 12px; }
