@@ -1,4 +1,23 @@
 export const ROLES = ['analista', 'mobilidade', 'infraestrutura'];
+export const MIN_PLAYERS = 2;
+export const MAX_PLAYERS = ROLES.length;
+/** Em dupla não há Analista: as duas equipes de campo dividem a central. */
+export const DUO_ROLES = ['mobilidade', 'infraestrutura'];
+const ROLE_ACTIONS = {
+  analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'],
+  mobilidade: ['interact', 'mobility-hotkey'],
+  infraestrutura: ['interact', 'repair-complete'],
+};
+/** Ações do tablet concedidas às equipes de campo quando a Analista é compartilhada. */
+export const SHARED_ANALYST_ACTIONS = ['analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'];
+/** 'trio' com os três papéis, 'duo' com Mobilidade + Infraestrutura; null quando a sala não pode iniciar. */
+export function teamMode(roles) {
+  const unique = new Set(roles);
+  if (unique.size !== roles.length) return null;
+  if (roles.length === MAX_PLAYERS && ROLES.every(role => unique.has(role))) return 'trio';
+  if (roles.length === MIN_PLAYERS && DUO_ROLES.every(role => unique.has(role))) return 'duo';
+  return null;
+}
 export class ProtocolError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
@@ -31,9 +50,9 @@ function action(value) {
       if (!['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(value.key)) invalid();
       return { type: value.type, key: value.key, pose: pose(value.pose) };
     case 'dispatch':
-      keys(value, ['type', 'team']);
+      keys(value, ['type', 'team', 'problemId']);
       if (!['infraestrutura', 'mobilidade'].includes(value.team)) invalid();
-      return { type: value.type, team: value.team };
+      return { type: value.type, team: value.team, ...(value.problemId === undefined ? {} : { problemId: text(value.problemId, 1, 128) }) };
     case 'repair-complete':
       keys(value, ['type']); return { type: value.type };
     case 'analyze': case 'archive': case 'call-tow': case 'problem-select':
@@ -46,7 +65,7 @@ export function validateMessage(value) {
   if (!object(value)) invalid();
   const allowed = {
     'create-room': ['name', 'role', 'isPublic'],
-    join: ['code', 'name', 'role'], 'join-open': ['code', 'name', 'role'],
+    join: ['code', 'name', 'role'], 'join-open': ['code', 'name', 'role'], 'set-role': ['role'],
     'list-rooms': [], leave: [], start: [], 'tutorial-open': [],
     ready: ['ready'], 'tutorial-ready': ['ready'], 'set-public': ['isPublic'],
     move: ['x', 'z', 'yaw'], action: ['action'], pause: ['paused'],
@@ -63,6 +82,7 @@ export function validateMessage(value) {
       if (!/^[A-Z0-9]{4,8}$/.test(code)) invalid();
       Object.assign(result, { name: text(value.name, 1, 24), role: role(value.role), code }); break;
     }
+    case 'set-role': result.role = role(value.role); break;
     case 'ready': case 'tutorial-ready': result.ready = bool(value.ready); break;
     case 'set-public': result.isPublic = bool(value.isPublic); break;
     case 'pause': result.paused = bool(value.paused); break;
@@ -71,11 +91,22 @@ export function validateMessage(value) {
   }
   return result;
 }
-export function authorizeAction(actorRole, action) {
-  const allowed = {
-    analista: ['interact', 'analyze', 'dispatch', 'archive', 'call-tow', 'problem-select'],
-    mobilidade: ['interact', 'mobility-hotkey'],
-    infraestrutura: ['interact', 'repair-complete'],
-  };
-  if (!allowed[actorRole]?.includes(action.type)) reject('FORBIDDEN', 'Seu papel não pode executar essa ação.');
+/** Papel principal + permissões extras do modo em dupla. Calculado uma vez, no início da partida. */
+export function permissionsFor(actorRole, sharedAnalyst = false) {
+  const own = ROLE_ACTIONS[actorRole] ?? [];
+  return new Set(sharedAnalyst && DUO_ROLES.includes(actorRole) ? [...own, ...SHARED_ANALYST_ACTIONS] : own);
+}
+export function authorizeAction(actorRole, action, sharedAnalyst = false) {
+  if (!permissionsFor(actorRole, sharedAnalyst).has(action.type)) reject('FORBIDDEN', 'Seu papel não pode executar essa ação.');
+}
+/**
+ * Chave de idempotência das ações da central. Ações com a mesma chave só têm efeito
+ * uma vez por partida, então a primeira a chegar vence e as repetidas são absorvidas.
+ */
+export function analysisKey(action) {
+  switch (action.type) {
+    case 'analyze': case 'archive': case 'call-tow': return action.type + ':' + action.problemId;
+    case 'dispatch': return action.problemId === undefined ? null : 'dispatch:' + action.problemId + ':' + action.team;
+    default: return null;
+  }
 }

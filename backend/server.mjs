@@ -2,7 +2,9 @@ import { createServer } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { WebSocketServer, WebSocket } from 'ws';
-import { ProtocolError, reject, ROLES, validateMessage, authorizeAction } from './protocol.mjs';
+import { ProtocolError, reject, MIN_PLAYERS, MAX_PLAYERS, teamMode, validateMessage, authorizeAction, analysisKey } from './protocol.mjs';
+
+const LEDGER_LIMIT = 256;
 
 export function readConfig(env = process.env) {
   const integer = (key, fallback, min, max) => {
@@ -52,12 +54,15 @@ export function createCoopServer(options = {}) {
     id: peer.id, name: peer.name, role: peer.role, ready: peer.ready,
     tutorialReady: peer.tutorialReady, host: peer === room.host,
   }));
+  // No lobby o modo acompanha a composição atual; depois do início fica congelado.
+  const modeOf = room => room.phase === 'lobby' ? teamMode([...room.players.values()].map(peer => peer.role)) : room.mode;
   function publishRoom(room) {
-    broadcast(room, { type: 'room', code: room.code, phase: room.phase, isPublic: room.isPublic, paused: room.paused, players: roster(room) });
+    broadcast(room, { type: 'room', code: room.code, phase: room.phase, isPublic: room.isPublic, paused: room.paused,
+      mode: modeOf(room), sharedAnalyst: room.sharedAnalyst, players: roster(room) });
   }
   function directory() {
-    return [...rooms.values()].filter(room => room.isPublic && room.phase === 'lobby' && room.players.size < 3)
-      .map(room => ({ code: room.code, phase: room.phase, players: roster(room) }));
+    return [...rooms.values()].filter(room => room.isPublic && room.phase === 'lobby' && room.players.size < MAX_PLAYERS)
+      .map(room => ({ code: room.code, phase: room.phase, mode: modeOf(room), players: roster(room) }));
   }
   function publishDirectory() {
     if (directoryTimer || closing) return;
@@ -94,7 +99,7 @@ export function createCoopServer(options = {}) {
   }
   function addPlayer(peer, room, message) {
     if (room.phase !== 'lobby') reject('GAME_STARTED', 'A partida desta sala já começou.');
-    if (room.players.size >= 3) reject('ROOM_FULL', 'A sala já tem três pessoas.');
+    if (room.players.size >= MAX_PLAYERS) reject('ROOM_FULL', 'A sala já tem três pessoas.');
     if ([...room.players.values()].some(player => player.role === message.role)) reject('ROLE_TAKEN', 'Esse papel já está ocupado. Escolha outra personagem.');
     Object.assign(peer, { room, name: message.name, role: message.role, ready: false, tutorialReady: false, introDone: false });
     room.players.set(peer.id, peer);
@@ -107,7 +112,8 @@ export function createCoopServer(options = {}) {
     if (!phases.includes(room.phase)) reject('INVALID_PHASE', 'Essa ação não está disponível nesta etapa da partida.');
   }
   function advanceTutorial(room) {
-    if (room.players.size !== 3 || ![...room.players.values()].every(player => player.introDone)) return;
+    // A barreira espera exatamente quem iniciou a partida: 2 em dupla, 3 em trio.
+    if (room.players.size !== room.teamSize || ![...room.players.values()].every(player => player.introDone)) return;
     room.phase = 'tutorial';
     if ([...room.players.values()].every(player => player.tutorialReady)) {
       room.phase = 'playing';
@@ -130,7 +136,8 @@ export function createCoopServer(options = {}) {
         let code;
         const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
         do { code = [...randomBytes(8)].map(byte => alphabet[byte % alphabet.length]).join(''); } while (rooms.has(code));
-        const room = { code, phase: 'lobby', isPublic: message.isPublic, paused: false, startAt: 0, players: new Map(), host: null };
+        const room = { code, phase: 'lobby', isPublic: message.isPublic, paused: false, startAt: 0, players: new Map(), host: null,
+          mode: null, sharedAnalyst: false, teamSize: 0, ledger: new Set() };
         rooms.set(code, room);
         addPlayer(peer, room, message); return;
       }
@@ -143,6 +150,14 @@ export function createCoopServer(options = {}) {
     switch (message.type) {
       case 'ready':
         requirePhase(room, 'lobby'); peer.ready = message.ready; publishRoom(room); return;
+      case 'set-role':
+        requirePhase(room, 'lobby');
+        if (message.role === peer.role) return;
+        if ([...room.players.values()].some(player => player.role === message.role)) reject('ROLE_TAKEN', 'Esse papel já está ocupado. Escolha outra personagem.');
+        // Trocar de papel muda a composição da equipe: a prontidão precisa ser confirmada de novo.
+        peer.role = message.role; peer.ready = false;
+        send(peer, { type: 'joined', id: peer.id, role: peer.role, code: room.code, host: room.host === peer });
+        publishRoom(room); publishDirectory(); return;
       case 'set-public':
         if (peer !== room.host) reject('FORBIDDEN', 'Somente a anfitriã pode alterar a visibilidade.');
         requirePhase(room, 'lobby'); room.isPublic = message.isPublic;
@@ -150,11 +165,14 @@ export function createCoopServer(options = {}) {
       case 'start':
         if (peer !== room.host) reject('FORBIDDEN', 'Somente a anfitriã pode iniciar a partida.');
         requirePhase(room, 'lobby');
-        if (room.players.size !== 3 || new Set(roster(room).map(player => player.role)).size !== ROLES.length) reject('TEAM_INCOMPLETE', 'Reúna Analista, Mobilidade e Infraestrutura para iniciar.');
+        if (room.players.size < MIN_PLAYERS) reject('TEAM_INCOMPLETE', 'Chame pelo menos mais uma pessoa: a partida começa com 2 ou 3 jogadoras.');
+        const mode = modeOf(room);
+        if (!mode) reject('TEAM_INCOMPLETE', 'Em dupla, escolham Mobilidade e Infraestrutura; as funções da Analista ficam compartilhadas no tablet.');
         if (roster(room).some(player => !player.ready)) reject('TEAM_NOT_READY', 'Todas precisam marcar “Pronta”.');
         for (const member of room.players.values()) { member.introDone = false; member.tutorialReady = false; }
-        room.phase = 'story';
-        broadcast(room, { type: 'game-start', room: room.code, startDelayMs: config.startDelayMs, players: roster(room) });
+        Object.assign(room, { phase: 'story', mode, sharedAnalyst: mode === 'duo', teamSize: room.players.size });
+        room.ledger.clear();
+        broadcast(room, { type: 'game-start', room: room.code, startDelayMs: config.startDelayMs, mode, sharedAnalyst: room.sharedAnalyst, players: roster(room) });
         publishRoom(room); publishDirectory(); return;
       case 'tutorial-open':
         requirePhase(room, 'story', 'tutorial'); peer.introDone = true; advanceTutorial(room); publishRoom(room); return;
@@ -173,13 +191,22 @@ export function createCoopServer(options = {}) {
       case 'move':
       case 'action':
         requirePhase(room, 'playing');
-        if (message.type === 'action') authorizeAction(peer.role, message.action);
+        if (message.type === 'action') authorizeAction(peer.role, message.action, room.sharedAnalyst);
         if (room.paused || Date.now() < room.startAt) {
           if (message.type === 'action') reject('GAME_PAUSED', 'A partida ainda não está liberada para essa ação.');
           return; // Transient movement frames can safely be discarded across pause/start.
         }
-        if (message.type === 'move') broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer);
-        else broadcast(room, { type: 'action', id: peer.id, role: peer.role, action: message.action }, peer);
+        if (message.type === 'move') { broadcast(room, { type: 'move', id: peer.id, role: peer.role, x: message.x, z: message.z, yaw: message.yaw }, peer); return; }
+        // Clientes aplicam a própria ação antes de enviar. Se duas pessoas analisam o mesmo
+        // chamado ao mesmo tempo, a ordem do servidor decide e a cópia tardia é absorvida
+        // sem erro, porque o efeito dela já existe nos dois clientes.
+        const key = analysisKey(message.action);
+        if (key) {
+          if (room.ledger.has(key)) return;
+          room.ledger.add(key);
+          if (room.ledger.size > LEDGER_LIMIT) room.ledger.delete(room.ledger.values().next().value);
+        }
+        broadcast(room, { type: 'action', id: peer.id, role: peer.role, action: message.action }, peer);
         return;
     }
   }

@@ -501,9 +501,12 @@ export class Fase1OrlaScene implements GameScene {
 
   stopMovement(): void { this.players.forEach(player => player.stopMovement()); }
 
-  setAnalystTabletOpen(open: boolean): void {
-    this.analystTabletOpen = open;
-    this.players[2].setTabletOpen(open);
+  /** Em dupla quem segura o tablet é a Mobilidade ou a Infraestrutura local; senão, a Analista. */
+  setAnalystTabletOpen(open: boolean, holderId: PlayerId = 3): void {
+    this.analystTabletOpen = open && holderId === 3;
+    for (const player of this.players) {
+      player.setTabletOpen((open && player.id === holderId) || (player.id === 3 && this.localCoopTabletOpen));
+    }
   }
 
   setTutorialMovementEnabled(enabled: boolean): void {

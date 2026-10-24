@@ -47,6 +47,8 @@ Analista	Identificar ocorrências no mapa, consultar o tablet e encaminhar chama
 Mobilidade	Organizar a circulação, sinalizar trechos, posicionar cones e administrar desvios.
 Infraestrutura	Reparar instalações, iluminação e sensores.
 
+No coop online a partida começa com 2 ou 3 pessoas. Em trio, cada pessoa assume uma função. Em dupla, as duas escolhem Mobilidade e Infraestrutura e dividem a central da Analista: cada uma abre o próprio tablet com Q, e o que uma analisar ou acionar aparece para a outra.
+
 
 Na Fase 1 — Orla, o jogador passa por um tutorial das funções antes do desafio com ocorrências e tempo limitado. As intervenções dependem da cooperação entre as equipes.
 Controles principais

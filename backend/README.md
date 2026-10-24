@@ -20,8 +20,11 @@ Para testar entre computadores da mesma rede, inicie o frontend com `npm run dev
 
 - Criar sala gera código de oito caracteres. Salas podem ser públicas ou acessíveis somente pelo código; apenas a anfitriã muda a visibilidade.
 - A lista pública mostra apenas lobbies públicos com vagas. Atualizações são enviadas pelo servidor aos navegadores que solicitaram a lista.
-- Cada sala tem exatamente três papéis diferentes. Escolher um papel ocupado retorna erro; o servidor não troca a personagem silenciosamente.
-- Só a anfitriã inicia, com três pessoas prontas. Cada conexão confirma seu próprio prólogo antes do tutorial. O relógio é liberado quando as três confirmam o tutorial.
+- Cada sala tem até três papéis diferentes. Escolher um papel ocupado retorna erro; o servidor não troca a personagem silenciosamente. No lobby, `set-role` troca para um papel livre e cancela a prontidão de quem trocou.
+- Só a anfitriã inicia, com 2 ou 3 pessoas prontas. **Trio**: Analista, Mobilidade e Infraestrutura. **Dupla**: obrigatoriamente Mobilidade + Infraestrutura (sem elas não há quem repare ou organize o trânsito); as duas recebem as permissões da Analista. Uma pessoa sozinha, ou uma dupla com a Analista, recebe TEAM_INCOMPLETE. O modo (`mode: 'trio' | 'duo'`, `sharedAnalyst`) acompanha a composição no lobby e é congelado no `start`.
+- Cada conexão confirma seu próprio prólogo antes do tutorial. O relógio é liberado quando todas as pessoas que iniciaram a partida (2 ou 3) confirmam o tutorial.
+- A autorização de `action` usa o papel principal mais as permissões do modo (`permissionsFor` em protocol.mjs). Em dupla: Mobilidade = `interact`, `mobility-hotkey` + central; Infraestrutura = `interact`, `repair-complete` + central; central = `analyze`, `dispatch`, `archive`, `call-tow`, `problem-select`. No trio, só a Analista usa a central.
+- Ações da central são idempotentes por chamado (`analysisKey`): `analyze`/`archive`/`call-tow` por `problemId` e `dispatch` por `problemId` + equipe. A primeira cópia é retransmitida; as repetidas (duas pessoas confirmando ao mesmo tempo) recebem `ack` e não são retransmitidas, sem erro, porque o efeito já existe em cada cliente.
 - A pausa pertence à sala. Qualquer participante pode pausar/retomar, preservando o comportamento anterior. Movimento transitório em trânsito durante a pausa é descartado; ações recebem erro.
 - A saída de uma pessoa no lobby libera sua vaga e transfere a anfitriã. Após o início, encerra a sessão para as demais com uma mensagem explícita: não há snapshot completo que permita substituir a pessoa ou restaurar a partida com segurança.
 - Recarregar a página exige entrar novamente. O cliente não apresenta os dados antigos de sessionStorage como uma conexão recuperada.
@@ -44,7 +47,7 @@ A saúde não exige login; não devolve nomes, códigos privados nem segredos.
 
 ## Protocolo WebSocket
 
-Comandos JSON: `create-room`, `join`, `join-open`, `list-rooms`, `leave`, `ready`, `set-public`, `start`, `tutorial-open`, `tutorial-ready`, `pause`, `move`, `action`.
+Comandos JSON: `create-room`, `join`, `join-open`, `list-rooms`, `leave`, `set-role`, `ready`, `set-public`, `start`, `tutorial-open`, `tutorial-ready`, `pause`, `move`, `action`. A ação `dispatch` aceita `problemId` opcional; o cliente atual sempre o envia para que o despacho não dependa da seleção local.
 
 Os comandos de controle enviados pelo cliente incluem `requestId`. O servidor responde `ack` ou `error` com o mesmo identificador, além dos eventos de estado. Os últimos 128 resultados de cada conexão são deduplicados; reutilizar um ID com outro conteúdo retorna REQUEST_CONFLICT. Não há retentativa automática de mutações após timeout. O cliente encerra a conexão se uma confirmação não chega em oito segundos, pois o resultado seria incerto.
 
