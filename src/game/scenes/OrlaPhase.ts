@@ -26,6 +26,7 @@ export class OrlaPhase {
   private signalRepairCompleted = false;
   private rescueProtected = false;
   private rushFlowSeconds = 0;
+  private rushElectricDetourUsed = false;
   private rescueBaseline = 0;
   private rescueTarget = 0;
   private service: { id: string; elapsed: number } | null = null;
@@ -145,6 +146,16 @@ export class OrlaPhase {
     }
   }
 
+  callTow(id: string): boolean {
+    const event = ORLA_EVENTS[this.eventIndex];
+    const problem = event && this.problem(event.id);
+    if (!event || event.id !== 'roadside-breakdown' || id !== event.id || !problem?.analyzed
+      || problem.status === 'RESOLVED' || problem.towStatus !== 'not-called' || !this.traffic.callTowTruck()) return false;
+    this.step(id, 1001);
+    this.patch(id, { towStatus: 'en-route', instruction: 'Guincho acionado! Ele está vindo pela avenida. Aguarde a remoção do carro para liberar a faixa.' });
+    return true;
+  }
+
   archiveResolved(id: string): boolean {
     const event = ORLA_EVENTS[this.eventIndex];
     const problem = event && this.problem(event.id);
@@ -153,6 +164,10 @@ export class OrlaPhase {
     suburbanGameState.selectProblem(null);
     this.eventIndex++;
     this.dispatchStartedAt = null;
+    if (id === 'rush-hour') {
+      this.rushFlowSeconds = 0;
+      this.rushElectricDetourUsed = false;
+    }
     this.issueNext();
     return true;
   }
@@ -180,8 +195,11 @@ export class OrlaPhase {
       this.traffic.setElectricChargerBroken(false);
     } else if (id === 'minor-collision') {
       this.traffic.clearCollision();
+    } else if (id === 'roadside-breakdown') {
+      this.traffic.clearBreakdown();
     }
     this.rushFlowSeconds = 0;
+    this.rushElectricDetourUsed = false;
     this.traffic.resetRoadInterventions();
     suburbanGameState.setProblems(suburbanGameState.getProblems().filter(item => item.id !== id));
     suburbanGameState.selectProblem(null);
@@ -194,11 +212,18 @@ export class OrlaPhase {
   private issueNext(): void {
     const event = ORLA_EVENTS[this.eventIndex];
     if (!event || this.elapsedMs < event.atMs || suburbanGameState.getProblems().length > 0) return;
-    const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition() : event.position;
+    const position = event.id === 'ev-charger-repair' ? this.traffic.getElectricChargerPosition()
+      : event.id === 'roadside-breakdown' ? this.traffic.startBreakdown() ?? event.position : event.position;
+    if (event.id === 'rush-hour') {
+      this.rushFlowSeconds = 0;
+      this.rushElectricDetourUsed = false;
+      this.traffic.setElectricDiversion(false);
+    }
     suburbanGameState.setProblems([{ id: event.id,
       type: event.id === 'broken-light-pole-1' ? 'broken-light-pole' : event.id,
       label: event.title, position: { ...position }, status: 'ACTIVE', stage: 'warning',
       requiredTeams: [...event.teams], dispatchedTeams: [],
+      ...(event.id === 'roadside-breakdown' ? { towStatus: 'not-called' as const } : {}),
       instruction: 'Novo chamado recebido. Analista: confira o relatório e acione a equipe indicada.' }]);
     suburbanGameState.selectProblem(null);
     if (event.id === 'traffic-signal-failure') {
@@ -225,6 +250,7 @@ export class OrlaPhase {
       this.traffic.setElectricChargerBroken(true);
       this.beginCinematic(position, .72, 2.5);
     }
+    if (event.id === 'roadside-breakdown') this.beginCinematic(position, .62, 2.4);
   }
 
   advance(elapsedMs: number): void {
@@ -283,19 +309,32 @@ export class OrlaPhase {
     const rush = this.problem('rush-hour');
     if (rush?.stage === 'active' && rush.status === 'ACTIVE') {
       const roads = this.traffic.getRoadStates();
-      const flowing = roads.filter(road => road.type === 'PRINCIPAL').every(road => road.status === 'open')
+      const diversionActive = this.rushElectricDetourUsed && this.traffic.isElectricDiversionActive();
+      const flowing = diversionActive
+        && roads.filter(road => road.type === 'PRINCIPAL').every(road => road.status === 'open')
         && !this.traffic.isCrossingGuarded()
         && this.traffic.getMovingVehicleCount() > 0;
       this.rushFlowSeconds = flowing ? this.rushFlowSeconds + dt : 0;
       this.patch(rush.id, { instruction: flowing
         ? `Faixas fluindo. Mantenha a circulação: ${Math.min(8, Math.floor(this.rushFlowSeconds))}/8 s.`
       : ORLA_EVENTS.find(event => event.id === 'rush-hour')!.instruction });
-      if (this.rushFlowSeconds >= 8 && !this.completedSteps.has(301)) this.resolve(rush.id, 301);
+      if (diversionActive && this.rushFlowSeconds >= 8 && !this.completedSteps.has(301)) this.resolve(rush.id, 301);
     }
     const chargerIssue = this.problem('ev-charger-repair');
     if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE' && !this.completedSteps.has(901)) {
       const waiting = this.traffic.getElectricQueueCount();
       if (waiting > 0) this.patch(chargerIssue.id, { instruction: `${waiting} carro${waiting === 1 ? '' : 's'} elétrico${waiting === 1 ? '' : 's'} na fila. Mobilidade: use a Habilidade 4 (tecla 4) para desviá-los para a rua normal.` });
+    }
+    const breakdown = this.problem('roadside-breakdown');
+    if (breakdown && breakdown.status !== 'RESOLVED' && breakdown.towStatus === 'en-route'
+      && this.traffic.getTowTruckState() === 'loading') {
+      this.patch(breakdown.id, { towStatus: 'loading', instruction: 'O guincho chegou e está prendendo o carro à plataforma. A faixa será liberada em instantes.' });
+    } else if (breakdown && breakdown.status !== 'RESOLVED' && breakdown.towStatus === 'loading'
+      && this.traffic.getTowTruckState() === 'departing') {
+      this.patch(breakdown.id, { towStatus: 'departing', instruction: 'Carro preso ao guincho. Ele está saindo da avenida; aguarde o veículo de apoio concluir o trajeto.' });
+    } else if (breakdown && breakdown.status !== 'RESOLVED' && this.traffic.getTowTruckState() === 'completed') {
+      this.patch(breakdown.id, { towStatus: 'done' });
+      this.resolve(breakdown.id, 1002);
     }
     const collision = this.problem('minor-collision');
     if (collision?.stage === 'active' && collision.status === 'ACTIVE' && this.traffic.isIncidentProtected()) {
@@ -348,16 +387,6 @@ export class OrlaPhase {
     }
     if (player.id === 2) {
       const position = player.position;
-      const bikeTask = suburbanGameState.getProblems().find(problem =>
-        ['cyclist-assist', 'bike-lane-cleanup'].includes(problem.id)
-        && problem.stage === 'active' && problem.status === 'ACTIVE'
-        && distance(position, problem.position) <= 1.8);
-      if (bikeTask) {
-        if (bikeTask.id === 'cyclist-assist') return;
-        this.resolve(bikeTask.id, 802);
-        this.patch(bikeTask.id, { instruction: 'Objeto removido. A ciclovia está livre novamente.' });
-        return;
-      }
       const crate = this.map.cellCenter(this.map.itemSources[0].column, this.map.itemSources[0].row);
       const held = this.items.heldBy(2);
       const coneTask = this.problem('bike-lane-cone');
@@ -537,6 +566,11 @@ export class OrlaPhase {
       this.crossingProtected = false;
     }
     const chargerIssue = this.problem('ev-charger-repair');
+    const rushIssue = this.problem('rush-hour');
+    if (action === 'electricDetour' && rushIssue?.stage === 'warning' && rushIssue.status === 'ACTIVE') {
+      this.patch(rushIssue.id, { instruction: 'Aguarde a Mobilidade assumir o chamado. Depois, pressione 4 para desviar os carros elÃ©tricos.' });
+      return true;
+    }
     if (action === 'electricDetour' && chargerIssue?.status === 'ACTIVE' && chargerIssue.stage === 'warning') {
       this.patch(chargerIssue.id, { instruction: 'Aguarde o chamado ser liberado pelas equipes. Depois, use a Habilidade 4 (tecla 4) para desviar os elétricos.' });
       return true;
@@ -547,6 +581,13 @@ export class OrlaPhase {
       return true;
     }
     this.traffic.applyMobilityAction(roadId, action);
+    if (action === 'electricDetour') {
+      const rush = this.problem('rush-hour');
+      if (rush?.stage === 'active' && rush.status === 'ACTIVE') {
+        this.rushElectricDetourUsed = this.traffic.isElectricDiversionActive();
+        this.rushFlowSeconds = 0;
+      }
+    }
     if (action === 'electricDetour') {
       if (chargerIssue?.stage === 'active' && chargerIssue.status === 'ACTIVE'
         && this.traffic.isElectricChargerBroken() && this.traffic.isElectricDiversionActive()) {
@@ -598,7 +639,7 @@ export class OrlaPhase {
       return { target: this.targetFor(player, problem), prompt };
     }
     const bikeTask = player.id === 2 ? problems.find(item =>
-      ['cyclist-assist', 'bike-lane-cleanup', 'bike-lane-cone'].includes(item.id) && item.status === 'ACTIVE') : undefined;
+      ['cyclist-assist', 'bike-lane-cone'].includes(item.id) && item.status === 'ACTIVE') : undefined;
     if (bikeTask && distance(player.position, bikeTask.position) <= (bikeTask.id === 'cyclist-assist' ? 4 : 1.8)) {
       if (bikeTask.id === 'cyclist-assist') {
         const state = this.pedestrians.getWorkerRescueState();

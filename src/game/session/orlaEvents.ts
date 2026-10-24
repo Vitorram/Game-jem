@@ -38,24 +38,27 @@ const ORLA_EVENT_DEFINITIONS: OrlaEvent[] = [
   { id: 'rush-hour', title: 'Fluxo intenso', atMs: 30_000, warningMs: 0,
     teams: ['mobilidade'], position: { x: -16, z: 8.2 }, steps: [301],
     warning: 'Fluxo intenso na Orla: mantenha as faixas abertas para o trânsito circular.',
-    instruction: 'Mobilidade: mantenha as vias principais abertas. Se os elétricos formarem fila na avenida verde, use 4 para desviá-los para a rua normal.' },
+    instruction: 'Mobilidade: use 4 para desviar os carros eletricos para a rua normal. Depois, mantenha as vias principais abertas por 8 segundos.' },
   { id: 'signal-check', title: 'Checagem do semáforo', atMs: 70_000, warningMs: 0,
     teams: ['infraestrutura'], position: { x: 0, z: 4.7 }, steps: [801],
     warning: 'O semáforo voltou a piscar. Faça uma checagem rápida do controlador.',
     instruction: 'Infraestrutura: aproxime-se do semáforo e use E. Confira os tempos do amarelo, do intervalo e do ciclo.' },
-  { id: 'bike-lane-cleanup', title: 'Ciclovia bloqueada', atMs: 90_000, warningMs: 0,
-    teams: ['mobilidade'], position: { x: -12, z: 2.4 }, steps: [802],
-    warning: 'Um objeto caiu na ciclovia e está atrapalhando as bicicletas. Libere a passagem.',
-    instruction: 'Mobilidade: vá até os objetos e use E para iniciar a triagem. Separe recicláveis, orgânicos e materiais de risco.' },
   { id: 'bike-lane-cone', title: 'Cone bloqueando a ciclovia', atMs: 110_000, warningMs: 0,
     teams: ['mobilidade'], position: { x: -12, z: 2.4 }, steps: [803],
     warning: 'Um cone apareceu no meio da ciclovia e está atrapalhando as bicicletas.',
     instruction: 'Mobilidade: recolha o cone com E e leve até a caixa de cones. Use E junto à caixa para guardar.' },
 ];
 
+ORLA_EVENT_DEFINITIONS.push({ id: 'roadside-breakdown', title: 'Carro parado · faixa bloqueada', atMs: 225_000, warningMs: 0,
+  teams: [], position: { x: 10, z: 8.2 }, steps: [1001, 1002],
+  warning: 'Um carro enguiçou na avenida e está bloqueando uma faixa. Analista: consulte a lista telefônica e chame um guincho.',
+  instruction: 'Analista: abra a lista telefônica e ligue para o Guincho Rota Verde. Acompanhe o reboque até a faixa ser liberada.' });
+
 export const ORLA_EVENTS: readonly OrlaEvent[] = ORLA_EVENT_DEFINITIONS.sort((a, b) => a.atMs - b.atMs);
 
 export const ORLA_EVENT_STEPS: Record<number, { icon: string; label: string }> = {
+  1001: { icon: '☎', label: 'Analista: chamar o guincho' },
+  1002: { icon: '↗', label: 'Guincho: liberar a faixa' },
   101: { icon: '💡', label: 'Infra: reparar poste' },
   201: { icon: '🚶', label: 'Mob: 3 e aguardar travessia' },
   202: { icon: '▶', label: 'Mob: 1 para liberar fluxo' },
@@ -67,7 +70,6 @@ export const ORLA_EVENT_STEPS: Record<number, { icon: string; label: string }> =
   701: { icon: '🚴', label: 'Mob: proteger a travessia do entregador' },
   702: { icon: '✅', label: 'Mob: liberar a via após o resgate' },
   801: { icon: '🚦', label: 'Infra: checar semáforo' },
-  802: { icon: '🚲', label: 'Mob: liberar ciclovia' },
   803: { icon: '🚧', label: 'Mob: levar cone até a caixa' },
   901: { icon: '↗', label: 'Mob: habilidade 4 · desviar elétricos' },
   902: { icon: '🔌', label: 'Infra: reparar carregador' },

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Scene, Color, HemisphereLight, DirectionalLight, MathUtils, Vector3,
 } from 'three';
 import type { PerspectiveCamera } from 'three';
@@ -99,11 +99,15 @@ export class Fase1OrlaScene implements GameScene {
   private missionStep = 0;
   private returningConeToCrate = false;
   private tutorialMovementEnabled = true;
+  private analystTabletOpen = false;
   private tutorialCollisionProtected = false;
   private tutorialWorkZonePrepared = false;
   private collisionRecovery: { player: Player; elapsed: number; from: { x: number; z: number }; spawn: { x: number; z: number }; push: { x: number; z: number }; respawned: boolean } | null = null;
   private collisionInvulnerability = 0;
   private phase: OrlaPhase | null = null;
+  private localCoopInput: { getAxis: () => { x: number; z: number }; isSprinting: () => boolean } | null = null;
+  private localCoopPlayerId: PlayerId | null = null;
+  private localCoopTabletOpen = false;
 
   startPhase(onStep: (id: string, step: number) => void): void {
     if (this.phase) return;
@@ -121,6 +125,16 @@ export class Fase1OrlaScene implements GameScene {
   phaseIsCinematic(): boolean { return this.phase?.isCinematicActive() ?? false; }
 
   get player() { return this.players[suburbanGameState.activeCharacter - 1]; }
+
+  applyRemotePlayerPose(id: PlayerId, x: number, z: number, yaw: number): void {
+    const player = this.players[id - 1];
+    if (!player || !Number.isFinite(x) || !Number.isFinite(z) || !Number.isFinite(yaw)) return;
+    const beforeX = player.position.x;
+    const beforeZ = player.position.z;
+    player.setPosition(x, z);
+    player.mesh.rotation.y = yaw;
+    player.animateWalking(1 / 30, Math.hypot(x - beforeX, z - beforeZ));
+  }
 
   private currentInteractionPrompt: string | null = null;
   constructor(input: Pick<Input, 'getAxis' | 'isSprinting'> = { getAxis: () => ({ x: 0, z: 0 }), isSprinting: () => false }, private readonly onRisks?: (state: RiskSnapshot) => void, private readonly onInteractionPrompt?: (prompt: string | null) => void, private readonly onRepairPuzzleStart?: (type: RepairPuzzleType) => void, private readonly onObjectiveDistance?: (distance: number | null) => void, private readonly onMissionStep?: (step: number) => void) {
@@ -149,9 +163,9 @@ export class Fase1OrlaScene implements GameScene {
     this.scene.add(this.mapView.group, this.traffic.group, this.activeMobility.group, this.trafficSignals.group, this.brokenPoleMarker.group, this.objectiveMarker.group, this.analystCabin.group);
     this.players.forEach((player, index) => {
       const spawn = index === 2 ? analystSpawn : this.map.spawns[index];
-      player.setPosition(spawn.x, spawn.z - (index === 2 ? 0.3 : 0));
+      // A Analista começa ao lado da cabine, fora da área sólida da mesa e paredes.
+      player.setPosition(spawn.x + (index === 2 ? 1.18 + GRID_CONFIG.playerRadius + 0.15 : 0), spawn.z);
       this.spawnPositions.set(player.id, { x: player.position.x, z: player.position.z });
-      player.setSeated(index === 2);
       this.scene.add(player.mesh);
     });
     this.syncRisks();
@@ -165,6 +179,25 @@ export class Fase1OrlaScene implements GameScene {
   }
 
   canSelectPlayer(id: PlayerId): boolean { return this.phase?.canSelectPlayer(id) ?? true; }
+
+  /** Configura o segundo jogador local. Passe null para desativar. */
+  setLocalCoopInput(
+    input: { getAxis: () => { x: number; z: number }; isSprinting: () => boolean } | null,
+    playerId: PlayerId | null,
+  ): void {
+    this.localCoopInput = input;
+    this.localCoopPlayerId = playerId;
+    this.localCoopTabletOpen = false;
+    if (playerId !== null && playerId === 3) this.players[2].setTabletOpen(false);
+  }
+
+  toggleLocalCoopTablet(): void {
+    if (this.localCoopPlayerId !== 3) return;
+    this.localCoopTabletOpen = !this.localCoopTabletOpen;
+    this.players[2].setTabletOpen(this.localCoopTabletOpen || this.analystTabletOpen);
+  }
+
+  get localCoopTabletIsOpen(): boolean { return this.localCoopTabletOpen; }
 
   interact(): void {
     if (this.disposed) return;
@@ -355,7 +388,14 @@ export class Fase1OrlaScene implements GameScene {
 
   analyzeProblem(id: string): boolean {
     if (this.disposed || this.player.role !== 'analista') return false;
-    return suburbanGameState.analyzeProblem(id);
+    const analyzed = suburbanGameState.analyzeProblem(id);
+    if (analyzed) this.phase?.teamDispatched();
+    return analyzed;
+  }
+
+  callTow(id: string, fromCoop = false): boolean {
+    if (this.disposed || (!fromCoop && this.player.role !== 'analista')) return false;
+    return this.phase?.callTow(id) ?? false;
   }
 
   requestReinforcements(id: string): boolean {
@@ -461,6 +501,11 @@ export class Fase1OrlaScene implements GameScene {
 
   stopMovement(): void { this.players.forEach(player => player.stopMovement()); }
 
+  setAnalystTabletOpen(open: boolean): void {
+    this.analystTabletOpen = open;
+    this.players[2].setTabletOpen(open);
+  }
+
   setTutorialMovementEnabled(enabled: boolean): void {
     this.tutorialMovementEnabled = enabled;
     if (!enabled) this.player.stopMovement();
@@ -476,14 +521,14 @@ export class Fase1OrlaScene implements GameScene {
     this.updateCollisionRecovery(dt);
     const recovering = !!this.collisionRecovery && !this.collisionRecovery.respawned;
     const cinematic = this.phase?.isCinematicActive() ?? false;
-    const axis = this.player.role === 'analista' || cinematic
+    const axis = cinematic
       || !this.tutorialMovementEnabled
       || (recovering && this.collisionRecovery?.player === this.player)
       ? this.idle : this.input.getAxis();
     if (dt > 0) this.items.face(suburbanGameState.activeCharacter, axis);
     this.mapView.update(dt);
     this.brokenPoleMarker.update(dt);
-    const pedestrianPosition = this.player.role === 'analista' ? null : this.player.mesh.position;
+    const pedestrianPosition = this.player.mesh.position;
     this.traffic.setPlayerPosition(pedestrianPosition);
     this.activeMobility.setPlayerPosition(pedestrianPosition);
     this.traffic.update(dt);
@@ -495,11 +540,14 @@ export class Fase1OrlaScene implements GameScene {
     for (const player of this.players) {
       const movementResolver = player.active && player.role === 'infraestrutura' && !this.phase?.isServicing(player)
         ? this.resolveInfrastructureMovement
-        : player.role === 'mobilidade' ? this.resolveMobilityMovement : this.resolveOrlaMovement;
-      if (!player.active) player.stopMovement();
-      player.update(dt, player.active ? axis : this.idle, movementResolver, player.active && this.input.isSprinting());
+        : player.role === 'mobilidade' || player.role === 'analista' ? this.resolveMobilityMovement : this.resolveOrlaMovement;
+      const isP2 = this.localCoopInput !== null && this.localCoopPlayerId === player.id && !player.active;
+      if (!player.active && !isP2) player.stopMovement();
+      const playerAxis = player.active ? axis : isP2 ? this.localCoopInput!.getAxis() : this.idle;
+      const sprinting = player.active ? this.input.isSprinting() : isP2 ? this.localCoopInput!.isSprinting() : false;
+      player.update(dt, playerAxis, movementResolver, sprinting);
     }
-    if (!this.tutorialCollisionProtected && !recovering && this.collisionInvulnerability <= 0 && this.player.role !== 'analista') this.checkPlayerCollision();
+    if (!this.tutorialCollisionProtected && !recovering && this.collisionInvulnerability <= 0) this.checkPlayerCollision();
   }
 
   private checkPlayerCollision(): void {

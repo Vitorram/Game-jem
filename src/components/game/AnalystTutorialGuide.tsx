@@ -53,7 +53,7 @@ const lessons = [
   { title: 'Confirme o que será atendido', body: 'Leia o relatório. Quando reconhecer o problema e o local, use o botão destacado para confirmar a ocorrência.' },
   { title: 'Organize a resposta', body: 'O poste exige reparo elétrico e proteção do trecho. Acione Infraestrutura pelo plano de resposta.' },
   { title: 'Complete o plano', body: 'Agora acione Mobilidade para proteger o trecho. O tablet mostrará cada equipe como “a caminho”.' },
-  { title: 'Analista pronta', body: 'Você já sabe localizar, avaliar, confirmar e encaminhar uma ocorrência. Agora vamos aprender a preparar o trecho com a equipe de Mobilidade. O relógio continua parado.' },
+  { title: 'Analista pronta', body: 'Na partida, WASD move você e Q abre ou guarda o tablet. Você fica parada onde estiver enquanto analisa; o trânsito e o tempo continuam. Agora vamos treinar Mobilidade. Durante o treino, o relógio continua parado.' },
 ] as const;
 
 function clamp(value: number, min: number, max: number): number {

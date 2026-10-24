@@ -1,4 +1,4 @@
-import {
+﻿import {
   BoxGeometry, BufferGeometry, CapsuleGeometry, CatmullRomCurve3, Color,
   Group, MathUtils, Mesh, MeshStandardMaterial, SphereGeometry, TubeGeometry, Vector3,
 } from 'three';
@@ -42,6 +42,7 @@ export class Player {
   private readonly head = new Group();
   private readonly bag = new Group();
   private readonly charm = new Group();
+  private readonly tablet = new Group();
   private readonly arms: JointChain[] = [];
   private readonly legs: JointChain[] = [];
   private readonly hairLocks: HairLock[] = [];
@@ -77,6 +78,15 @@ export class Player {
     this.head.position.y = 0.51;
     this.bag.position.set(0, 0.04, -0.24);
     this.build(appearance);
+    this.tablet.name = 'analyst-handheld-tablet';
+    this.tablet.visible = false;
+    if (this.role === 'analista') {
+      this.torso.add(this.tablet);
+      this.tablet.position.set(0, -0.06, 0.45);
+      this.tablet.rotation.x = -0.65;
+      this.part(this.tablet, new BoxGeometry(0.54, 0.34, 0.05), '#173746', [0, 0, 0]);
+      this.part(this.tablet, new BoxGeometry(0.46, 0.26, 0.012), '#74d9d0', [0, 0, -0.03]);
+    }
     this.bag.scale.setScalar(0.78);
     this.mesh.scale.setScalar(PLAYER_VISUAL_SCALE);
     this.animate(0, 0, 0);
@@ -359,8 +369,12 @@ export class Player {
 
   get cyclingPhase(): number { return this.gait * .65; }
 
-  /** Mantém a Analista sentada na estação de observação da Orla. */
+  /** Alterna a pose sentada para cenas que usam cadeiras. */
   setSeated(seated: boolean): void { this.seated = seated; }
+
+  setTabletOpen(open: boolean): void {
+    this.tablet.visible = this.role === 'analista' && open;
+  }
 
   private animate(dt: number, turning: number, traveled: number) {
     const time = this.elapsed + this.id * 1.7;
@@ -417,6 +431,17 @@ export class Player {
       leg.root.rotation.x = Math.atan2(-footZ, -footY) - knee / 2;
       leg.joint.rotation.x = knee;
       leg.end.rotation.x = -leg.root.rotation.x - knee;
+    }
+    if (this.tablet.visible) {
+      // A analista pode andar com o tablet; inclina a cabeca e segura o tablet
+      // com leve balanco de caminhada nos bracos.
+      this.head.rotation.x = 0.22 - move * 0.04;
+      for (const arm of this.arms) {
+        const tabletSwing = Math.sin(this.gait + (arm.side === 1 ? Math.PI : 0)) * 0.06 * move;
+        arm.root.rotation.set(-0.55 + tabletSwing, 0, arm.side * 0.12);
+        arm.joint.rotation.set(-1.15, 0, 0);
+        arm.end.rotation.set(0, 0, 0);
+      }
     }
     this.bag.rotation.x = Math.sin(this.gait * 2 - 0.7) * 0.045 * move;
     this.bag.rotation.z = -this.torso.rotation.z * 0.65;

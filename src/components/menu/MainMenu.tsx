@@ -74,6 +74,9 @@ export default function MainMenu() {
           <Link className="menu-action menu-action-primary" href="/jogo">
             <span className="menu-icon" aria-hidden="true">▶</span><span>Iniciar</span><span className="menu-arrow" aria-hidden="true">↗</span>
           </Link>
+          <Link className="menu-action" href="/coop">
+            <span className="menu-icon" aria-hidden="true">3</span><span>Jogar em coop</span><span className="menu-arrow" aria-hidden="true">→</span>
+          </Link>
           <button className="menu-action" type="button" onClick={() => setActivePanel('settings')}>
             <span className="menu-icon" aria-hidden="true">⚙</span><span>Configurações</span><span className="menu-arrow" aria-hidden="true">＋</span>
           </button>
