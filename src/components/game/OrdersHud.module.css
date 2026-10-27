@@ -156,7 +156,8 @@
   border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, #ffe27a, #f2b01e 70%);
   color: #7a4a05;
-  font-size: 1.05rem;
+  font-size: 0.78rem;
+  letter-spacing: -0.02em;
 }
 
 .toast {

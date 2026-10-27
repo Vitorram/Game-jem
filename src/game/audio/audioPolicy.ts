@@ -14,6 +14,6 @@ export function musicForState(state: AudioState): MusicCue | null {
 export function soundForFeedback(type: string): 'coin' | 'notification' | 'warning' | null {
   if (type === 'order-completed') return 'coin';
   if (type === 'order-arrived') return 'notification';
-  if (['order-expired', 'xp-penalty', 'xp-warning'].includes(type)) return 'warning';
+  if (type === 'score-warning') return 'warning';
   return null;
 }

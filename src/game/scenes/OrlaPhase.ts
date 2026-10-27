@@ -803,7 +803,7 @@ export class OrlaPhase {
   private resolve(id: string, step: number): void {
     this.step(id, step);
     this.releaseResolvedTrafficControls(id);
-    this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência resolvida. Volte ao sistema da Analista para arquivar o relatório e receber XP.' });
+    this.patch(id, { status: 'RESOLVED', instruction: 'Ocorrência resolvida. Volte ao sistema da Analista para arquivar o relatório e receber Pontos.' });
   }
 
   /** Libera apenas controles que já não têm condição legítima para permanecer ativos. */

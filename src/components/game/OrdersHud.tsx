@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { gsap } from 'gsap';
 import type { SessionEvent, SessionSnapshot } from '@/game/session/GameSession';
-import { sessionStore, starsFor, type SessionView } from '@/game/session/sessionStore';
+import { sessionStore, starsFor } from '@/game/session/sessionStore';
 import styles from './OrdersHud.module.css';
 import { ORLA_EVENTS, ORLA_EVENT_STEPS } from '@/game/session/orlaEvents';
 import { suburbanGameState, type UrbanProblem } from '@/game/core/GameState';
@@ -24,11 +24,16 @@ const reducedMotion = () =>
   typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 const formatTime = (ms: number) => {
-  const total = Math.max(0, Math.ceil(ms / 1000));
+  const total = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 };
 
-function Ticket({ order, frozen, problem }: { order: HudOrder; frozen: boolean; problem?: UrbanProblem }) {
+function currentOrderPoints(order: HudOrder): number {
+  const bonus = Math.max(0, Math.floor(order.maxSpeedBonus * (order.remainingMs / order.timeLimitMs)));
+  return Math.max(0, order.basePoints + bonus);
+}
+
+function Ticket({ order, problem }: { order: HudOrder; problem?: UrbanProblem }) {
   const root = useRef<HTMLLIElement>(null);
 
   useEffect(() => {
@@ -38,10 +43,15 @@ function Ticket({ order, frozen, problem }: { order: HudOrder; frozen: boolean; 
   }, []);
 
   const next = RISK_STEPS[order.riskIds[order.completedSteps]];
+  const potentialPoints = currentOrderPoints(order);
+  const progressPct = Math.round((order.completedSteps / Math.max(1, order.riskIds.length)) * 100);
   return (
     <li ref={root} className={styles.ticket}>
       <span className={styles.title}>{order.title}</span>
-      <span className={styles.hint}>{problem?.requiredTeams?.map(team => team === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura').join(' + ')}</span>
+      <span className={styles.hint}>
+        {problem?.requiredTeams?.map(team => team === 'mobilidade' ? 'Mobilidade' : 'Infraestrutura').join(' + ')}
+        {` · +${potentialPoints} pts`}
+      </span>
       <span className={styles.steps}>
         {order.riskIds.map((id, index) => {
           const step = RISK_STEPS[id] ?? { icon: '❓', label: `Risco ${id}` };
@@ -59,9 +69,9 @@ function Ticket({ order, frozen, problem }: { order: HudOrder; frozen: boolean; 
         <i
           className={styles.fill}
           style={{
-            width: `${order.remainingMs / order.timeLimitMs * 100}%`,
-            background: order.remainingMs < 30_000 ? '#e5484d' : '#46c46a',
-            transition: frozen ? 'none' : 'width 1s linear',
+            width: `${progressPct}%`,
+            background: '#46c46a',
+            transition: 'width 0.3s ease',
           }}
         />
       </span>
@@ -79,8 +89,8 @@ function Coin({ score }: { score: number }) {
     return () => { tween?.kill(); };
   }, [score]);
   return (
-    <div ref={root} className={styles.coin} role="status" aria-label={`Experiência: ${score} XP`}>
-      <span className={styles.coinFace} aria-hidden="true">XP</span>
+    <div ref={root} className={styles.coin} role="status" aria-label={`Pontuação: ${score} pontos`}>
+      <span className={styles.coinFace} aria-hidden="true">PTS</span>
       <b>{score}</b>
     </div>
   );
@@ -89,12 +99,8 @@ function Coin({ score }: { score: number }) {
 function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | 'info' } | null {
   switch (event.type) {
     case 'order-completed':
-      return { tone: 'good', text: `Ocorrência resolvida! +${event.points} XP${event.speedBonus > 0 ? ` (bônus de rapidez +${event.speedBonus})` : ''}` };
-    case 'order-expired':
-      return { tone: 'bad', text: `Você perdeu ${event.penalty} XP: o prazo da missão terminou sem concluir.` };
-    case 'xp-penalty':
-      return { tone: 'bad', text: `Você perdeu ${event.amount} XP. ${event.reason}` };
-    case 'xp-warning':
+      return { tone: 'good', text: `Ocorrência resolvida! +${event.points} pontos${event.speedBonus > 0 ? ` (bônus de agilidade +${event.speedBonus})` : ''}` };
+    case 'score-warning':
       return { tone: 'info', text: event.message };
     case 'order-arrived':
       return { tone: 'info', text: ORLA_EVENTS.find(item => item.id === event.order.definitionId)?.warning ?? event.order.title };
@@ -103,9 +109,8 @@ function describe(event: SessionEvent): { text: string; tone: 'good' | 'bad' | '
   }
 }
 
-
 const SUMMARY_MESSAGES = [
-  'A orla ainda precisa de você. Tente de novo.',
+  'A orla ainda precisa de você. Continue praticando!',
   'Um bom começo: a orla já está mais segura.',
   'Muito bem! O trecho está bem cuidado.',
   'Orla segura para todas!',
@@ -135,7 +140,6 @@ function Summary({ snapshot, onMenu, onRestart }: { snapshot: SessionSnapshot; o
   const root = useRef<HTMLDivElement>(null);
   const stars = starsFor(snapshot.score);
   const allMissionsCompleted = snapshot.completedOrders === ORLA_EVENTS.length;
-  const lost = snapshot.expiredOrders >= 4;
 
   useEffect(() => {
     const node = root.current;
@@ -150,7 +154,7 @@ function Summary({ snapshot, onMenu, onRestart }: { snapshot: SessionSnapshot; o
   return (
     <div ref={root} className={styles.summary} role="dialog" aria-modal="true" aria-label="Fim de fase">
       <div className={`${styles.card}${allMissionsCompleted ? ` ${styles.farewellCard}` : ''}`}>
-        <h2>{lost ? 'VOCÊ PERDEU' : allMissionsCompleted ? 'Obrigado por jogar!' : 'Orla recuperada!'}</h2>
+        <h2>{allMissionsCompleted ? 'Obrigado por jogar!' : 'Orla recuperada!'}</h2>
         {allMissionsCompleted
           ? <FarewellIllustration className={styles.farewellIllustration} />
           : <div className={styles.stars} aria-label={`${stars} de 3 estrelas`}>
@@ -158,14 +162,12 @@ function Summary({ snapshot, onMenu, onRestart }: { snapshot: SessionSnapshot; o
           </div>}
         <p className={`${styles.verdict}${allMissionsCompleted ? ` ${styles.farewellVerdict}` : ''}`}>{allMissionsCompleted
           ? 'Obrigado por jogar nossa primeira fase! Ficaremos felizes em ter você para testar nossas próximas fases e nosso modo coop. Nos veremos em breve!'
-          : lost
-          ? 'Quatro missões venceram sem ser concluídas. Cada prazo encerrado tira XP. Jogue novamente e conclua as tarefas antes do tempo acabar.'
           : SUMMARY_MESSAGES[stars]}</p>
         {allMissionsCompleted && <EndCredits />}
         <dl className={styles.stats}>
-          <div><dt>XP</dt><dd>{snapshot.score}</dd></div>
-          <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}</dd></div>
-          <div><dt>Missões perdidas</dt><dd>{snapshot.expiredOrders}</dd></div>
+          <div><dt>Pontos</dt><dd>{snapshot.score}</dd></div>
+          <div><dt>Ocorrências</dt><dd>{snapshot.completedOrders}/{ORLA_EVENTS.length}</dd></div>
+          <div><dt>Tempo total</dt><dd>{formatTime(snapshot.elapsedMs)}</dd></div>
         </dl>
         <button type="button" className={styles.primary} onClick={() => onRestart ? onRestart() : sessionStore.restart()}>Jogar de novo</button>
         {onMenu && <button type="button" className={styles.primary} onClick={onMenu}>Voltar ao menu</button>}
@@ -174,37 +176,8 @@ function Summary({ snapshot, onMenu, onRestart }: { snapshot: SessionSnapshot; o
   );
 }
 
-/**
- * HUD de pedidos. `paused` congela as barras (a cena também para de avançar o relógio).
- * Renderize FORA do bloco `status === 'playing'` para a barra continuar sincronizada ao retomar.
- */
-function PenaltyAlert({ feedback, finished, onContinue }: {
-  feedback: SessionView['feedback']; finished: boolean; onContinue?: () => void;
-}) {
-  if (!feedback || (feedback.event.type !== 'order-expired' && feedback.event.type !== 'xp-penalty')) return null;
-  const event = feedback.event;
-  const amount = event.type === 'order-expired' ? event.penalty : event.amount;
-  const explanation = event.type === 'order-expired'
-    ? 'A missão ficou sem ser concluída por 60 segundos. Esse prazo terminou e a tarefa foi perdida.'
-    : event.reason;
-  return (
-    <div className={styles.penaltyOverlay} role="alertdialog" aria-modal="true" aria-labelledby="penalty-title">
-      <div className={styles.penaltyCard}>
-        <span className={styles.penaltyEyebrow}>ENTENDA O QUE ACONTECEU</span>
-        <h2 id="penalty-title">Você perdeu {amount} XP</h2>
-        <p>{explanation}</p>
-        {finished && <p className={styles.penaltyExtra}>Quatro missões expiraram. A partida terminou; veja o resultado e tente novamente.</p>}
-        <button type="button" className={styles.primary} onClick={() => {
-          sessionStore.dismissFeedback(feedback.seq);
-          if (!finished) onContinue?.();
-        }}>{finished ? 'Ver resultado' : 'Entendi · continuar'}</button>
-      </div>
-    </div>
-  );
-}
-
-export default function OrdersHud({ paused, showDebug = false, onMenu, onContinue, onRestart }: {
-  paused: boolean; showDebug?: boolean; onMenu?: () => void; onContinue?: () => void; onRestart?: () => void;
+export default function OrdersHud({ showDebug = false, onMenu, onRestart }: {
+  paused?: boolean; showDebug?: boolean; onMenu?: () => void; onContinue?: () => void; onRestart?: () => void;
 }) {
   const { snapshot, feedback } = useSyncExternalStore(sessionStore.subscribe, sessionStore.getSnapshot, sessionStore.getServerSnapshot);
   const [world, setWorld] = useState(() => suburbanGameState.snapshot());
@@ -214,24 +187,20 @@ export default function OrdersHud({ paused, showDebug = false, onMenu, onContinu
   }, []);
   if (!snapshot) return null;
 
-  const frozen = paused || snapshot.status !== 'playing';
-  const urgent = snapshot.status === 'playing' && snapshot.remainingMs > 0 && snapshot.remainingMs <= 30_000;
-  const overtime = Math.max(0, snapshot.elapsedMs - 360_000);
   return (
     <>
       <div className={styles.strip} aria-label="Pedidos da fase">
         <Coin score={snapshot.score} />
         <ol className={styles.tickets}>
           {snapshot.orders.map(order => (
-            <Ticket key={order.id} order={order} frozen={frozen} problem={world.problems.find(problem => problem.id === order.definitionId)} />
+            <Ticket key={order.id} order={order} problem={world.problems.find(problem => problem.id === order.definitionId)} />
           ))}
         </ol>
-        <div className={styles.clock} data-urgent={urgent || undefined} role="timer" aria-label={overtime ? 'Tempo além da meta de seis minutos' : 'Tempo restante da meta de seis minutos'}>
-          <span aria-hidden="true">⏱</span> {overtime ? `+${formatTime(overtime)}` : formatTime(snapshot.remainingMs)}
+        <div className={styles.clock} role="status" aria-label={`Ocorrências concluídas: ${snapshot.completedOrders} de ${ORLA_EVENTS.length}`}>
+          <span aria-hidden="true">✓</span> {snapshot.completedOrders}/{ORLA_EVENTS.length}
         </div>
       </div>
       <FeedbackToast sequence={feedback?.seq} message={feedback ? describe(feedback.event) : null} />
-      <PenaltyAlert feedback={feedback} finished={snapshot.status === 'finished'} onContinue={onContinue} />
       {showDebug && snapshot.status === 'playing' && snapshot.orders[0] && (
         <button type="button" className={styles.debug} onClick={() => sessionStore.debugResolveNext()}>
           Resolver passo do pedido (teste)
@@ -241,5 +210,3 @@ export default function OrdersHud({ paused, showDebug = false, onMenu, onContinu
     </>
   );
 }
-
-
